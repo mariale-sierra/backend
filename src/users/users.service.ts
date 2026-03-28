@@ -1,13 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import { RegisterUserDto } from './dto/register-user.dto';
+import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Logger } from '@nestjs/common';
 
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
-  register(registerUserDto: RegisterUserDto) {
-    this.logger.log(`Registering user with email: ${registerUserDto.email}`); 
+  register(createDto: CreateUserDto) {
+    this.logger.log(`Registering user with username: ${createDto.username}`); 
 
     /**
      * por el momento se deja id como date now porq no hay bd corriendo
@@ -15,8 +15,7 @@ export class UsersService {
      */
     const createdUser = {
       id: Date.now(),
-      email: registerUserDto.email,
-      username: registerUserDto.username,
+      username: createDto.username,
     }
 
     return {
