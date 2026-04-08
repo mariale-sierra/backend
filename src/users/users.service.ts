@@ -8,18 +8,17 @@ import { CreateUserDto } from './dto/create-user.dto';
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
 
-  // 👇 1) CONSTRUCTOR (inyección del repo)
   constructor(
     @InjectRepository(User)
     private userRepo: Repository<User>,
   ) {}
 
-  // 👇 2) MÉTODO (lógica de negocio)
-  async create(createDto: CreateUserDto, userId: string, email?: string) {
-    this.logger.log(Registering user with username: ${createDto.username});
+  async register(createDto: CreateUserDto, userId: string, email?: string) {
+    this.logger.log(`Registering user with username: ${createDto.username}`);
+    console.log(`Received userId: ${userId}`);
 
     const user = this.userRepo.create({
-      id: userId,          // viene de Supabase
+      supabase_id: userId,         
       username: createDto.username,
       email,
     });

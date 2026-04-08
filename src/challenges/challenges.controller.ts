@@ -9,18 +9,18 @@ export class ChallengesController {
   constructor(private readonly challengesService: ChallengesService) {}
 
   @Post()
-@UseGuards(SupabaseAuthGuard)
-create(@Body() dto: CreateChallengeDto, @Req() req) {
+  @UseGuards(SupabaseAuthGuard)
+  create(@Body() dto: CreateChallengeDto, @Req() req) {
   return this.challengesService.create(dto, req.user.id);
-}
+  }
 
   @Post(':id/join')
+  @UseGuards(SupabaseAuthGuard) // <-- agregar esto
   joinChallenge(@Param('id') id: string, @Req() req) {
   return this.challengesService.joinChallenge(req.user.id, Number(id));
-}
+  }
 
   @Get()
-
   findAll() {
     return this.challengesService.findAll();
   }

@@ -75,6 +75,7 @@ export class AuthService {
         appUser: createdUser,
       };
     } catch (dbError) {
+      console.log('DB ERROR:', dbError);
       throw new UnauthorizedException('Failed to create user profile, rolled back Supabase user');
     }
   }

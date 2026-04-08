@@ -1,14 +1,17 @@
 
-import { Entity, PrimaryColumn, Column } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 
-@Entity('users')
+@Entity({schema: 'havit', name: 'users'})
 export class User {
-  @PrimaryColumn()
-  id: string; // 👈 UUID de Supabase
+  @PrimaryGeneratedColumn()
+  id!: string; 
 
   @Column()
-  username: string;
+  username!: string;
+
+ @Column({ nullable: true })
+  supabase_id?: string;
 
   @Column({ nullable: true })
-  email?: string; // opcional
+  email?: string; 
 }

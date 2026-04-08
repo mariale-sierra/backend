@@ -7,7 +7,7 @@ export enum ChallengeVisibility {
 
 export class CreateChallengeDto {
   @IsString()
-  name: string;
+  name!: string;
 
   @IsOptional()
   @IsString()
@@ -18,10 +18,10 @@ export class CreateChallengeDto {
   instructions?: string;
 
   @IsEnum(ChallengeVisibility)
-  visibility: ChallengeVisibility;
+  visibility!: ChallengeVisibility;
 
   @IsInt()
-  duration_days: number;
+  duration_days!: number;
 
   @IsOptional()
   @IsInt()
