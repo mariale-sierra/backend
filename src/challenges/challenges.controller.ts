@@ -9,12 +9,20 @@ export class ChallengesController {
   constructor(private readonly challengesService: ChallengesService) {}
 
   @Post()
-  @UseGuards(SupabaseAuthGuard)
-  create(@Body() dto: CreateChallengeDto, @Req() req) {
-    return this.challengesService.create(dto, req.user.id);
+// @UseGuards(SupabaseAuthGuard)
+create(@Body() dto: CreateChallengeDto) {
+  return this.challengesService.create(dto, 1); // mock user CAMBIAR DE REGRESO LUEGO
+}
+
+  @Post(':id/join')
+  joinChallenge(@Param('id') id: string) {
+    const userId = 1; // mock por ahora
+
+    return this.challengesService.joinChallenge(userId, Number(id));
   }
 
   @Get()
+  
   findAll() {
     return this.challengesService.findAll();
   }
