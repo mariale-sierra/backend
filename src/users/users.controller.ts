@@ -7,9 +7,9 @@ import { UpdateUserDto } from './dto/update-user.dto';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @Post('create')
-  register(@Body() registerUserDto: CreateUserDto) {
-    return this.usersService.register(registerUserDto);
+  @Post()
+  create(@Body() dto: CreateUserDto, @Req() req) {
+    return this.usersService.create(dto, req.user.id, req.user.email);
   }
 
   @Get()
