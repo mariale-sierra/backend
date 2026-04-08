@@ -60,9 +60,11 @@ export class AuthService {
     const supabaseUserId = data.user.id;
 
     try {
-      const createdUser = await this.usersService.register({
-        username: regisDto.username, 
-      });
+      const createdUser = await this.usersService.register(
+          { username: regisDto.username },
+      data.user.id,
+      data.user.email,
+    );
 
       return {
         message: 'User registered successfully',
