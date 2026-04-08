@@ -29,8 +29,22 @@ export class ChallengesService {
 }
 
   findAll() {
-    return this.challenges;
-  }
+  const userId = 1; // mock
+
+  return this.challenges.map(challenge => {
+    const participants = this.participants.filter(
+      p => p.challengeId === challenge.id
+    );
+
+    const isJoined = participants.some(p => p.userId === userId);
+
+    return {
+      ...challenge,
+      participants: participants.length,
+      joined: isJoined,
+    };
+  });
+}
 
   joinChallenge(userId: number, challengeId: number) {
   const challenge = this.challenges.find(c => c.id === challengeId);
