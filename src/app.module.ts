@@ -1,9 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { AuthModule } from './auth/auth.module';
-import { UsersModule } from './users/users.module';
-import { ChallengesModule } from './challenges/challenges.module';
 
 @Module({
   imports: [
@@ -18,6 +15,9 @@ import { ChallengesModule } from './challenges/challenges.module';
       database: process.env.DB_NAME,
       ssl: {
         rejectUnauthorized: false,
+      },
+      extra: {
+        family: 4,
       },
     })
   ],
