@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ChallengesModule } from './challenges/challenges.module';
@@ -16,13 +16,20 @@ import { ChallengesModule } from './challenges/challenges.module';
       username: process.env.DB_USER,
       password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME,
+      autoLoadEntities: true,
+      schema: 'havit',
+      synchronize: false,
       ssl: {
         rejectUnauthorized: false,
       },
       extra: {
         family: 4,
       },
-    })
+    }),
+
+    AuthModule,
+    UsersModule,
+    ChallengesModule,
   ],
 })
 export class AppModule {}
