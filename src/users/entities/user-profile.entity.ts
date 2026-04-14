@@ -1,4 +1,4 @@
-import {Entity, PrimaryColumn, Column, OneToOne, JoinColumn,ForeignKey,} from 'typeorm';
+import { Entity, PrimaryColumn, Column, OneToOne, JoinColumn } from 'typeorm';
 import { User } from './user.entity';
 
 @Entity({ schema: 'havit', name: 'user_profiles' })
@@ -16,8 +16,8 @@ export class UserProfile {
   @Column({ nullable: true, type: 'text' })
   bio?: string;
 
-  @Column({ default: 'es' })
-  preferred_language!: string;
+  @Column({ nullable: true })
+  preferred_language?: string;
 
   @Column({ nullable: true })
   profile_image_url?: string;
