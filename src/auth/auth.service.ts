@@ -47,9 +47,10 @@ export class AuthService {
       const savedUser = await manager.save(newUser);
 
       const profile = manager.create(UserProfile, {
-        user_id: savedUser.id,
-        display_name: username, 
-      });
+      user_id: savedUser.id,
+      display_name: username,
+      preferred_language: 'es',
+    });
       await manager.save(profile);
 
       return savedUser;
