@@ -83,26 +83,24 @@ export class ChallengesService {
   }
 
   async joinChallenge(userId: number, challengeId: number) {
-    const user = await this.userRepo.findOne({
-      where: { id: userId }
-    });
-
+    const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    const challenge = await this.challengeRepo.findOne({
-      where: { id: challengeId }
-    });
-
+    const challenge = await this.challengeRepo.findOne({ where: { id: challengeId } });
     if (!challenge) throw new NotFoundException('Challenge not found');
 
-    const alreadyJoined = await this.challengeUserMapRepo.findOne({
-      where: { user_id: user.id, challenge_id: challengeId }
-    });
+    // No puede unirse el creador
+    if (challenge.created_by_user_id === userId) {
+      throw new BadRequestException('You cannot join a challenge you created');
+    }
 
+    const alreadyJoined = await this.challengeUserMapRepo.findOne({
+      where: { user_id: userId, challenge_id: challengeId }
+    });
     if (alreadyJoined) throw new BadRequestException('Already joined this challenge');
 
     const join = this.challengeUserMapRepo.create({
-      user_id: user.id,
+      user_id: userId,
       challenge_id: challengeId,
       role: 'participant',
       status: 'active',
