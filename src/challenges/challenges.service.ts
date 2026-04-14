@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Challenge } from './entities/challenge.entity';
@@ -11,6 +6,8 @@ import { CreateChallengeDto } from './dto/create-challenge.dto';
 import { UpdateChallengeDto } from './dto/update-challenge.dto';
 import { User } from '../users/entities/user.entity';
 import { ChallengeUserMap } from './entities/challenge-user-map.entity';
+import { DataSource } from 'typeorm';
+
 
 @Injectable()
 export class ChallengesService {
@@ -23,27 +20,36 @@ export class ChallengesService {
     private userRepo: Repository<User>,
     @InjectRepository(ChallengeUserMap)
     private challengeUserMapRepo: Repository<ChallengeUserMap>,
+    private dataSource: DataSource,
   ) {}
 
   async create(createChallengeDto: CreateChallengeDto, userId: number) {
     this.logger.log(`Creating challenge with name: ${createChallengeDto.name}`);
 
-    const user = await this.userRepo.findOne({
-      where: { id: userId }
-    });
-
+    const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    const challenge = this.challengeRepo.create({
-      ...createChallengeDto,
-      created_by_user_id: user.id,
-    });
+    const result = await this.dataSource.transaction(async (manager) => {
+      const challenge = manager.create(Challenge, {
+        ...createChallengeDto,
+        created_by_user_id: userId,
+      });
+      const savedChallenge = await manager.save(challenge);
 
-    const saved = await this.challengeRepo.save(challenge);
+      const ownerMap = manager.create(ChallengeUserMap, {
+        challenge_id: savedChallenge.id,
+        user_id: userId,
+        role: 'owner',
+        status: 'active',
+      });
+      await manager.save(ownerMap);
+
+      return savedChallenge;
+    });
 
     return {
       message: 'Challenge created successfully',
-      challenge: saved,
+      challenge: result,
     };
   }
 
