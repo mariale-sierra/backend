@@ -20,23 +20,18 @@ export class ChallengesService {
     @InjectRepository(Challenge)
     private challengeRepo: Repository<Challenge>,
     @InjectRepository(User)
-    private userRepo: Repository<User>, 
+    private userRepo: Repository<User>,
     @InjectRepository(ChallengeUserMap)
     private challengeUserMapRepo: Repository<ChallengeUserMap>,
-) {}
+  ) {}
 
-
-  
-  async create(createChallengeDto: CreateChallengeDto, supabaseId: string) {
+  async create(createChallengeDto: CreateChallengeDto, userId: number) {
     this.logger.log(`Creating challenge with name: ${createChallengeDto.name}`);
 
-    console.log('supabase_id buscado:', supabaseId);
-
-    const user = await this.userRepo.findOne({ 
-      where: { supabase_id: supabaseId } 
+    const user = await this.userRepo.findOne({
+      where: { id: userId }
     });
 
-    console.log('usuario encontrado:', user); 
     if (!user) throw new NotFoundException('User not found');
 
     const challenge = this.challengeRepo.create({
@@ -52,41 +47,25 @@ export class ChallengesService {
     };
   }
 
-  
   async findAll() {
     const challenges = await this.challengeRepo.find();
-
     return {
       message: 'Challenges retrieved successfully',
       data: challenges,
     };
   }
 
- 
   async findOne(id: number) {
-    const challenge = await this.challengeRepo.findOne({
-      where: { id },
-    });
-
-    if (!challenge) {
-      throw new NotFoundException('Challenge not found');
-    }
-
+    const challenge = await this.challengeRepo.findOne({ where: { id } });
+    if (!challenge) throw new NotFoundException('Challenge not found');
     return challenge;
   }
 
-  
   async update(id: number, updateChallengeDto: UpdateChallengeDto) {
-    const challenge = await this.challengeRepo.findOne({
-      where: { id },
-    });
-
-    if (!challenge) {
-      throw new NotFoundException('Challenge not found');
-    }
+    const challenge = await this.challengeRepo.findOne({ where: { id } });
+    if (!challenge) throw new NotFoundException('Challenge not found');
 
     Object.assign(challenge, updateChallengeDto);
-
     const updated = await this.challengeRepo.save(challenge);
 
     return {
@@ -95,27 +74,17 @@ export class ChallengesService {
     };
   }
 
-  
   async remove(id: number) {
-    const challenge = await this.challengeRepo.findOne({
-      where: { id },
-    });
-
-    if (!challenge) {
-      throw new NotFoundException('Challenge not found');
-    }
+    const challenge = await this.challengeRepo.findOne({ where: { id } });
+    if (!challenge) throw new NotFoundException('Challenge not found');
 
     await this.challengeRepo.remove(challenge);
-
-    return {
-      message: 'Challenge deleted successfully',
-    };
+    return { message: 'Challenge deleted successfully' };
   }
 
-  
-  async joinChallenge(supabaseId: string, challengeId: number) {
+  async joinChallenge(userId: number, challengeId: number) {
     const user = await this.userRepo.findOne({
-      where: { supabase_id: supabaseId }
+      where: { id: userId }
     });
 
     if (!user) throw new NotFoundException('User not found');
@@ -126,15 +95,14 @@ export class ChallengesService {
 
     if (!challenge) throw new NotFoundException('Challenge not found');
 
-   
     const alreadyJoined = await this.challengeUserMapRepo.findOne({
-      where: { user_id: Number(user.id), challenge_id: challengeId }
+      where: { user_id: user.id, challenge_id: challengeId }
     });
 
     if (alreadyJoined) throw new BadRequestException('Already joined this challenge');
 
     const join = this.challengeUserMapRepo.create({
-      user_id: Number(user.id),
+      user_id: user.id,
       challenge_id: challengeId,
       role: 'participant',
       status: 'active',

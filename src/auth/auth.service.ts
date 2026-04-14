@@ -1,82 +1,74 @@
-import { Injectable, UnauthorizedException, BadRequestException} from '@nestjs/common';
-import { createClient } from '@supabase/supabase-js';
+import {Injectable, UnauthorizedException, ConflictException} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
+import * as bcrypt from 'bcrypt';
 import { LoginDto } from './dto/login.dto';
-import { UsersService } from '../users/users.service';
 import { RegisterDto } from './dto/register.dto';
+import { User } from '../users/entities/user.entity';
+import { UserProfile } from '../users/entities/user-profile.entity';
 
 @Injectable()
 export class AuthService {
-  private supabase;
-
   constructor(
+    private jwtService: JwtService,
     private configService: ConfigService,
-    private usersService: UsersService, 
-  ) {
-    this.supabase = createClient(
-      this.configService.getOrThrow<string>('SUPABASE_URL'),
-      this.configService.getOrThrow<string>('SUPABASE_ANON_KEY'),
-    );
-  }
+    private dataSource: DataSource,
+    @InjectRepository(User)
+    private userRepo: Repository<User>,
+  ) {}
 
   async login(loginDto: LoginDto) {
     const { email, password } = loginDto;
 
-    const { data, error } = await this.supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const user = await this.userRepo.findOne({ where: { email } });
+    if (!user) throw new UnauthorizedException('Invalid email or password');
 
-    if (error) {
-      throw new UnauthorizedException('Invalid email or password');
-    }
+    const isMatch = await bcrypt.compare(password, user.password_hash);
+    if (!isMatch) throw new UnauthorizedException('Invalid email or password');
 
     return {
-      accessToken: data.session.access_token,
-      user: {
-        id: data.user.id,
-        email: data.user.email,
-      },
+      accessToken: await this.signToken(user),
+      user: { id: user.id, email: user.email, username: user.username },
     };
   }
 
-  async register(regisDto: RegisterDto) {
-    const { email, password } = regisDto;
+  async register(registerDto: RegisterDto) {
+    const { email, password, username } = registerDto;
 
-    const { data, error } = await this.supabase.auth.signUp({
-      email,
-      password,
+    const existing = await this.userRepo.findOne({ where: { email } });
+    if (existing) throw new ConflictException('Email already in use');
+
+    const password_hash = await bcrypt.hash(password, 10);
+
+    const user = await this.dataSource.transaction(async (manager) => {
+      const newUser = manager.create(User, { email, username, password_hash });
+      const savedUser = await manager.save(newUser);
+
+      const profile = manager.create(UserProfile, {
+        user_id: savedUser.id,
+        display_name: username, 
+      });
+      await manager.save(profile);
+
+      return savedUser;
     });
 
-    if (error) {
-    console.log(error);
-    throw new BadRequestException(error.message);
-    }
+    return {
+      message: 'User registered successfully',
+      accessToken: await this.signToken(user),
+      user: { id: user.id, email: user.email, username: user.username },
+    };
+  }
 
-    if (!data.user) {
-      throw new UnauthorizedException('User not created');
-    }
-
-    const supabaseUserId = data.user.id;
-
-    try {
-      const createdUser = await this.usersService.register(
-          { username: regisDto.username },
-      data.user.id,
-      data.user.email,
+  private async signToken(user: User): Promise<string> {
+    return this.jwtService.signAsync(
+      { sub: user.id, email: user.email, username: user.username },
+      {
+        secret: this.configService.getOrThrow<string>('JWT_SECRET'),
+        expiresIn: '7d',
+      },
     );
-
-      return {
-        message: 'User registered successfully',
-        authUser: {
-          id: supabaseUserId,
-          email: data.user.email,
-        },
-        appUser: createdUser,
-      };
-    } catch (dbError) {
-      console.log('DB ERROR:', dbError);
-      throw new UnauthorizedException('Failed to create user profile, rolled back Supabase user');
-    }
   }
 }

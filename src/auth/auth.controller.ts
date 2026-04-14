@@ -6,7 +6,7 @@ import { Body } from '@nestjs/common';
 import { HttpCode } from '@nestjs/common';  
 import { RegisterDto } from './dto/register.dto';
 import { UseGuards, Get, Req } from '@nestjs/common';
-import { SupabaseAuthGuard } from './guards/supabase-auth.guard';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 
 @Controller('auth')
@@ -26,7 +26,7 @@ export class AuthController {
   }
 
   @Get('me')
-  @UseGuards(SupabaseAuthGuard)
+  @UseGuards(JwtAuthGuard)
   getMe(@Req() req) {
     return req.user;
   }

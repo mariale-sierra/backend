@@ -1,17 +1,23 @@
+import { Entity, PrimaryGeneratedColumn, Column, OneToOne } from 'typeorm';
+import { UserProfile } from './user-profile.entity';
 
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
-
-@Entity({schema: 'havit', name: 'users'})
+@Entity({ schema: 'havit', name: 'users' })
 export class User {
   @PrimaryGeneratedColumn()
-  id!: string; 
+  id!: number;
 
-  @Column()
+  @Column({ unique: true })
   username!: string;
 
- @Column({ nullable: true })
-  supabase_id?: string;
+  @Column({ unique: true })
+  email!: string;
 
-  @Column({ nullable: true })
-  email?: string; 
+  @Column()
+  password_hash!: string;
+
+  @Column({ default: true })
+  is_active!: boolean;
+
+  @OneToOne(() => UserProfile, (profile) => profile.user)
+  profile?: UserProfile;
 }

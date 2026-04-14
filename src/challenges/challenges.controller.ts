@@ -2,24 +2,23 @@ import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Req } fro
 import { ChallengesService } from './challenges.service';
 import { CreateChallengeDto } from './dto/create-challenge.dto';
 import { UpdateChallengeDto } from './dto/update-challenge.dto';
-import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @Controller('challenges')
 export class ChallengesController {
   constructor(private readonly challengesService: ChallengesService) {}
 
+  @UseGuards(JwtAuthGuard)
   @Post()
-  @UseGuards(SupabaseAuthGuard)
   create(@Body() dto: CreateChallengeDto, @Req() req) {
-  return this.challengesService.create(dto, req.user.id);
+    return this.challengesService.create(dto, req.user.sub);
   }
 
+  @UseGuards(JwtAuthGuard)
   @Post(':id/join')
-  @UseGuards(SupabaseAuthGuard) // <-- agregar esto
-  joinChallenge(@Param('id') id: string, @Req() req) {
-  return this.challengesService.joinChallenge(req.user.id, Number(id));
+  join(@Param('id') challengeId: number, @Req() req) {
+    return this.challengesService.joinChallenge(req.user.sub, challengeId);
   }
-
   @Get()
   findAll() {
     return this.challengesService.findAll();
