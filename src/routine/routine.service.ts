@@ -1,14 +1,14 @@
 import { Injectable } from '@nestjs/common';
 
 @Injectable()
-export class WorkoutsService {
+export class RoutineService {
   private workouts: any[] = [];
 
   create(workoutDto: any) {
     const workout = {
       id: Date.now(),
       name: workoutDto.name,
-      exercises: [], // 👈 CLAVE
+      exercises: [], 
     };
 
     this.workouts.push(workout);

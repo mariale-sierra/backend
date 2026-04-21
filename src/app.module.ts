@@ -5,35 +5,33 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ChallengesModule } from './challenges/challenges.module';
 import { ExercisesModule } from './exercises/exercises.module';
-import { WorkoutsModule } from './workouts/workouts.module';
+import { RoutineModule } from './routine/routine.module';
+import { WorkoutLogModule } from './workout-log/workout-log.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
 
-    /* TypeOrmModule.forRoot({
+    TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DB_HOST,
-      port: 6543,
-      username: process.env.DB_USER,
+      port: 5432,
+      username: process.env.DB_USERNAME,
       password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME,
+      database: process.env.DB_DATABASE,
       autoLoadEntities: true,
       schema: 'havit',
       synchronize: false,
       ssl: {
         rejectUnauthorized: false,
       },
-      extra: {
-        family: 4,
-      },
-    }), */ //DESCOMENTAR, SOLO ES EN LO QUE SALE LA DB
-
-    //AuthModule, DESCOMENTAR, SOLO ES EN LO QUE SALE LA DB
-    //UsersModule, DESCOMENTAR, SOLO ES EN LO QUE SALE LA DB
-    //ChallengesModule, DESCOMENTAR, SOLO ES EN LO QUE SALE LA DB
+    }),
+    AuthModule, 
+    UsersModule,
+    ChallengesModule,
     ExercisesModule,
-    WorkoutsModule,
+    RoutineModule,
+    WorkoutLogModule,
   ],
 })
 export class AppModule {}

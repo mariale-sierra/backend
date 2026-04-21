@@ -6,8 +6,8 @@
   OneToMany,
 } from 'typeorm';
 import { WorkoutLog } from './workout-log.entity';
-import { Exercise } from './exercise.entity';
-import { WorkoutLogExerciseMetric } from './workout-log-exercise-metric.entity';
+import { Exercise } from '../../exercises/entities/exercise.entity';
+import { WorkoutLogExerciseMetric } from '../../workout-log/entities/workout-log-exercise-metric.entity';
 
 @Entity({ schema: 'havit', name: 'workout_log_exercises' })
 export class WorkoutLogExercise {

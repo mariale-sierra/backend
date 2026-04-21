@@ -1,9 +1,9 @@
 import { Controller, Get, Post, Body, Param } from '@nestjs/common';
-import { WorkoutsService } from './workouts.service';
+import { RoutineService } from './routine.service';
 
-@Controller('workouts')
-export class WorkoutsController {
-  constructor(private readonly workoutsService: WorkoutsService) {}
+@Controller('routine')
+export class RoutineController {
+  constructor(private readonly workoutsService: RoutineService) {}
 
   @Post()
   create(@Body() body) {

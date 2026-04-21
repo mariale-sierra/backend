@@ -4,12 +4,8 @@ import {
   Column,
   OneToMany,
 } from 'typeorm';
-import { ExerciseCategoryMap } from './exercise-category-map.entity';
-import { ExerciseLocationMap } from './exercise-location-map.entity';
-import { ExerciseBodyPartMap } from './exercise-body-part-map.entity';
-import { ExerciseMetric } from './exercise-metric.entity';
-import { RoutineExercise } from './routine-exercise.entity';
-import { WorkoutLogExercise } from './workout-log-exercise.entity';
+import { RoutineExercise } from '../../routine/entities/routine-exercise.entity';
+import { WorkoutLogExercise } from '../../workout-log/entities/workout-log-exercise.entity';
 
 export enum TrackingMode {
   SINGLE = 'single',
@@ -36,3 +32,17 @@ export class Exercise {
   instructions!: string;
 
   @Column({ nullable: true })
+  icon_url?: string;
+
+  @Column({ type: 'enum', enum: TrackingMode })
+  tracking_mode!: TrackingMode;
+
+  @Column({ default: true })
+  is_active!: boolean;
+
+  @OneToMany(() => RoutineExercise, (re) => re.exercise)
+  routine_exercises?: RoutineExercise[];
+
+  @OneToMany(() => WorkoutLogExercise, (wle) => wle.exercise)
+  workout_log_exercises?: WorkoutLogExercise[];
+}

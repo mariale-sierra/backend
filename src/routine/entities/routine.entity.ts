@@ -4,8 +4,8 @@
   Column,
   OneToMany,
 } from 'typeorm';
-import { RoutineExercise } from './routine-exercise.entity';
-import { WorkoutLog } from './workout-log.entity';
+import { RoutineExercise } from '../../routine/entities/routine-exercise.entity';
+import { WorkoutLog } from '../../workout-log/entities/workout-log.entity';
 
 @Entity({ schema: 'havit', name: 'routines' })
 export class Routine {

@@ -4,8 +4,7 @@ import {
   Column,
   ManyToOne,
 } from 'typeorm';
-import { WorkoutLogExercise } from './workout-log-exercise.entity';
-import { ExerciseMetric } from './exercise-metric.entity';
+import { WorkoutLogExercise } from '../../workout-log/entities/workout-log-exercise.entity';
 
 @Entity({ schema: 'havit', name: 'workout_log_exercise_metrics' })
 export class WorkoutLogExerciseMetric {
@@ -22,9 +21,6 @@ export class WorkoutLogExerciseMetric {
   @Column()
   workout_log_exercise_id!: number;
 
-  @ManyToOne(() => ExerciseMetric)
-  metric!: ExerciseMetric;
-
   @Column()
   metric_id!: number;
 
@@ -32,5 +28,5 @@ export class WorkoutLogExerciseMetric {
   value!: number;
 
   @Column({ nullable: true })
-  set_number?: number; // 🔥 clave si usas SETS
+  set_number?: number; 
 }

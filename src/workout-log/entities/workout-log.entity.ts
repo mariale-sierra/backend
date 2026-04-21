@@ -5,8 +5,8 @@ import {
   ManyToOne,
   OneToMany,
 } from 'typeorm';
-import { Routine } from './routine.entity';
-import { WorkoutLogExercise } from './workout-log-exercise.entity';
+import { Routine } from '../../routine/entities/routine.entity';
+import { WorkoutLogExercise } from '../../workout-log/entities/workout-log-exercise.entity';
 
 @Entity({ schema: 'havit', name: 'workout_logs' })
 export class WorkoutLog {
