@@ -4,12 +4,13 @@ import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ChallengesModule } from './challenges/challenges.module';
+import { ExercisesModule } from './exercises/exercises.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
 
-    TypeOrmModule.forRoot({
+    /* TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DB_HOST,
       port: 6543,
@@ -25,11 +26,12 @@ import { ChallengesModule } from './challenges/challenges.module';
       extra: {
         family: 4,
       },
-    }),
+    }), */ //DESCOMENTAR, SOLO ES EN LO QUE SALE LA DB
 
-    AuthModule,
-    UsersModule,
-    ChallengesModule,
+    //AuthModule, DESCOMENTAR, SOLO ES EN LO QUE SALE LA DB
+    //UsersModule, DESCOMENTAR, SOLO ES EN LO QUE SALE LA DB
+    //ChallengesModule, DESCOMENTAR, SOLO ES EN LO QUE SALE LA DB
+    ExercisesModule,
   ],
 })
 export class AppModule {}
