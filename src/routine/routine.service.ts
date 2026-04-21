@@ -1,29 +1,55 @@
 import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+
+import { Routine } from './entities/routine.entity';
+import { RoutineExercise } from './entities/routine-exercise.entity';
+import { Exercise } from '../exercises/entities/exercise.entity';
 
 @Injectable()
 export class RoutineService {
-  private workouts: any[] = [];
+  constructor(
+    @InjectRepository(Routine)
+    private routineRepo: Repository<Routine>,
 
-  create(workoutDto: any) {
-    const workout = {
-      id: Date.now(),
-      name: workoutDto.name,
-      exercises: [], 
-    };
+    @InjectRepository(RoutineExercise)
+    private routineExerciseRepo: Repository<RoutineExercise>,
 
-    this.workouts.push(workout);
+    @InjectRepository(Exercise)
+    private exerciseRepo: Repository<Exercise>,
+  ) {}
 
-    return {
-      message: 'Workout created successfully',
-      workout,
-    };
+  async create(dto: any) {
+    const routine = this.routineRepo.create(dto);
+    return this.routineRepo.save(routine);
   }
 
-  findAll() {
-    return this.workouts;
+  async findAll() {
+    return this.routineRepo.find({
+      relations: ['routine_exercises', 'routine_exercises.exercise'],
+    });
   }
 
-  findOne(id: number) {
-    return this.workouts.find(w => w.id === id);
+  async findOne(id: number) {
+    return this.routineRepo.findOne({
+      where: { id },
+      relations: ['routine_exercises', 'routine_exercises.exercise'],
+    });
+  }
+
+  async addExerciseToRoutine(routineId: number, exerciseId: number) {
+    const routine = await this.routineRepo.findOneBy({ id: routineId });
+    if (!routine) throw new Error('Routine not found');
+
+    const exercise = await this.exerciseRepo.findOneBy({ id: exerciseId });
+    if (!exercise) throw new Error('Exercise not found');
+
+    const routineExercise = this.routineExerciseRepo.create({
+      routine,
+      exercise,
+      order_index: 1,
+    });
+
+    return this.routineExerciseRepo.save(routineExercise);
   }
 }

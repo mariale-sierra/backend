@@ -1,11 +1,9 @@
- import {
+import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
   OneToMany,
 } from 'typeorm';
-import { RoutineExercise } from '../../routine/entities/routine-exercise.entity';
-import { WorkoutLog } from '../../workout-log/entities/workout-log.entity';
 
 @Entity({ schema: 'havit', name: 'routines' })
 export class Routine {
@@ -18,15 +16,12 @@ export class Routine {
   @Column({ type: 'text', nullable: true })
   description?: string;
 
-  @Column()
-  user_id!: number;
+  @Column({ name: 'created_by_user_id', type: 'uuid', nullable: true })
+  createdByUserId?: string;
 
   @Column({ default: true })
   is_active!: boolean;
 
-  @OneToMany(() => RoutineExercise, (re) => re.routine)
-  routine_exercises?: RoutineExercise[];
-
-  @OneToMany(() => WorkoutLog, (log) => log.routine)
-  workout_logs?: WorkoutLog[];
+  @OneToMany('RoutineExercise', 'routine')  
+  routine_exercises?: any[];
 }

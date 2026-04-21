@@ -12,7 +12,7 @@ export class UsersService {
     private userRepo: Repository<User>,
   ) {}
 
-  async findById(id: number) {
+  async findById(id: string) {
     const user = await this.userRepo.findOne({ where: { id } });
     if (!user) throw new NotFoundException('User not found');
     return user;

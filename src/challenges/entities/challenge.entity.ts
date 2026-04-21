@@ -1,12 +1,12 @@
 import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 
-@Entity({schema: 'havit', name: 'challenges'})
+@Entity({ schema: 'havit', name: 'challenges' })
 export class Challenge {
   @PrimaryGeneratedColumn()
-  id!: number;
+  id!: string;
 
   @Column()
-  created_by_user_id!: number; 
+  created_by_user_id!: string; 
 
   @Column()
   name!: string;

@@ -4,7 +4,7 @@ import { UserProfile } from './user-profile.entity';
 @Entity({ schema: 'havit', name: 'users' })
 export class User {
   @PrimaryGeneratedColumn()
-  id!: number;
+  id!: string;
 
   @Column({ unique: true })
   username!: string;

@@ -23,7 +23,7 @@ export class ChallengesService {
     private dataSource: DataSource,
   ) {}
 
-  async create(createChallengeDto: CreateChallengeDto, userId: number) {
+  async create(createChallengeDto: CreateChallengeDto, userId: string) {
     this.logger.log(`Creating challenge with name: ${createChallengeDto.name}`);
 
     const user = await this.userRepo.findOne({ where: { id: userId } });
@@ -61,13 +61,13 @@ export class ChallengesService {
     };
   }
 
-  async findOne(id: number) {
+  async findOne(id: string) {
     const challenge = await this.challengeRepo.findOne({ where: { id } });
     if (!challenge) throw new NotFoundException('Challenge not found');
     return challenge;
   }
 
-  async update(id: number, updateChallengeDto: UpdateChallengeDto) {
+  async update(id: string, updateChallengeDto: UpdateChallengeDto) {
     const challenge = await this.challengeRepo.findOne({ where: { id } });
     if (!challenge) throw new NotFoundException('Challenge not found');
 
@@ -80,7 +80,7 @@ export class ChallengesService {
     };
   }
 
-  async remove(id: number) {
+  async remove(id: string) {
     const challenge = await this.challengeRepo.findOne({ where: { id } });
     if (!challenge) throw new NotFoundException('Challenge not found');
 
@@ -88,14 +88,14 @@ export class ChallengesService {
     return { message: 'Challenge deleted successfully' };
   }
 
-  async joinChallenge(userId: number, challengeId: number) {
+  async joinChallenge(userId: string, challengeId: string) {
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
     const challenge = await this.challengeRepo.findOne({ where: { id: challengeId } });
     if (!challenge) throw new NotFoundException('Challenge not found');
 
-    // No puede unirse el creador
+    // no puede unirse el creador
     if (challenge.created_by_user_id === userId) {
       throw new BadRequestException('You cannot join a challenge you created');
     }

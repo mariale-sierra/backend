@@ -16,7 +16,7 @@ export class ChallengesController {
 
   @UseGuards(JwtAuthGuard)
   @Post(':id/join')
-  join(@Param('id') challengeId: number, @Req() req) {
+  join(@Param('id') challengeId: string, @Req() req) {
     return this.challengesService.joinChallenge(req.user.sub, challengeId);
   }
   @Get()
@@ -26,16 +26,16 @@ export class ChallengesController {
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.challengesService.findOne(+id);
+    return this.challengesService.findOne(id);
   }
 
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateChallengeDto: UpdateChallengeDto) {
-    return this.challengesService.update(+id, updateChallengeDto);
+    return this.challengesService.update(id, updateChallengeDto);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string) {
-    return this.challengesService.remove(+id);
+    return this.challengesService.remove(id);
   }
 }

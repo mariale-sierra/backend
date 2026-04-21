@@ -4,7 +4,7 @@ import { User } from './user.entity';
 @Entity({ schema: 'havit', name: 'user_profiles' })
 export class UserProfile {
   @PrimaryColumn()
-  user_id!: number;
+  user_id!: string;
 
   @OneToOne(() => User, (user) => user.profile)
   @JoinColumn({ name: 'user_id' })

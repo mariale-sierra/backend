@@ -3,20 +3,30 @@ import { RoutineService } from './routine.service';
 
 @Controller('routine')
 export class RoutineController {
-  constructor(private readonly workoutsService: RoutineService) {}
+  constructor(private readonly routineService: RoutineService) {}
 
   @Post()
   create(@Body() body) {
-    return this.workoutsService.create(body);
+    return this.routineService.create(body);
   }
 
   @Get()
   findAll() {
-    return this.workoutsService.findAll();
+    return this.routineService.findAll();
   }
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.workoutsService.findOne(Number(id));
+    return this.routineService.findOne(Number(id));
+  }
+  @Post(':id/exercises')
+  addExercise(
+    @Param('id') routineId: string,
+    @Body() body: { exerciseId: number },
+  ) {
+    return this.routineService.addExerciseToRoutine(
+      Number(routineId),
+      body.exerciseId,
+    );
   }
 }

@@ -5,7 +5,6 @@ import {
   OneToMany,
 } from 'typeorm';
 import { RoutineExercise } from '../../routine/entities/routine-exercise.entity';
-import { WorkoutLogExercise } from '../../workout-log/entities/workout-log-exercise.entity';
 
 export enum TrackingMode {
   SINGLE = 'single',
@@ -42,7 +41,4 @@ export class Exercise {
 
   @OneToMany(() => RoutineExercise, (re) => re.exercise)
   routine_exercises?: RoutineExercise[];
-
-  @OneToMany(() => WorkoutLogExercise, (wle) => wle.exercise)
-  workout_log_exercises?: WorkoutLogExercise[];
 }
