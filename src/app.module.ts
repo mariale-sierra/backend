@@ -5,6 +5,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ChallengesModule } from './challenges/challenges.module';
 import { ExercisesModule } from './exercises/exercises.module';
+import { WorkoutsModule } from './workouts/workouts.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { ExercisesModule } from './exercises/exercises.module';
     //UsersModule, DESCOMENTAR, SOLO ES EN LO QUE SALE LA DB
     //ChallengesModule, DESCOMENTAR, SOLO ES EN LO QUE SALE LA DB
     ExercisesModule,
+    WorkoutsModule,
   ],
 })
 export class AppModule {}
