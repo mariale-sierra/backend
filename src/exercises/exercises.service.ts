@@ -16,6 +16,8 @@ export class ExercisesService {
   }
 
   async findAll() {
-    return this.exerciseRepo.find();
+    return this.exerciseRepo.find({
+      where: { is_active: true },
+    });
   }
 }

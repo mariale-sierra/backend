@@ -44,10 +44,14 @@ export class RoutineService {
     const exercise = await this.exerciseRepo.findOneBy({ id: exerciseId });
     if (!exercise) throw new Error('Exercise not found');
 
+    const existingCount = await this.routineExerciseRepo.count({
+      where: { routine: { id: routineId } },
+    });
+
     const routineExercise = this.routineExerciseRepo.create({
       routine,
       exercise,
-      order_index: 1,
+      order_index: existingCount + 1,
     });
 
     return this.routineExerciseRepo.save(routineExercise);
