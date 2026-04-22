@@ -4,29 +4,34 @@
   Column,
   ManyToOne,
   OneToMany,
+  JoinColumn,
 } from 'typeorm';
 import { WorkoutLog } from './workout-log.entity';
-import { WorkoutLogExerciseMetric } from '../../workout-log/entities/workout-log-exercise-metric.entity';
+import { Exercise } from '../../exercises/entities/exercise.entity';
+import { WorkoutLogExerciseMetric } from '../../metrics/entities/workout-log-exercise-metric.entity';
 
 @Entity({ schema: 'havit', name: 'workout_log_exercises' })
 export class WorkoutLogExercise {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  @ManyToOne(() => WorkoutLog, (log) => log.exercises, {
-    onDelete: 'CASCADE',
-  })
-  workout_log!: WorkoutLog;
+  @ManyToOne(() => WorkoutLog, (w) => w.exercises)
+  @JoinColumn({ name: 'workout_log_id' })
+  workout!: WorkoutLog;
 
-  @Column()
-  workout_log_id!: number;
-
-  @Column()
-  exercise_id!: number;
+  @ManyToOne(() => Exercise)
+  @JoinColumn({ name: 'exercise_id' })
+  exercise!: Exercise;
 
   @OneToMany(
-    () => WorkoutLogExerciseMetric,
-    (metric) => metric.workout_log_exercise,
+  () => WorkoutLogExerciseMetric,
+  (metric) => metric.workoutLogExercise,
   )
   metrics?: WorkoutLogExerciseMetric[];
+
+  @Column({ name: 'order_index', nullable: true })
+  orderIndex?: number;
+
+  @Column({ nullable: true })
+  notes?: string;
 }
