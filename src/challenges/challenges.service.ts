@@ -119,4 +119,33 @@ export class ChallengesService {
       data: join,
     };
   }
+
+  async findUsersByChallenge(challengeId: string) {
+  const challenge = await this.challengeRepo.findOne({
+    where: { id: challengeId },
+  });
+
+  if (!challenge) {
+    throw new NotFoundException('Challenge not found');
+  }
+
+  const users = await this.challengeUserMapRepo
+    .createQueryBuilder('map')
+    .innerJoin(User, 'user', 'user.id = map.user_id')
+    .where('map.challenge_id = :challengeId', { challengeId })
+    .select([
+      'user.id AS id',
+      'user.username AS username',
+      'user.email AS email',
+      'map.role AS role',
+      'map.status AS status',
+      'map.joined_at AS joined_at',
+    ])
+    .getRawMany();
+
+  return {
+    message: 'Challenge users retrieved successfully',
+    data: users,
+  };
+}
 }

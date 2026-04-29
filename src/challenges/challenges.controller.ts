@@ -24,6 +24,11 @@ export class ChallengesController {
     return this.challengesService.findAll();
   }
 
+  @Get(':id/users')
+  findUsers(@Param('id') id: string) {
+    return this.challengesService.findUsersByChallenge(id);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.challengesService.findOne(id);
