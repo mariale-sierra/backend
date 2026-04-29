@@ -4,10 +4,12 @@ import { UsersController } from './users.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
+import { Challenge } from '../challenges/entities/challenge.entity';
+import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, Challenge, ChallengeUserMap]),
     forwardRef(() => AuthModule),
   ],
   controllers: [UsersController],

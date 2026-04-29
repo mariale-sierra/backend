@@ -11,4 +11,10 @@ export class UsersController {
   getMe(@Req() req) {
     return this.usersService.findById(req.user.sub);
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('me/challenges')
+  getMyChallenges(@Req() req) {
+    return this.usersService.getMyChallenges(req.user.sub);
+  }
 }
