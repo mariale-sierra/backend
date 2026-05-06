@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
 import { WorkoutLogService } from './workout-log.service';
+
 
 @Controller('workout-logs')
 export class WorkoutLogController {
@@ -24,4 +25,14 @@ export class WorkoutLogController {
   findAll() {
     return this.service.findAll();
   }
+
+  @Post('progress')
+  createProgress(@Body() body, @Req() req) {
+    return this.service.createWorkout({
+      userId: req.user.id,
+      challengeId: body.challengeId,
+    });
+  }
+
 }
+

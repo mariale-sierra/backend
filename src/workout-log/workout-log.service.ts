@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { WorkoutLog } from './entities/workout-log.entity';
 import { RoutineExercise } from '../routine/entities/routine-exercise.entity';
 import { WorkoutLogExercise } from './entities/workout-log-exercise.entity';
+import { Between } from 'typeorm';
 
 @Injectable()
 export class WorkoutLogService {
@@ -19,33 +20,58 @@ export class WorkoutLogService {
   ) {}
 
 
-    async createWorkout(dto: { routineId?: number; userId: string }) {
-    const workout = this.workoutRepo.create({
-    routineId: dto.routineId,
-    userId: dto.userId, 
-    status: 'in_progress' as WorkoutLog['status'],
-    started_at: new Date(),
-    });
 
-    const savedWorkout = await this.workoutRepo.save(workout);
+    
+    async createWorkout(dto: { routineId?: number; userId: string; challengeId?: string; }) {
 
-    if (dto.routineId) {
-        const routineExercises = await this.routineExerciseRepo.find({
-        where: { routine: { id: dto.routineId } },
-        relations: ['exercise'],
-        order: { order_index: 'ASC' },
+        //Validar si ya se hizo un registro en el día
+        if (dto.challengeId) {
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+
+            const todayEnd = new Date();
+            todayEnd.setHours(23, 59, 59, 999);
+
+            const existing = await this.workoutRepo.findOne({
+                where: {
+                    userId: dto.userId,
+                    challengeId: dto.challengeId,
+                    started_at: Between(todayStart, todayEnd),
+                    },
+                });
+
+            if (existing) {
+                throw new Error('You already logged progress today');
+            }
+        }
+
+        const workout = this.workoutRepo.create({
+        routineId: dto.routineId,
+        userId: dto.userId,
+        challengeId: dto.challengeId,
+        status: 'in_progress' as WorkoutLog['status'],
+        started_at: new Date(),
         });
 
-        const workoutExercises = routineExercises.map((re) =>
-        this.wleRepo.create({
-            workout: savedWorkout,
-            exercise: re.exercise,
-            orderIndex: re.order_index,
-        }),
-        );
+        const savedWorkout = await this.workoutRepo.save(workout);
 
-        await this.wleRepo.save(workoutExercises);
-    }
+        if (dto.routineId) {
+            const routineExercises = await this.routineExerciseRepo.find({
+            where: { routine: { id: dto.routineId } },
+            relations: ['exercise'],
+            order: { order_index: 'ASC' },
+            });
+
+            const workoutExercises = routineExercises.map((re) =>
+            this.wleRepo.create({
+                workout: savedWorkout,
+                exercise: re.exercise,
+                orderIndex: re.order_index,
+            }),
+            );
+
+            await this.wleRepo.save(workoutExercises);
+        }
 
     return savedWorkout;
     }
