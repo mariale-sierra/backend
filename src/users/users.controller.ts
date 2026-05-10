@@ -21,10 +21,12 @@ export class UsersController {
   @UseGuards(JwtAuthGuard)
   @Get('me/challenges')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Obtener mis desafíos', description: 'Lista todos los desafíos en los que participa el usuario actual' })
+  @ApiOperation({
+    summary: 'Obtener mis desafíos',
+    description: 'Lista todos los desafíos en los que participa el usuario actual'
+  })
   @ApiResponse({ status: 200, description: 'Lista de desafíos del usuario' })
   @ApiResponse({ status: 401, description: 'No autorizado' })
-  @Get('me/challenges')
   getMyChallenges(@Req() req) {
     return this.usersService.getUserChallenges(req.user.id);
   }
