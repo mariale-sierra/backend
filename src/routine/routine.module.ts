@@ -9,11 +9,12 @@ import { RoutineService } from './routine.service';
 import { RoutineController } from './routine.controller';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengesModule } from '../challenges/challenges.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Routine, RoutineExercise, Exercise, Challenge]),
-    ChallengesModule,
+    ChallengesModule,AuthModule,
   ],
   controllers: [RoutineController],
   providers: [RoutineService],
