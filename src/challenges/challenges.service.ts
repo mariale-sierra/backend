@@ -7,6 +7,8 @@ import { UpdateChallengeDto } from './dto/update-challenge.dto';
 import { User } from '../users/entities/user.entity';
 import { ChallengeUserMap } from './entities/challenge-user-map.entity';
 import { DataSource } from 'typeorm';
+import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
+
 
 
 @Injectable()
@@ -21,6 +23,8 @@ export class ChallengesService {
     @InjectRepository(ChallengeUserMap)
     private challengeUserMapRepo: Repository<ChallengeUserMap>,
     private dataSource: DataSource,
+    @InjectRepository(WorkoutLog)
+    private workoutRepo: Repository<WorkoutLog>,
   ) {}
 
   async create(createChallengeDto: CreateChallengeDto, userId: string) {
@@ -161,14 +165,13 @@ export class ChallengesService {
     const challenge = await this.challengeRepo.findOne({ where: { id: challengeId } });
     if (!challenge) return null;
 
-    const workoutRepo = this.dataSource.getRepository<any>('workout');
 
     // currentDay
-    const completedDays = await workoutRepo.count({
+    const completedDays = await this.workoutRepo.count({
       where: {
-        user_id: String(userId),
-        challenge_id: challengeId,
-        status: 'completed'
+        userId: String(userId),
+        challengeId: challengeId,
+        status: 'completed' as any
       }
     });
 
@@ -181,10 +184,10 @@ export class ChallengesService {
     const end = new Date();
     end.setHours(23,59,59,999);
 
-    const todayWorkout = await workoutRepo.findOne({
+    const todayWorkout = await this.workoutRepo.findOne({
       where: {
-        user_id: String(userId),
-        challenge_id: challengeId,
+        userId: String(userId),
+        challengeId: challengeId,
         started_at: Between(start, end)
       }
     });
