@@ -26,5 +26,6 @@ import { WorkoutPostsModule } from '../workout-posts/workout-posts.module';
   ],
   controllers: [WorkoutLogController],
   providers: [WorkoutLogService],
+  exports: [WorkoutLogService],
 })
 export class WorkoutLogModule {}

@@ -5,11 +5,15 @@ import { UpdateChallengeDto } from './dto/update-challenge.dto';
 import { ChallengeProgressDto } from './dto/challenge-progress.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiOkResponse } from '@nestjs/swagger';
+import { WorkoutLogService } from '../workout-log/workout-log.service';
 
 @ApiTags('Challenges')
 @Controller('challenges')
 export class ChallengesController {
-  constructor(private readonly challengesService: ChallengesService) {}
+  constructor(
+    private readonly challengesService: ChallengesService,
+    private readonly workoutLogService: WorkoutLogService,
+  ) {}
 
   @UseGuards(JwtAuthGuard)
   @Post()
@@ -52,6 +56,21 @@ export class ChallengesController {
   @ApiResponse({ status: 404, description: 'No hay desafío activo para el usuario' })
   getProgress(@Req() req): Promise<ChallengeProgressDto | null> {
     return this.challengesService.getProgress(req.user.sub);
+  }
+
+  @Post('progress')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Registrar progreso del desafío', description: 'Crea un workout asociado al usuario autenticado y al challenge indicado' })
+  @ApiResponse({ status: 201, description: 'Progreso registrado exitosamente' })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({ status: 400, description: 'Datos inválidos' })
+  createProgress(@Body() body: { challengeId: string; routineId?: number; imageUrl?: string; caption?: string; visibility?: 'private' | 'followers'; isRestDay?: boolean }, @Req() req) {
+    return this.workoutLogService.createWorkout({
+      ...body,
+      userId: req.user.sub,
+      challengeId: body.challengeId,
+    });
   }
 
   @Get(':id/users')
