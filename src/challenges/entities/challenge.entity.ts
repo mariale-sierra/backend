@@ -2,10 +2,10 @@ import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 
 @Entity({ schema: 'havit', name: 'challenges' })
 export class Challenge {
-  @PrimaryGeneratedColumn()
+  @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column()
+  @Column({ type: 'uuid' })
   created_by_user_id!: string; 
 
   @Column()

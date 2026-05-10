@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nest
 import { WorkoutLogService } from './workout-log.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CreateWorkoutProgressDto } from './dto/create-workout-progress.dto';
 
 @ApiTags('Workout Logs')
 @Controller('workout-logs')
@@ -38,10 +39,15 @@ export class WorkoutLogController {
   @ApiOperation({ summary: 'Registrar progreso de desafío', description: 'Crea un registro de progreso para un desafío específico' })
   @ApiResponse({ status: 201, description: 'Progreso registrado exitosamente' })
   @ApiResponse({ status: 401, description: 'No autorizado' })
-  createProgress(@Body() body, @Req() req) {
+  createProgress(@Body() body: CreateWorkoutProgressDto, @Req() req) {
     return this.service.createWorkout({
       userId: req.user.sub,
       challengeId: body.challengeId,
+      routineId: body.routineId,
+      imageUrl: body.imageUrl,
+      caption: body.caption,
+      visibility: body.visibility,
+      isRestDay: body.isRestDay,
     });
   }
 
