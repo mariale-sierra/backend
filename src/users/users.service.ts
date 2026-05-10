@@ -12,11 +12,8 @@ export class UsersService {
   constructor(
     @InjectRepository(User)
     private userRepo: Repository<User>,
-    @InjectRepository(Challenge)
-    private challengeRepo: Repository<Challenge>,
-
     @InjectRepository(ChallengeUserMap)
-    private challengeUserMapRepo: Repository<ChallengeUserMap>,
+    private challengeUserRepo: Repository<ChallengeUserMap>,
   ) {}
 
   async findById(id: string) {
@@ -31,33 +28,35 @@ export class UsersService {
     return user;
   }
 
-  async getMyChallenges(userId: string) {
-  const challenges = await this.challengeRepo
-    .createQueryBuilder('challenge')
-    .innerJoin(
-      ChallengeUserMap,
-      'map',
-      'map.challenge_id = challenge.id',
-    )
-    .where('map.user_id = :userId', { userId })
-    .select([
-      'challenge.id AS id',
-      'challenge.name AS name',
-      'challenge.description AS description',
-      'challenge.instructions AS instructions',
-      'challenge.visibility AS visibility',
-      'challenge.duration_days AS duration_days',
-      'challenge.cycle_length_days AS cycle_length_days',
-      'challenge.created_by_user_id AS created_by_user_id',
-      'map.role AS role',
-      'map.status AS status',
-      'map.joined_at AS joined_at',
-    ])
-    .getRawMany();
+  async getUserChallenges(userId: number) {
+  const challenges = await this.challengeUserRepo
+    .createQueryBuilder('cu')
+    .leftJoinAndSelect('cu.challenge', 'challenge')
+    .where('cu.user_id = :userId', { userId })
+    .getMany();
 
-  return {
-    message: 'User challenges retrieved successfully',
-    data: challenges,
+  const grouped: {
+  active: any[];
+  completed: any[];
+  left: any[];
+  } = {
+    active: [],
+    completed: [],
+    left: [],
   };
-}  
+
+  challenges.forEach((c) => {
+    const formatted = {
+      ...c.challenge,
+      status: c.status,
+      joinedAt: c.joined_at,
+    };
+
+    if (c.status === 'active') grouped.active.push(formatted);
+    if (c.status === 'completed') grouped.completed.push(formatted);
+    if (c.status === 'left') grouped.left.push(formatted);
+  });
+
+  return grouped;
+}
 }

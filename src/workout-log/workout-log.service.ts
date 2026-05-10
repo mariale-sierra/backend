@@ -5,6 +5,7 @@ import { WorkoutLog } from './entities/workout-log.entity';
 import { RoutineExercise } from '../routine/entities/routine-exercise.entity';
 import { WorkoutLogExercise } from './entities/workout-log-exercise.entity';
 import { Between } from 'typeorm';
+import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
 
 @Injectable()
 export class WorkoutLogService {
@@ -14,17 +15,17 @@ export class WorkoutLogService {
 
     @InjectRepository(WorkoutLog)
     private workoutRepo: Repository<WorkoutLog>,
+    private workoutPostsService: WorkoutPostsService,
 
     @InjectRepository(WorkoutLogExercise)
     private wleRepo: Repository<WorkoutLogExercise>,
-  ) {}
-
-
-
-    
-    async createWorkout(dto: { routineId?: number; userId: string; challengeId?: string; }) {
-
-        //Validar si ya se hizo un registro en el día
+  
+) {}
+    async createWorkout(dto: { routineId?: number; userId: string; challengeId?: string; imageUrl?: string;
+    caption?: string; visibility?: 'private' | 'followers'; isRestDay?: boolean; }) {
+        if (!dto.isRestDay && !dto.imageUrl) {
+        throw new Error('Image is required');
+        }
         if (dto.challengeId) {
             const todayStart = new Date();
             todayStart.setHours(0, 0, 0, 0);
@@ -46,14 +47,25 @@ export class WorkoutLogService {
         }
 
         const workout = this.workoutRepo.create({
-        routineId: dto.routineId,
-        userId: dto.userId,
-        challengeId: dto.challengeId,
-        status: 'in_progress' as WorkoutLog['status'],
-        started_at: new Date(),
+            routineId: dto.routineId,
+            userId: dto.userId,
+            challengeId: dto.challengeId,
+            status: 'in_progress' as WorkoutLog['status'],
+            started_at: new Date(),
+            
         });
 
         const savedWorkout = await this.workoutRepo.save(workout);
+
+        if (!dto.isRestDay) {
+        await this.workoutPostsService.create({
+            workout_log_id: savedWorkout.id,
+            user_id: Number(dto.userId),
+            image_url: dto.imageUrl,
+            caption: dto.caption,
+            visibility: dto.visibility || 'private',
+        });
+        }
 
         if (dto.routineId) {
             const routineExercises = await this.routineExerciseRepo.find({
@@ -73,18 +85,19 @@ export class WorkoutLogService {
             await this.wleRepo.save(workoutExercises);
         }
 
-    return savedWorkout;
+        return savedWorkout;
     }
 
     async finishWorkout(workoutId: number) {
-    const workout = await this.workoutRepo.findOneBy({ id: workoutId });
+        const workout = await this.workoutRepo.findOneBy({ id: workoutId });
 
-    if (!workout) throw new Error('Workout not found');
+        if (!workout) throw new Error('Workout not found');
 
-    workout.ended_at = new Date();
-    workout.status = 'completed' as WorkoutLog['status'];
+        workout.ended_at = new Date();
+        workout.status = 'completed' as WorkoutLog['status'];
+        
+        return this.workoutRepo.save(workout);
 
-    return this.workoutRepo.save(workout);
     }
 
     async findOne(id: number) {

@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Between, Repository } from 'typeorm';
 import { Challenge } from './entities/challenge.entity';
 import { CreateChallengeDto } from './dto/create-challenge.dto';
 import { UpdateChallengeDto } from './dto/update-challenge.dto';
@@ -121,31 +121,87 @@ export class ChallengesService {
   }
 
   async findUsersByChallenge(challengeId: string) {
-  const challenge = await this.challengeRepo.findOne({
-    where: { id: challengeId },
-  });
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId },
+    });
 
-  if (!challenge) {
-    throw new NotFoundException('Challenge not found');
+    if (!challenge) {
+      throw new NotFoundException('Challenge not found');
+    }
+
+    const users = await this.challengeUserMapRepo
+      .createQueryBuilder('map')
+      .innerJoin(User, 'user', 'user.id = map.user_id')
+      .where('map.challenge_id = :challengeId', { challengeId })
+      .select([
+        'user.id AS id',
+        'user.username AS username',
+        'user.email AS email',
+        'map.role AS role',
+        'map.status AS status',
+        'map.joined_at AS joined_at',
+      ])
+      .getRawMany();
+
+    return {
+      message: 'Challenge users retrieved successfully',
+      data: users,
+    };
+
+  
   }
+  async getProgress(userId: number) {
+    const relation = await this.challengeUserMapRepo.findOne({
+      where: { user_id: String(userId), status: 'active' },
+    });
 
-  const users = await this.challengeUserMapRepo
-    .createQueryBuilder('map')
-    .innerJoin(User, 'user', 'user.id = map.user_id')
-    .where('map.challenge_id = :challengeId', { challengeId })
-    .select([
-      'user.id AS id',
-      'user.username AS username',
-      'user.email AS email',
-      'map.role AS role',
-      'map.status AS status',
-      'map.joined_at AS joined_at',
-    ])
-    .getRawMany();
+    if (!relation) return null;
 
-  return {
-    message: 'Challenge users retrieved successfully',
-    data: users,
-  };
-}
+    const challengeId = relation.challenge_id;
+    const challenge = await this.challengeRepo.findOne({ where: { id: challengeId } });
+    if (!challenge) return null;
+
+    const workoutRepo = this.dataSource.getRepository<any>('workout');
+
+    // currentDay
+    const completedDays = await workoutRepo.count({
+      where: {
+        user_id: String(userId),
+        challenge_id: challengeId,
+        status: 'completed'
+      }
+    });
+
+    const currentDay = completedDays + 1;
+
+    // completedToday
+    const start = new Date();
+    start.setHours(0,0,0,0);
+
+    const end = new Date();
+    end.setHours(23,59,59,999);
+
+    const todayWorkout = await workoutRepo.findOne({
+      where: {
+        user_id: String(userId),
+        challenge_id: challengeId,
+        started_at: Between(start, end)
+      }
+    });
+
+    // hours left
+    const now = new Date();
+    const endDay = new Date();
+    endDay.setHours(23,59,59,999);
+
+    const hoursLeft = Math.ceil((endDay.getTime() - now.getTime()) / (1000 * 60 * 60));
+
+    return {
+      challenge,
+      currentDay,
+      totalDays: challenge.duration_days,
+      completedToday: !!todayWorkout,
+      hoursLeftToday: hoursLeft
+    };
+  }
 }

@@ -1,4 +1,5 @@
-import { Entity, PrimaryColumn, Column, CreateDateColumn } from 'typeorm';
+import { Entity, PrimaryColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Challenge } from './challenge.entity';
 
 @Entity({ schema: 'havit', name: 'challenge_user_map' })
 export class ChallengeUserMap {
@@ -16,4 +17,8 @@ export class ChallengeUserMap {
 
   @Column({ default: 'active' })
   status?: string;
+
+  @ManyToOne(() => Challenge)
+  @JoinColumn({ name: 'challenge_id' })
+  challenge!: Challenge;
 }

@@ -7,6 +7,10 @@ import { WorkoutLogExercise } from './entities/workout-log-exercise.entity';
 import { RoutineExercise } from '../routine/entities/routine-exercise.entity';
 import { Exercise } from '../exercises/entities/exercise.entity';
 import { WorkoutLogExerciseMetric } from '../metrics/entities/workout-log-exercise-metric.entity';
+import { AuthModule } from '../auth/auth.module';
+import { WorkoutPost } from 'src/workout-posts/entities/workout-post.entity';
+import { WorkoutPostsModule } from '../workout-posts/workout-posts.module';
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -15,7 +19,10 @@ import { WorkoutLogExerciseMetric } from '../metrics/entities/workout-log-exerci
       WorkoutLogExerciseMetric,
       RoutineExercise,
       Exercise,
+      WorkoutPost,
     ]),
+    AuthModule,
+    WorkoutPostsModule,
   ],
   controllers: [WorkoutLogController],
   providers: [WorkoutLogService],
