@@ -16,6 +16,7 @@ import { WorkoutLogModule } from '../workout-log/workout-log.module';
     WorkoutLogModule,
   ],
   controllers: [ChallengesController],
-  providers: [ChallengesService, ],
+  providers: [ChallengesService],
+  exports: [ChallengesService],
 })
 export class ChallengesModule {}
