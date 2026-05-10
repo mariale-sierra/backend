@@ -40,6 +40,20 @@ export class ChallengesController {
     return this.challengesService.findAll();
   }
 
+  @Get('progress')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Obtener progreso del desafío actual', description: 'Devuelve el progreso del usuario en el desafío activo, incluyendo día actual, si completó hoy y horas restantes' })
+  @ApiOkResponse({
+    description: 'Progreso del desafío obtenido exitosamente',
+    type: ChallengeProgressDto,
+  })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({ status: 404, description: 'No hay desafío activo para el usuario' })
+  getProgress(@Req() req): Promise<ChallengeProgressDto | null> {
+    return this.challengesService.getProgress(req.user.sub);
+  }
+
   @Get(':id/users')
   @ApiParam({ name: 'id', description: 'ID del desafío' })
   @ApiOperation({ summary: 'Obtener usuarios de un desafío', description: 'Lista todos los usuarios que están participando en un desafío' })
@@ -74,20 +88,6 @@ export class ChallengesController {
   @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
   remove(@Param('id') id: string) {
     return this.challengesService.remove(id);
-  }
-
-  @Get('progress')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Obtener progreso del desafío actual', description: 'Devuelve el progreso del usuario en el desafío activo, incluyendo día actual, si completó hoy y horas restantes' })
-  @ApiOkResponse({
-    description: 'Progreso del desafío obtenido exitosamente',
-    type: ChallengeProgressDto,
-  })
-  @ApiResponse({ status: 401, description: 'No autorizado' })
-  @ApiResponse({ status: 404, description: 'No hay desafío activo para el usuario' })
-  getProgress(@Req() req): Promise<ChallengeProgressDto | null> {
-    return this.challengesService.getProgress(req.user.sub);
   }
 
   

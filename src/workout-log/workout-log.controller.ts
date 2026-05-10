@@ -25,15 +25,6 @@ export class WorkoutLogController {
     return this.service.finishWorkout(Number(id));
   }
 
-  @Get(':id')
-  @ApiParam({ name: 'id', description: 'ID del log de entrenamiento' })
-  @ApiOperation({ summary: 'Obtener detalles del log de entrenamiento', description: 'Devuelve los detalles de un log de entrenamiento específico' })
-  @ApiResponse({ status: 200, description: 'Detalles del log de entrenamiento' })
-  @ApiResponse({ status: 404, description: 'Log de entrenamiento no encontrado' })
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(Number(id));
-  }
-
   @Get()
   @ApiOperation({ summary: 'Obtener todos los logs de entrenamiento', description: 'Lista todos los registros de entrenamiento' })
   @ApiResponse({ status: 200, description: 'Lista de logs de entrenamiento' })
@@ -52,6 +43,15 @@ export class WorkoutLogController {
       userId: req.user.sub,
       challengeId: body.challengeId,
     });
+  }
+
+  @Get(':id')
+  @ApiParam({ name: 'id', description: 'ID del log de entrenamiento' })
+  @ApiOperation({ summary: 'Obtener detalles del log de entrenamiento', description: 'Devuelve los detalles de un log de entrenamiento específico' })
+  @ApiResponse({ status: 200, description: 'Detalles del log de entrenamiento' })
+  @ApiResponse({ status: 404, description: 'Log de entrenamiento no encontrado' })
+  findOne(@Param('id') id: string) {
+    return this.service.findOne(Number(id));
   }
 
 }
