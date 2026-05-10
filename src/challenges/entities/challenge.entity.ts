@@ -25,4 +25,6 @@ export class Challenge {
 
   @Column({ nullable: true })
   cycle_length_days?: number;
+
+  
 }

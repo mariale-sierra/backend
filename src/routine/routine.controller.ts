@@ -1,6 +1,8 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, UseGuards, Req} from '@nestjs/common';
 import { RoutineService } from './routine.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+
 
 @ApiTags('Routine')
 @Controller('routine')
@@ -44,5 +46,16 @@ export class RoutineController {
       Number(routineId),
       body.exerciseId,
     );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('today/:challengeId')
+  @ApiParam({ name: 'challengeId', description: 'ID del challenge' })
+  @ApiOperation({ summary: 'Obtener rutina de hoy' })
+  getTodayRoutine(
+    @Param('challengeId') challengeId: string,
+    @Req() req,
+  ) {
+    return this.routineService.getTodayRoutine(req.user.sub, challengeId);
   }
 }

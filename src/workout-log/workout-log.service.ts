@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ConflictException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { WorkoutLog } from './entities/workout-log.entity';
@@ -24,7 +24,7 @@ export class WorkoutLogService {
     async createWorkout(dto: { routineId?: number; userId: string; challengeId?: string; imageUrl?: string;
     caption?: string; visibility?: 'private' | 'followers'; isRestDay?: boolean; }) {
         if (!dto.isRestDay && !dto.imageUrl) {
-        throw new Error('Image is required');
+        throw new BadRequestException('Image is required');
         }
         if (dto.challengeId) {
             const todayStart = new Date();
@@ -42,7 +42,7 @@ export class WorkoutLogService {
                 });
 
             if (existing) {
-                throw new Error('You already logged progress today');
+                throw new ConflictException('You already logged progress today');
             }
         }
 
