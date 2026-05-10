@@ -87,7 +87,7 @@ export class ChallengesController {
   @ApiResponse({ status: 401, description: 'No autorizado' })
   @ApiResponse({ status: 404, description: 'No hay desafío activo para el usuario' })
   getProgress(@Req() req): Promise<ChallengeProgressDto | null> {
-    return this.challengesService.getProgress(req.user.id);
+    return this.challengesService.getProgress(req.user.sub);
   }
 
   

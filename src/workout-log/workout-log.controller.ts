@@ -49,7 +49,7 @@ export class WorkoutLogController {
   @ApiResponse({ status: 401, description: 'No autorizado' })
   createProgress(@Body() body, @Req() req) {
     return this.service.createWorkout({
-      userId: req.user.id,
+      userId: req.user.sub,
       challengeId: body.challengeId,
     });
   }
