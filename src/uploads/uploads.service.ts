@@ -12,6 +12,8 @@ export class UploadsService {
       accessKeyId: process.env['CLOUDFLARE_R2_ACCESS_KEY_ID'] as string,
       secretAccessKey: process.env['CLOUDFLARE_R2_SECRET_ACCESS_KEY'] as string,
     },
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
   });
 
   async getPresignedUrl(fileType: string) {
@@ -24,7 +26,11 @@ export class UploadsService {
       ContentType: fileType,
     });
 
-    const signedUrl = await getSignedUrl(this.s3, command, { expiresIn: 300 });
+    const signedUrl = await getSignedUrl(this.s3, command, {
+      expiresIn: 300,
+      unhoistableHeaders: new Set(['x-amz-checksum-crc32', 'x-amz-sdk-checksum-algorithm']),
+    });
+
     const publicUrl = `${process.env['CLOUDFLARE_R2_PUBLIC_URL']}/${key}`;
 
     return { signedUrl, publicUrl, key };
