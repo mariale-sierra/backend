@@ -9,6 +9,7 @@ import { RoutineModule } from './routine/routine.module';
 import { WorkoutLogModule } from './workout-log/workout-log.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { WorkoutPostsModule } from './workout-posts/workout-posts.module';
+import { UploadsModule } from './uploads/uploads.module';
 
 @Module({
   imports: [
@@ -36,7 +37,8 @@ import { WorkoutPostsModule } from './workout-posts/workout-posts.module';
     WorkoutLogModule,
     MetricsModule,
     MetricsModule,
-    WorkoutPostsModule
+    WorkoutPostsModule,
+    UploadsModule,
   ],
 })
 export class AppModule {}
