@@ -10,7 +10,7 @@ export class WorkoutPost {
   workout_log_id!: number;
 
   @Column()
-  user_id!: number;
+  user_id!: string;
 
   @Column()
   image_url!: string;

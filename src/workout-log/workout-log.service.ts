@@ -60,7 +60,7 @@ export class WorkoutLogService {
         if (!dto.isRestDay) {
         await this.workoutPostsService.create({
             workout_log_id: savedWorkout.id,
-            user_id: Number(dto.userId),
+            user_id: dto.userId,
             image_url: dto.imageUrl,
             caption: dto.caption,
             visibility: dto.visibility || 'private',
