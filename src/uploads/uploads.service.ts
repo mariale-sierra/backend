@@ -23,12 +23,10 @@ export class UploadsService {
     const command = new PutObjectCommand({
       Bucket: process.env['CLOUDFLARE_R2_BUCKET_NAME'] as string,
       Key: key,
-      ContentType: fileType,
     });
 
     const signedUrl = await getSignedUrl(this.s3, command, {
       expiresIn: 300,
-      unhoistableHeaders: new Set(['x-amz-checksum-crc32', 'x-amz-sdk-checksum-algorithm']),
     });
 
     const publicUrl = `${process.env['CLOUDFLARE_R2_PUBLIC_URL']}/${key}`;
