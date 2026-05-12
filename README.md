@@ -1,98 +1,160 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# 🏋️‍♂️ Havit — Backend
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Backend de **Havit**, una plataforma de fitness basada en challenges donde los usuarios registran su progreso diario, se unen a retos y visualizan su avance.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+> ⚠️ **Este backend corre en un servidor remoto.** No está pensado para ejecutarse localmente — la base de datos solo es accesible desde el servidor. Si necesitas revisar el estado del servicio o los logs, conéctate directamente al servidor (ver sección de acceso más abajo).
 
-## Description
+---
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 🚀 Stack
 
-## Project setup
+- **NestJS** + TypeScript
+- **TypeORM** + PostgreSQL
+- **JWT** para autenticación
+- **Swagger** para documentación de APIs
+- **Cloudflare** para almacenamiento remoto de las imágenes
+- Desplegado en VM con base de datos remota
 
-```bash
-$ npm install
+---
+
+## ☁️ Acceso al servidor
+
+El backend está corriendo en:
+
+```
+http://20.63.84.1:3000
 ```
 
-## Compile and run the project
+Para ver los logs en tiempo real, conéctate al servidor vía SSH y ejecuta:
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+# Ver logs del proceso activo
+docker-compose logs backend
 ```
 
-## Run tests
+> 🔒 No detener ni reiniciar el proceso — el servidor está en producción.
 
-```bash
-# unit tests
-$ npm run test
+---
 
-# e2e tests
-$ npm run test:e2e
+## ⚙️ Variables de entorno
 
-# test coverage
-$ npm run test:cov
+El archivo `.env` en el servidor ya está configurado. Su estructura es:
+
+```env
+PORT=3000
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/DB_NAME
+JWT_SECRET=tu_secret
 ```
 
-## Deployment
+---
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## 🔐 Autenticación
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+El sistema usa JWT. Para obtener un token:
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+```http
+POST /auth/login
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+Respuesta:
 
-## Resources
+```json
+{
+  "accessToken": "..."
+}
+```
 
-Check out a few resources that may come in handy when working with NestJS:
+En endpoints protegidos, incluir el header:
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+```
+Authorization: Bearer <TOKEN>
+```
 
-## Support
+---
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+## 📡 Endpoints principales
 
-## Stay in touch
+### 🧑 Usuarios
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+```http
+GET /users/me
+GET /users/me/challenges
+```
 
-## License
+### 🏋️ Challenges
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+```http
+GET  /challenges
+GET  /challenges/:id
+POST /challenges
+POST /challenges/:id/join
+GET  /challenges/progress
+```
+
+### 📈 Progreso
+
+```http
+POST /progress
+GET  /challenges/progress
+```
+
+### 📸 Posts
+
+```http
+POST /workout-posts
+```
+
+---
+
+## 🧠 Flujo principal
+
+```
+Usuario inicia sesión
+        ↓
+Explora challenges disponibles
+        ↓
+Se une a un challenge
+        ↓
+Registra progreso diario
+        ↓
+Sube evidencia (imagen como URL)
+        ↓
+Visualiza su avance
+```
+
+---
+
+## 🧪 Ejemplo de request (Postman / Thunder Client)
+
+```http
+POST /progress
+Authorization: Bearer <TOKEN>
+
+{
+  "challengeId": 1,
+  "imageUrl": "https://test.com/img.jpg",
+  "caption": "Workout done 💪",
+  "visibility": "private",
+  "isRestDay": false
+}
+```
+
+---
+
+## ⚠️ Reglas de negocio importantes
+
+- Solo se permite **un registro por día** por challenge
+- El progreso se calcula dinámicamente según workouts completados
+- Las imágenes se manejan como URLs (integración con Cloudflare R2 pendiente)
+
+---
+
+## 🗺️ Próximos pasos
+
+- [ ] Sistema de comunidad entre usuarios
+- [ ] Notificaciones push
+- [ ] Métricas avanzadas de progreso
+
+---
+
+
