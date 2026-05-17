@@ -8,6 +8,8 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiOkRespo
 import { WorkoutLogService } from '../workout-log/workout-log.service';
 import { CreateWorkoutProgressDto } from '../workout-log/dto/create-workout-progress.dto';
 import { UnauthorizedException } from '@nestjs/common';
+import { UseGuards } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
 
 @ApiTags('Challenges')
 @Controller('challenges')
@@ -112,6 +114,7 @@ export class ChallengesController {
     return this.challengesService.remove(id);
   }
 
+  @UseGuards(AuthGuard('jwt'))
   @Get(':id/today')
   @ApiParam({ name: 'id', description: 'ID del desafío' })
   @ApiOperation({ summary: 'Obtener el progreso del desafío de hoy', description: 'Devuelve el progreso del desafío de hoy para el usuario' })
@@ -119,6 +122,8 @@ export class ChallengesController {
   @ApiResponse({ status: 401, description: 'No autorizado' })
   @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
   getToday(@Param('id') challengeId: string, @Req() req: any) {
+    console.log('User from token:', req.user); // Depuración
+
     if (!req.user || !req.user.id) {
       throw new UnauthorizedException('User not authenticated');
     }
