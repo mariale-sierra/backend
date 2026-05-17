@@ -7,6 +7,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiOkResponse } from '@nestjs/swagger';
 import { WorkoutLogService } from '../workout-log/workout-log.service';
 import { CreateWorkoutProgressDto } from '../workout-log/dto/create-workout-progress.dto';
+import { UnauthorizedException } from '@nestjs/common';
 
 @ApiTags('Challenges')
 @Controller('challenges')
@@ -118,6 +119,10 @@ export class ChallengesController {
   @ApiResponse({ status: 401, description: 'No autorizado' })
   @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
   getToday(@Param('id') challengeId: string, @Req() req: any) {
+    if (!req.user || !req.user.id) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+
     const userId = req.user.id; // Asumiendo que el userId viene del token o sesión
     return this.challengesService.getToday(challengeId, userId);
   }
