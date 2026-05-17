@@ -23,8 +23,6 @@ export class Challenge {
   @Column()
   duration_days!: number;
 
-  @Column({ nullable: true })
-  cycle_length_days?: number;
-
-  
+  @Column('int')
+  cycle_length_days!: number;
 }

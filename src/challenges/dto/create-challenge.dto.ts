@@ -1,5 +1,6 @@
-import { IsEnum, IsInt, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsInt, IsString, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { Min } from 'class-validator';
 
 export enum ChallengeVisibility {
   PUBLIC = 'public',
@@ -48,11 +49,10 @@ export class CreateChallengeDto {
   duration_days!: number;
 
   @ApiProperty({
-    description: 'Longitud del ciclo en días (opcional)',
+    description: 'Longitud del ciclo en días',
     example: 7,
-    required: false,
   })
-  @IsOptional()
   @IsInt()
-  cycle_length_days?: number;
+  @Min(1)
+  cycle_length_days!: number;
 }

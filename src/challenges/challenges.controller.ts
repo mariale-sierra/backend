@@ -56,7 +56,7 @@ export class ChallengesController {
   @ApiResponse({ status: 401, description: 'No autorizado' })
   @ApiResponse({ status: 404, description: 'No hay desafío activo para el usuario' })
   getProgress(@Req() req): Promise<ChallengeProgressDto | null> {
-    return this.challengesService.getProgress(req.user.sub);
+    return this.challengesService.getProgress(req.user.sub, req.query.challengeId);
   }
 
   @Post('progress')
@@ -111,5 +111,14 @@ export class ChallengesController {
     return this.challengesService.remove(id);
   }
 
-  
+  @Get(':id/today')
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiOperation({ summary: 'Obtener el progreso del desafío de hoy', description: 'Devuelve el progreso del desafío de hoy para el usuario' })
+  @ApiResponse({ status: 200, description: 'Progreso del desafío de hoy' })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
+  getToday(@Param('id') challengeId: string, @Req() req: any) {
+    const userId = req.user.id; // Asumiendo que el userId viene del token o sesión
+    return this.challengesService.getToday(challengeId, userId);
+  }
 }
