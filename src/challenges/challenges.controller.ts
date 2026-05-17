@@ -114,21 +114,34 @@ export class ChallengesController {
     return this.challengesService.remove(id);
   }
 
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(JwtAuthGuard)
   @Get(':id/today')
+  @ApiBearerAuth()
   @ApiParam({ name: 'id', description: 'ID del desafío' })
-  @ApiOperation({ summary: 'Obtener el progreso del desafío de hoy', description: 'Devuelve el progreso del desafío de hoy para el usuario' })
-  @ApiResponse({ status: 200, description: 'Progreso del desafío de hoy' })
-  @ApiResponse({ status: 401, description: 'No autorizado' })
-  @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
-  getToday(@Param('id') challengeId: string, @Req() req: any) {
-    console.log('User from token:', req.user); // Depuración
-
-    if (!req.user || !req.user.id) {
-      throw new UnauthorizedException('User not authenticated');
-    }
-
-    const userId = req.user.id; // Asumiendo que el userId viene del token o sesión
-    return this.challengesService.getToday(challengeId, userId);
+  @ApiOperation({
+    summary: 'Obtener información del challenge para hoy',
+    description:
+      'Devuelve el día actual del challenge, tipo de día y rutina correspondiente',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Información del día obtenida exitosamente',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'No autorizado',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Challenge no encontrado',
+  })
+  getToday(
+    @Param('id') challengeId: string,
+    @Req() req,
+  ) {
+    return this.challengesService.getToday(
+      challengeId,
+      req.user.sub,
+    );
   }
 }
