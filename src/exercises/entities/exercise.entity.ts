@@ -5,6 +5,7 @@ import {
   OneToMany,
 } from 'typeorm';
 import { RoutineExercise } from '../../routine/entities/routine-exercise.entity';
+import { ExerciseMetric } from './exercise-metric.entity';
 
 export enum TrackingMode {
   SINGLE = 'single',
@@ -41,4 +42,7 @@ export class Exercise {
 
   @OneToMany(() => RoutineExercise, (re) => re.exercise)
   routine_exercises?: RoutineExercise[];
+
+  @OneToMany(() => ExerciseMetric, (em) => em.exercise)
+  exercise_metrics?: ExerciseMetric[];
 }

@@ -16,7 +16,7 @@ export class ExerciseMetric {
   @PrimaryColumn({ name: 'metric_type_id' })
   metricTypeId!: number;
 
-  @ManyToOne(() => Exercise, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Exercise, (exercise) => exercise.exercise_metrics, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'exercise_id' })
   exercise!: Exercise;
 

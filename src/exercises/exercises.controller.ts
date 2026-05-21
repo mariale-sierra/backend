@@ -1,6 +1,6 @@
-import { Controller, Get, Post, Body, Param} from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post } from '@nestjs/common';
 import { ExercisesService } from './exercises.service';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('Exercises')
 @Controller('exercises')
@@ -20,5 +20,17 @@ export class ExercisesController {
   @ApiResponse({ status: 200, description: 'Lista de ejercicios' })
   findAll() {
     return this.exercisesService.findAll();
+  }
+
+  @Get(':id/full')
+  @ApiOperation({
+    summary: 'Obtener ejercicio completo',
+    description: 'Devuelve un ejercicio con sus métricas asociadas usando JOINs',
+  })
+  @ApiParam({ name: 'id', description: 'ID del ejercicio', example: 1 })
+  @ApiResponse({ status: 200, description: 'Ejercicio completo con métricas' })
+  @ApiResponse({ status: 404, description: 'Ejercicio no encontrado' })
+  findFullById(@Param('id', ParseIntPipe) id: number) {
+    return this.exercisesService.findFullById(id);
   }
 }
