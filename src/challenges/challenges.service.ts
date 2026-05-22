@@ -174,12 +174,19 @@ export class ChallengesService {
     const challenge = await this.challengeRepo.findOne({ where: { id: challengeId } });
     if (!challenge) return null;
 
-    // Nueva lógica para calcular currentDay y currentDayInCycle
+    // nueva lógica para calcular currentDay y currentDayInCycle
     const joinedAt = new Date(relation.joined_at!);
+    joinedAt.setHours(0, 0, 0, 0);
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
     const msPerDay = 1000 * 60 * 60 * 24;
     const daysSinceStart = Math.floor((today.getTime() - joinedAt.getTime()) / msPerDay);
     const currentDay = daysSinceStart + 1;
+    if (!challenge.cycle_length_days) {
+      throw new BadRequestException(
+        'Challenge cycle length not configured',
+      );
+    }
     const currentDayInCycle = ((currentDay - 1) % challenge.cycle_length_days) + 1;
 
     // completedToday
@@ -233,6 +240,7 @@ export class ChallengesService {
     }
 
     const joinedAt = new Date(relation.joined_at!);
+    
     const today = new Date();
     const msPerDay = 1000 * 60 * 60 * 24;
     const daysSinceStart = Math.floor((today.getTime() - joinedAt.getTime()) / msPerDay);
@@ -278,4 +286,100 @@ export class ChallengesService {
     routine_id: cycleDay.routine_id,
   };
   }
+
+  async getProgressSummary(
+  challengeId: string,
+  userId: string,
+) {
+  // validar relación usuario-challenge
+  const relation =
+    await this.challengeUserMapRepo.findOne({
+      where: {
+        challenge_id: challengeId,
+        user_id: userId,
+        status: 'active',
+      },
+    });
+
+  if (!relation) {
+    throw new NotFoundException(
+      'User is not part of this challenge',
+    );
+  }
+
+  // buscar challenge
+  const challenge =
+    await this.challengeRepo.findOne({
+      where: { id: challengeId },
+    });
+
+  if (!challenge) {
+    throw new NotFoundException(
+      'Challenge not found',
+    );
+  }
+
+  // calcular currentDay
+  const joinedAt = new Date(
+    relation.joined_at!,
+  );
+
+  joinedAt.setHours(0, 0, 0, 0);
+
+  const today = new Date();
+
+  today.setHours(0, 0, 0, 0);
+
+  const msPerDay =
+    1000 * 60 * 60 * 24;
+
+  const daysSinceStart = Math.floor(
+    (today.getTime() - joinedAt.getTime()) /
+      msPerDay,
+  );
+
+  const currentDay = daysSinceStart + 1;
+
+  // contar workouts completados
+  const completedDays =
+    await this.workoutRepo.count({
+      where: {
+        userId: userId,
+        challengeId: challengeId,
+        status: 'completed' as any,
+      },
+    });
+
+  // días restantes
+  const remainingDays = Math.max(
+    challenge.duration_days - currentDay,
+    0,
+  );
+
+  // porcentaje
+  const percentage = Math.floor(
+    (completedDays /
+      challenge.duration_days) *
+      100,
+  );
+
+  // challenge terminado
+  const isCompleted =
+    currentDay > challenge.duration_days;
+
+  return {
+    completedDays,
+
+    currentDay,
+
+    totalDays:
+      challenge.duration_days,
+
+    remainingDays,
+
+    percentage,
+
+    isCompleted,
+  };
+}
 }

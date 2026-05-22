@@ -7,9 +7,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiOkResponse } from '@nestjs/swagger';
 import { WorkoutLogService } from '../workout-log/workout-log.service';
 import { CreateWorkoutProgressDto } from '../workout-log/dto/create-workout-progress.dto';
-import { UnauthorizedException } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
 import { UseGuards } from '@nestjs/common';
+import { ChallengeProgressSummaryDto } from './dto/challenge-progress-summary.dto'; 
 
 @ApiTags('Challenges')
 @Controller('challenges')
@@ -140,6 +139,26 @@ export class ChallengesController {
     @Req() req,
   ) {
     return this.challengesService.getToday(
+      challengeId,
+      req.user.sub,
+    );
+  }
+
+  @Get(':id/progress-summary')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      'Obtener resumen del progreso del challenge',
+  })
+  @ApiOkResponse({
+    type: ChallengeProgressSummaryDto,
+  })
+  getProgressSummary(
+    @Param('id') challengeId: string,
+    @Req() req,
+  ) {
+    return this.challengesService.getProgressSummary(
       challengeId,
       req.user.sub,
     );
