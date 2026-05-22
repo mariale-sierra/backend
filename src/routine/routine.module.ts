@@ -10,10 +10,14 @@ import { RoutineController } from './routine.controller';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengesModule } from '../challenges/challenges.module';
 import { AuthModule } from '../auth/auth.module';
+import { RoutineExerciseSet } from './entities/routine-exercise-set.entity';
+import { RoutineExerciseTarget } from './entities/routine-exercise-target.entity';
+import { RoutineExerciseSetTarget } from './entities/routine-exercise-set-target.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Routine, RoutineExercise, Exercise, Challenge]),
+    TypeOrmModule.forFeature([Routine, RoutineExercise, RoutineExerciseSet,RoutineExerciseTarget,
+    RoutineExerciseSetTarget,Exercise, Challenge]),
     ChallengesModule,AuthModule,
   ],
   controllers: [RoutineController],

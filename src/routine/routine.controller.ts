@@ -48,14 +48,15 @@ export class RoutineController {
     );
   }
 
-  @UseGuards(JwtAuthGuard)
   @Get('today/:challengeId')
-  @ApiParam({ name: 'challengeId', description: 'ID del challenge' })
-  @ApiOperation({ summary: 'Obtener rutina de hoy' })
+  @UseGuards(JwtAuthGuard)
   getTodayRoutine(
     @Param('challengeId') challengeId: string,
     @Req() req,
   ) {
-    return this.routineService.getTodayRoutine(req.user.sub, challengeId);
+    return this.routineService.getTodayRoutine(
+      challengeId,
+      req.user.sub,
+    );
   }
 }

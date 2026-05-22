@@ -63,24 +63,76 @@ export class RoutineService {
     return this.routineExerciseRepo.save(routineExercise);
   }
 
-  async getTodayRoutine(userId: string, challengeId: string) {
+  async getTodayRoutine(
+  challengeId: string,
+  userId: string,
+) {
 
-  const routine = await this.routineRepo.findOne({
-    relations: ['routineExercises', 'routineExercises.exercise'],
-  });
+  const today =
+  await this.challengeService.getToday(
+    challengeId,
+    userId,
+  );
 
-  if (!routine) {
-    throw new Error('No routine found');
+  if (!today.hasWorkout) {
+  return {
+    hasWorkout: false,
+    routine: null,
+  };
   }
 
-  return {
-    day: 1, // temporal
-    routineId: routine.id,
-    exercises: (routine.routine_exercises || []).map((re, index) => ({
-      id: re.exercise?.id ?? index,
-      name: re.exercise?.name ?? 'Exercise',
-      sets: 3,
-    })),
+  const exercises =
+  await this.routineExerciseRepo
+    .createQueryBuilder('re')
+
+    .leftJoinAndSelect(
+      're.exercise',
+      'exercise',
+    )
+
+    .leftJoinAndSelect(
+      're.sets',
+      'sets',
+    )
+
+    .leftJoinAndSelect(
+      'sets.targets',
+      'setTargets',
+    )
+
+    .leftJoinAndSelect(
+      'setTargets.metricType',
+      'setMetricType',
+    )
+
+    .leftJoinAndSelect(
+      're.targets',
+      'targets',
+    )
+
+    .leftJoinAndSelect(
+      'targets.metricType',
+      'targetMetricType',
+    )
+
+    .where(
+      're.routine_id = :routineId',
+      {
+        routineId: today.routine_id,
+      },
+    )
+
+    .orderBy('re.order_index', 'ASC')
+    .addOrderBy('sets.set_number', 'ASC')
+
+    .getMany();
+    return {
+    hasWorkout: true,
+    currentDay: today.currentDay,
+    currentDayInCycle:
+      today.currentDayInCycle,
+    routine_id: today.routine_id,
+    exercises,
   };
 }
 }

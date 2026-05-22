@@ -246,13 +246,36 @@ export class ChallengesService {
       },
     });
 
-    if (!cycleDay) {
-      throw new NotFoundException('Cycle day not found');
-    }
-
+    if (!cycleDay || cycleDay.day_type === 'rest') {
     return {
-      day_type: cycleDay.day_type,
-      routine_id: cycleDay.routine_id,
+      challenge_id: challengeId,
+
+      currentDay,
+      currentDayInCycle,
+
+      totalDays: challenge.duration_days,
+
+      hasWorkout: false,
+
+      day_type: 'rest',
+
+      routine_id: null,
     };
+  }
+
+  return {
+    challenge_id: challengeId,
+
+    currentDay,
+    currentDayInCycle,
+
+    totalDays: challenge.duration_days,
+
+    hasWorkout: true,
+
+    day_type: cycleDay.day_type,
+
+    routine_id: cycleDay.routine_id,
+  };
   }
 }
