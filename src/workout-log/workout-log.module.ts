@@ -10,6 +10,7 @@ import { WorkoutLogExerciseMetric } from '../metrics/entities/workout-log-exerci
 import { AuthModule } from '../auth/auth.module';
 import { WorkoutPost } from 'src/workout-posts/entities/workout-post.entity';
 import { WorkoutPostsModule } from '../workout-posts/workout-posts.module';
+import { OpenAiModule } from '../openai/openai.module';
 
 @Module({
   imports: [

@@ -6,6 +6,7 @@ import { RoutineExercise } from '../routine/entities/routine-exercise.entity';
 import { WorkoutLogExercise } from './entities/workout-log-exercise.entity';
 import { Between } from 'typeorm';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
+import { ModerationService } from '../openai/moderation.service';
 
 @Injectable()
 export class WorkoutLogService {
@@ -15,12 +16,13 @@ export class WorkoutLogService {
 
     @InjectRepository(WorkoutLog)
     private workoutRepo: Repository<WorkoutLog>,
+
     private workoutPostsService: WorkoutPostsService,
+    private moderationService: ModerationService,
 
     @InjectRepository(WorkoutLogExercise)
     private wleRepo: Repository<WorkoutLogExercise>,
-  
-) {}
+    ) {}
     async createWorkout(dto: { routineId?: number; userId: string; challengeId?: string; imageUrl?: string;
     caption?: string; visibility?: 'private' | 'followers'; isRestDay?: boolean; }) {
         if (!dto.isRestDay && !dto.imageUrl) {
@@ -35,15 +37,22 @@ export class WorkoutLogService {
 
             const existing = await this.workoutRepo.findOne({
                 where: {
-                    userId: dto.userId,
-                    challengeId: dto.challengeId,
-                    started_at: Between(todayStart, todayEnd),
-                    },
-                });
+                userId: dto.userId,
+                challengeId: dto.challengeId,
+                started_at: Between(todayStart, todayEnd),
+                },
+            });
 
-            if (existing) {
-                throw new ConflictException('You already logged progress today');
-            }
+        if (existing) {
+            throw new ConflictException('You already logged progress today');
+        }
+        }
+
+        if (!dto.isRestDay && dto.imageUrl) {
+        await this.moderationService.validateWorkoutImage(
+            dto.imageUrl,
+            dto.caption,
+        );
         }
 
         const workout = this.workoutRepo.create({
