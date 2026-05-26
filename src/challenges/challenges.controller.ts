@@ -39,7 +39,40 @@ export class ChallengesController {
   join(@Param('id') challengeId: string, @Req() req) {
     return this.challengesService.joinChallenge(req.user.sub, challengeId);
   }
-  
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/leave')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiOperation({
+    summary: 'Salir de un desafío',
+    description:
+      'Actualiza el status del usuario autenticado en challenge_user_map a left',
+  })
+  @ApiResponse({ status: 200, description: 'Usuario salió del desafío exitosamente' })
+  @ApiResponse({ status: 400, description: 'El usuario no puede salir de este desafío' })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({ status: 404, description: 'Desafío o relación no encontrada' })
+  leaveChallenge(@Param('id') challengeId: string, @Req() req) {
+    return this.challengesService.leaveChallenge(req.user.sub, challengeId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/complete')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiOperation({
+    summary: 'Completar un desafío',
+    description:
+      'Actualiza el status del usuario autenticado en challenge_user_map a completed',
+  })
+  @ApiResponse({ status: 200, description: 'Desafío completado exitosamente' })
+  @ApiResponse({ status: 400, description: 'El usuario no puede completar este desafío' })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({ status: 404, description: 'Desafío o relación no encontrada' })
+  completeChallenge(@Param('id') challengeId: string, @Req() req) {
+    return this.challengesService.completeChallenge(req.user.sub, challengeId);
+  }
+
   @Get()
   @ApiOperation({ summary: 'Obtener todos los desafíos', description: 'Lista todos los desafíos disponibles' })
   @ApiResponse({ status: 200, description: 'Lista de desafíos' })

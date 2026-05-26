@@ -130,6 +130,69 @@ export class ChallengesService {
     };
   }
 
+  async leaveChallenge(userId: string, challengeId: string) {
+    return this.updateChallengeUserStatus(
+      userId,
+      challengeId,
+      'left',
+      'Challenge left successfully',
+    );
+  }
+
+  async completeChallenge(userId: string, challengeId: string) {
+    return this.updateChallengeUserStatus(
+      userId,
+      challengeId,
+      'completed',
+      'Challenge completed successfully',
+    );
+  }
+
+  private async updateChallengeUserStatus(
+    userId: string,
+    challengeId: string,
+    status: 'left' | 'completed',
+    message: string,
+  ) {
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId },
+    });
+
+    if (!challenge) {
+      throw new NotFoundException('Challenge not found');
+    }
+
+    const relation = await this.challengeUserMapRepo.findOne({
+      where: {
+        user_id: userId,
+        challenge_id: challengeId,
+      },
+    });
+
+    if (!relation) {
+      throw new NotFoundException('User is not part of this challenge');
+    }
+
+    if (relation.status === status) {
+      throw new BadRequestException(`Challenge already marked as ${status}`);
+    }
+
+    if (relation.status !== 'active') {
+      throw new BadRequestException(
+        `Cannot change challenge status from ${relation.status} to ${status}`,
+      );
+    }
+
+    relation.status = status;
+
+    const updatedRelation = await this.challengeUserMapRepo.save(relation);
+
+    return {
+      message,
+      data: updatedRelation,
+    };
+  }
+  
   async findUsersByChallenge(challengeId: string) {
     const challenge = await this.challengeRepo.findOne({
       where: { id: challengeId },
