@@ -24,6 +24,7 @@ import { OpenAiModule } from '../openai/openai.module';
     ]),
     AuthModule,
     WorkoutPostsModule,
+    OpenAiModule,
   ],
   controllers: [WorkoutLogController],
   providers: [WorkoutLogService],
