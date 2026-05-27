@@ -75,13 +75,16 @@ export class ModerationService {
 
       return result;
     } catch (error) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-
-      throw new ServiceUnavailableException(
-        'No se pudo validar el contenido en este momento. Intenta nuevamente más tarde.',
-      );
+    if (error instanceof HttpException) {
+      throw error;
     }
+
+    console.error('MODERATION ERROR:', error);
+
+    throw new ServiceUnavailableException(
+      'No se pudo validar el contenido en este momento. Intenta nuevamente más tarde.',
+    );
+
   }
+} 
 }
