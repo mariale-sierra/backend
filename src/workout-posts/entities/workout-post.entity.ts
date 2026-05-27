@@ -5,7 +5,6 @@ import {
   CreateDateColumn,
   ManyToOne,
   JoinColumn,
-  UpdateDateColumn,
 } from 'typeorm';
 import { WorkoutLog } from '../../workout-log/entities/workout-log.entity';
 
@@ -51,9 +50,6 @@ export class WorkoutPost {
 
   @CreateDateColumn()
   created_at!: Date;
-
-  @UpdateDateColumn()
-  updated_at!: Date;
 
   @ManyToOne(() => WorkoutLog, (workoutLog) => workoutLog.posts)
   @JoinColumn({ name: 'workout_log_id' })
