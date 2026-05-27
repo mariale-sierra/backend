@@ -21,7 +21,7 @@ export class RoutineService {
     @InjectRepository(Exercise)
     private exerciseRepo: Repository<Exercise>,
 
-    @InjectRepository(Challenge) 
+    @InjectRepository(Challenge)
     private challengeRepo: Repository<Challenge>,
   ) {}
 
@@ -63,76 +63,56 @@ export class RoutineService {
     return this.routineExerciseRepo.save(routineExercise);
   }
 
-  async getTodayRoutine(
-  challengeId: string,
-  userId: string,
-) {
+  async getTodayRoutine(challengeId: string, userId: string) {
+    const today = await this.challengeService.getToday(challengeId, userId);
 
-  const today =
-  await this.challengeService.getToday(
-    challengeId,
-    userId,
-  );
+    if (!today.hasWorkout) {
+      return {
+        hasWorkout: false,
+        routine: null,
+      };
+    }
 
-  if (!today.hasWorkout) {
-  return {
-    hasWorkout: false,
-    routine: null,
-  };
-  }
+    if (!today.routine_id) {
+      return {
+        hasWorkout: true,
+        currentDay: today.currentDay,
+        currentDayInCycle: today.currentDayInCycle,
+        routine_id: null,
+        routine: null,
+        exercises: [],
+      };
+    }
 
-  const exercises =
-  await this.routineExerciseRepo
-    .createQueryBuilder('re')
+    const exercises = await this.routineExerciseRepo
+      .createQueryBuilder('re')
 
-    .leftJoinAndSelect(
-      're.exercise',
-      'exercise',
-    )
+      .leftJoinAndSelect('re.exercise', 'exercise')
 
-    .leftJoinAndSelect(
-      're.sets',
-      'sets',
-    )
+      .leftJoinAndSelect('re.sets', 'sets')
 
-    .leftJoinAndSelect(
-      'sets.targets',
-      'setTargets',
-    )
+      .leftJoinAndSelect('sets.targets', 'setTargets')
 
-    .leftJoinAndSelect(
-      'setTargets.metricType',
-      'setMetricType',
-    )
+      .leftJoinAndSelect('setTargets.metricType', 'setMetricType')
 
-    .leftJoinAndSelect(
-      're.targets',
-      'targets',
-    )
+      .leftJoinAndSelect('re.targets', 'targets')
 
-    .leftJoinAndSelect(
-      'targets.metricType',
-      'targetMetricType',
-    )
+      .leftJoinAndSelect('targets.metricType', 'targetMetricType')
 
-    .where(
-      're.routine_id = :routineId',
-      {
+      .where('re.routine_id = :routineId', {
         routineId: today.routine_id,
-      },
-    )
+      })
 
-    .orderBy('re.order_index', 'ASC')
-    .addOrderBy('sets.set_number', 'ASC')
+      .orderBy('re.order_index', 'ASC')
+      .addOrderBy('sets.set_number', 'ASC')
 
-    .getMany();
+      .getMany();
     return {
-    hasWorkout: true,
-    currentDay: today.currentDay,
-    currentDayInCycle:
-      today.currentDayInCycle,
-    routine_id: today.routine_id,
-    exercises,
-  };
-}
+      hasWorkout: true,
+      currentDay: today.currentDay,
+      currentDayInCycle: today.currentDayInCycle,
+      routine_id: today.routine_id,
+      exercises,
+    };
+  }
 }

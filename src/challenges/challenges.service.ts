@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger, NotFoundException} from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, Repository } from 'typeorm';
 import { Challenge } from './entities/challenge.entity';
@@ -9,8 +14,8 @@ import { ChallengeUserMap } from './entities/challenge-user-map.entity';
 import { DataSource } from 'typeorm';
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengeCycleDay } from './entities/challenge-cycle-days.entity';
-
-
+import { Routine } from '../routine/entities/routine.entity';
+import { UpdateChallengeCycleDayDto } from './dto/update-challenge-cycle-day.dto';
 
 @Injectable()
 export class ChallengesService {
@@ -28,11 +33,15 @@ export class ChallengesService {
     private workoutRepo: Repository<WorkoutLog>,
     @InjectRepository(ChallengeCycleDay)
     private challengeCycleDaysRepo: Repository<ChallengeCycleDay>,
+    @InjectRepository(Routine)
+    private routineRepo: Repository<Routine>,
   ) {}
 
   async create(createChallengeDto: CreateChallengeDto, userId: string) {
     this.logger.log(`Creating challenge with name: ${createChallengeDto.name}`);
-    if (createChallengeDto.cycle_length_days > createChallengeDto.duration_days) {
+    if (
+      createChallengeDto.cycle_length_days > createChallengeDto.duration_days
+    ) {
       throw new BadRequestException('Cycle length cannot exceed duration');
     }
 
@@ -102,7 +111,9 @@ export class ChallengesService {
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    const challenge = await this.challengeRepo.findOne({ where: { id: challengeId } });
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId },
+    });
     if (!challenge) throw new NotFoundException('Challenge not found');
 
     // no puede unirse el creador
@@ -111,9 +122,10 @@ export class ChallengesService {
     }
 
     const alreadyJoined = await this.challengeUserMapRepo.findOne({
-      where: { user_id: userId, challenge_id: challengeId }
+      where: { user_id: userId, challenge_id: challengeId },
     });
-    if (alreadyJoined) throw new BadRequestException('Already joined this challenge');
+    if (alreadyJoined)
+      throw new BadRequestException('Already joined this challenge');
 
     const join = this.challengeUserMapRepo.create({
       user_id: userId,
@@ -146,6 +158,72 @@ export class ChallengesService {
       'completed',
       'Challenge completed successfully',
     );
+  }
+
+  async updateCycleDay(
+    challengeId: string,
+    dayInCycle: number,
+    dto: UpdateChallengeCycleDayDto,
+  ) {
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId },
+    });
+
+    if (!challenge) {
+      throw new NotFoundException('Challenge not found');
+    }
+
+    if (dayInCycle < 1 || dayInCycle > challenge.cycle_length_days) {
+      throw new BadRequestException(
+        'Day in cycle is outside challenge cycle length',
+      );
+    }
+
+    const cycleDay = await this.challengeCycleDaysRepo.findOne({
+      where: {
+        challenge_id: challengeId,
+        day_in_cycle: dayInCycle,
+      },
+    });
+
+    if (!cycleDay) {
+      throw new NotFoundException('Challenge cycle day not found');
+    }
+
+    if (dto.day_type === undefined && dto.routine_id === undefined) {
+      throw new BadRequestException('day_type or routine_id is required');
+    }
+
+    const dayType = dto.day_type ?? cycleDay.day_type;
+    let routineId =
+      dto.routine_id !== undefined ? dto.routine_id : cycleDay.routine_id;
+
+    if (dayType === 'rest') {
+      if (dto.routine_id !== undefined && dto.routine_id !== null) {
+        throw new BadRequestException('Rest days cannot have a routine');
+      }
+      routineId = null;
+    }
+
+    if (routineId !== null && routineId !== undefined) {
+      const routine = await this.routineRepo.findOne({
+        where: { id: routineId },
+      });
+
+      if (!routine) {
+        throw new BadRequestException('Routine not found');
+      }
+    }
+
+    cycleDay.day_type = dayType;
+    cycleDay.routine_id = routineId ?? null;
+
+    await this.challengeCycleDaysRepo.save(cycleDay);
+
+    return {
+      message: 'Challenge cycle day updated successfully',
+      data: await this.findCycleDayWithRoutine(challengeId, dayInCycle),
+    };
   }
 
   private async updateChallengeUserStatus(
@@ -192,7 +270,7 @@ export class ChallengesService {
       data: updatedRelation,
     };
   }
-  
+
   async findUsersByChallenge(challengeId: string) {
     const challenge = await this.challengeRepo.findOne({
       where: { id: challengeId },
@@ -220,8 +298,6 @@ export class ChallengesService {
       message: 'Challenge users retrieved successfully',
       data: users,
     };
-
-  
   }
   async getProgress(userId: string, challengeId: string) {
     const relation = await this.challengeUserMapRepo.findOne({
@@ -234,7 +310,9 @@ export class ChallengesService {
 
     if (!relation) return null;
 
-    const challenge = await this.challengeRepo.findOne({ where: { id: challengeId } });
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId },
+    });
     if (!challenge) return null;
 
     // nueva lógica para calcular currentDay y currentDayInCycle
@@ -243,14 +321,15 @@ export class ChallengesService {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const msPerDay = 1000 * 60 * 60 * 24;
-    const daysSinceStart = Math.floor((today.getTime() - joinedAt.getTime()) / msPerDay);
+    const daysSinceStart = Math.floor(
+      (today.getTime() - joinedAt.getTime()) / msPerDay,
+    );
     const currentDay = daysSinceStart + 1;
     if (!challenge.cycle_length_days) {
-      throw new BadRequestException(
-        'Challenge cycle length not configured',
-      );
+      throw new BadRequestException('Challenge cycle length not configured');
     }
-    const currentDayInCycle = ((currentDay - 1) % challenge.cycle_length_days) + 1;
+    const currentDayInCycle =
+      ((currentDay - 1) % challenge.cycle_length_days) + 1;
 
     // completedToday
     const start = new Date();
@@ -272,7 +351,9 @@ export class ChallengesService {
     const endDay = new Date();
     endDay.setHours(23, 59, 59, 999);
 
-    const hoursLeft = Math.ceil((endDay.getTime() - now.getTime()) / (1000 * 60 * 60));
+    const hoursLeft = Math.ceil(
+      (endDay.getTime() - now.getTime()) / (1000 * 60 * 60),
+    );
 
     return {
       challenge,
@@ -297,27 +378,62 @@ export class ChallengesService {
       throw new NotFoundException('User is not part of this challenge');
     }
 
-    const challenge = await this.challengeRepo.findOne({ where: { id: challengeId } });
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId },
+    });
     if (!challenge) {
       throw new NotFoundException('Challenge not found');
     }
 
     const joinedAt = new Date(relation.joined_at!);
-    
-    const today = new Date();
-    const msPerDay = 1000 * 60 * 60 * 24;
-    const daysSinceStart = Math.floor((today.getTime() - joinedAt.getTime()) / msPerDay);
-    const currentDay = daysSinceStart + 1;
-    const currentDayInCycle = ((currentDay - 1) % challenge.cycle_length_days) + 1;
+    joinedAt.setHours(0, 0, 0, 0);
 
-    const cycleDay = await this.challengeCycleDaysRepo.findOne({
-      where: {
-        challenge_id: challengeId,
-        day_in_cycle: currentDayInCycle,
-      },
-    });
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const daysSinceStart = Math.floor(
+      (today.getTime() - joinedAt.getTime()) / msPerDay,
+    );
+    const currentDay = daysSinceStart + 1;
+    if (!challenge.cycle_length_days) {
+      throw new BadRequestException('Challenge cycle length not configured');
+    }
+    const currentDayInCycle =
+      ((currentDay - 1) % challenge.cycle_length_days) + 1;
+
+    const cycleDay = await this.findCycleDayWithRoutine(
+      challengeId,
+      currentDayInCycle,
+    );
 
     if (!cycleDay || cycleDay.day_type === 'rest') {
+      return {
+        challenge_id: challengeId,
+
+        currentDay,
+        currentDayInCycle,
+
+        totalDays: challenge.duration_days,
+
+        hasWorkout: false,
+
+        day_type: 'rest',
+
+        routine_id: null,
+
+        cycle_day: cycleDay
+          ? {
+              id: cycleDay.id,
+              day_in_cycle: cycleDay.day_in_cycle,
+              day_type: cycleDay.day_type,
+              routine_id: cycleDay.routine_id,
+            }
+          : null,
+
+        routine: null,
+      };
+    }
+
     return {
       challenge_id: challengeId,
 
@@ -326,37 +442,35 @@ export class ChallengesService {
 
       totalDays: challenge.duration_days,
 
-      hasWorkout: false,
+      hasWorkout: true,
 
-      day_type: 'rest',
+      day_type: cycleDay.day_type,
 
-      routine_id: null,
+      routine_id: cycleDay.routine_id,
+
+      cycle_day: {
+        id: cycleDay.id,
+        day_in_cycle: cycleDay.day_in_cycle,
+        day_type: cycleDay.day_type,
+        routine_id: cycleDay.routine_id,
+      },
+
+      routine: cycleDay.routine ?? null,
     };
   }
 
-  return {
-    challenge_id: challengeId,
-
-    currentDay,
-    currentDayInCycle,
-
-    totalDays: challenge.duration_days,
-
-    hasWorkout: true,
-
-    day_type: cycleDay.day_type,
-
-    routine_id: cycleDay.routine_id,
-  };
+  private findCycleDayWithRoutine(challengeId: string, dayInCycle: number) {
+    return this.challengeCycleDaysRepo
+      .createQueryBuilder('cycleDay')
+      .leftJoinAndSelect('cycleDay.routine', 'routine')
+      .where('cycleDay.challenge_id = :challengeId', { challengeId })
+      .andWhere('cycleDay.day_in_cycle = :dayInCycle', { dayInCycle })
+      .getOne();
   }
 
-  async getProgressSummary(
-  challengeId: string,
-  userId: string,
-) {
-  // validar relación usuario-challenge
-  const relation =
-    await this.challengeUserMapRepo.findOne({
+  async getProgressSummary(challengeId: string, userId: string) {
+    // validar relación usuario-challenge
+    const relation = await this.challengeUserMapRepo.findOne({
       where: {
         challenge_id: challengeId,
         user_id: userId,
@@ -364,48 +478,38 @@ export class ChallengesService {
       },
     });
 
-  if (!relation) {
-    throw new NotFoundException(
-      'User is not part of this challenge',
-    );
-  }
+    if (!relation) {
+      throw new NotFoundException('User is not part of this challenge');
+    }
 
-  // buscar challenge
-  const challenge =
-    await this.challengeRepo.findOne({
+    // buscar challenge
+    const challenge = await this.challengeRepo.findOne({
       where: { id: challengeId },
     });
 
-  if (!challenge) {
-    throw new NotFoundException(
-      'Challenge not found',
+    if (!challenge) {
+      throw new NotFoundException('Challenge not found');
+    }
+
+    // calcular currentDay
+    const joinedAt = new Date(relation.joined_at!);
+
+    joinedAt.setHours(0, 0, 0, 0);
+
+    const today = new Date();
+
+    today.setHours(0, 0, 0, 0);
+
+    const msPerDay = 1000 * 60 * 60 * 24;
+
+    const daysSinceStart = Math.floor(
+      (today.getTime() - joinedAt.getTime()) / msPerDay,
     );
-  }
 
-  // calcular currentDay
-  const joinedAt = new Date(
-    relation.joined_at!,
-  );
+    const currentDay = daysSinceStart + 1;
 
-  joinedAt.setHours(0, 0, 0, 0);
-
-  const today = new Date();
-
-  today.setHours(0, 0, 0, 0);
-
-  const msPerDay =
-    1000 * 60 * 60 * 24;
-
-  const daysSinceStart = Math.floor(
-    (today.getTime() - joinedAt.getTime()) /
-      msPerDay,
-  );
-
-  const currentDay = daysSinceStart + 1;
-
-  // contar workouts completados
-  const completedDays =
-    await this.workoutRepo.count({
+    // contar workouts completados
+    const completedDays = await this.workoutRepo.count({
       where: {
         userId: userId,
         challengeId: challengeId,
@@ -413,36 +517,29 @@ export class ChallengesService {
       },
     });
 
-  // días restantes
-  const remainingDays = Math.max(
-    challenge.duration_days - currentDay,
-    0,
-  );
+    // días restantes
+    const remainingDays = Math.max(challenge.duration_days - currentDay, 0);
 
-  // porcentaje
-  const percentage = Math.floor(
-    (completedDays /
-      challenge.duration_days) *
-      100,
-  );
+    // porcentaje
+    const percentage = Math.floor(
+      (completedDays / challenge.duration_days) * 100,
+    );
 
-  // challenge terminado
-  const isCompleted =
-    currentDay > challenge.duration_days;
+    // challenge terminado
+    const isCompleted = currentDay > challenge.duration_days;
 
-  return {
-    completedDays,
+    return {
+      completedDays,
 
-    currentDay,
+      currentDay,
 
-    totalDays:
-      challenge.duration_days,
+      totalDays: challenge.duration_days,
 
-    remainingDays,
+      remainingDays,
 
-    percentage,
+      percentage,
 
-    isCompleted,
-  };
-}
+      isCompleted,
+    };
+  }
 }

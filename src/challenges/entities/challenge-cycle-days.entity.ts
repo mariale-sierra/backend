@@ -7,6 +7,7 @@ import {
 } from 'typeorm';
 
 import { Challenge } from './challenge.entity';
+import { Routine } from '../../routine/entities/routine.entity';
 
 @Entity({
   schema: 'havit',
@@ -29,12 +30,16 @@ export class ChallengeCycleDay {
   day_type!: string;
 
   @Column({
-    type: 'uuid',
+    type: 'int',
     nullable: true,
   })
-  routine_id!: string | null;
+  routine_id!: number | null;
 
   @ManyToOne(() => Challenge)
   @JoinColumn({ name: 'challenge_id' })
   challenge!: Challenge;
+
+  @ManyToOne(() => Routine, { nullable: true })
+  @JoinColumn({ name: 'routine_id' })
+  routine?: Routine | null;
 }

@@ -21,11 +21,11 @@ export class RoutineExercise {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column('uuid')
-  routine_id!: string;
+  @Column('int')
+  routine_id!: number;
 
-  @Column('uuid')
-  exercise_id!: string;
+  @Column('int')
+  exercise_id!: number;
 
   @Column('int')
   order_index!: number;
@@ -44,15 +44,9 @@ export class RoutineExercise {
   @JoinColumn({ name: 'exercise_id' })
   exercise!: Exercise;
 
-  @OneToMany(
-    () => RoutineExerciseSet,
-    set => set.routineExercise,
-  )
+  @OneToMany(() => RoutineExerciseSet, (set) => set.routineExercise)
   sets!: RoutineExerciseSet[];
 
-  @OneToMany(
-    () => RoutineExerciseTarget,
-    target => target.routineExercise,
-  )
+  @OneToMany(() => RoutineExerciseTarget, (target) => target.routineExercise)
   targets!: RoutineExerciseTarget[];
 }
