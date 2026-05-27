@@ -3,9 +3,6 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { DataSource } from 'typeorm';
 
-import { ExerciseCategoryMap } from './exercises/entities/exercise-category-map.entity';
-import { ExerciseLocationMap } from './exercises/entities/exercise-location-map.entity';
-
 function loadEnvFile() {
   const envPath = join(process.cwd(), '.env');
 
@@ -40,7 +37,7 @@ export default new DataSource({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_DATABASE,
   schema: 'havit',
-  entities: [ExerciseCategoryMap, ExerciseLocationMap],
+  entities: ['src/**/*.entity.ts'],
   migrations: ['src/migrations/*.ts'],
   ssl: {
     rejectUnauthorized: false,
