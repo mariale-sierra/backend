@@ -45,17 +45,45 @@ export class UsersService {
     left: [],
   };
 
-  challenges.forEach((c) => {
-    const formatted = {
+  const msPerDay = 1000 * 60 * 60 * 24;
+
+  for (const c of challenges) {
+    const formatted: any = {
       ...c.challenge,
       status: c.status,
       joinedAt: c.joined_at,
     };
 
-    if (c.status === 'active') grouped.active.push(formatted);
+    // If relation is active, compute whether the challenge has actually finished
+    // according to calendar days since `joined_at` versus `duration_days`.
+    if (c.status === 'active') {
+      try {
+        if (c.joined_at && c.challenge && c.challenge.duration_days) {
+          const joinedAt = new Date(c.joined_at);
+          joinedAt.setHours(0, 0, 0, 0);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const daysSinceStart = Math.floor((today.getTime() - joinedAt.getTime()) / msPerDay);
+          const currentDay = daysSinceStart + 1;
+          if (currentDay > (c.challenge.duration_days ?? 0)) {
+            // treat as completed for the client view
+            formatted.status = 'completed';
+            grouped.completed.push(formatted);
+            continue;
+          }
+        }
+      } catch (e) {
+        // fallback: if any error, keep original active status
+      }
+
+      grouped.active.push(formatted);
+      continue;
+    }
+
     if (c.status === 'completed') grouped.completed.push(formatted);
-    if (c.status === 'left') grouped.left.push(formatted);
-  });
+    else if (c.status === 'left') grouped.left.push(formatted);
+    else grouped.active.push(formatted);
+  }
 
   return grouped;
 }
