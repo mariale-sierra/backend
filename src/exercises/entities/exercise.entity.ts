@@ -1,11 +1,9 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  OneToMany,
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
 import { RoutineExercise } from '../../routine/entities/routine-exercise.entity';
 import { ExerciseMetric } from './exercise-metric.entity';
+import { ExerciseCategoryMap } from './exercise-category-map.entity';
+import { ExerciseLocationMap } from './exercise-location-map.entity';
+import { ExerciseBodyPartMap } from './exercise-body-part-map.entity';
 
 export enum TrackingMode {
   SINGLE = 'single',
@@ -45,4 +43,13 @@ export class Exercise {
 
   @OneToMany(() => ExerciseMetric, (em) => em.exercise)
   exercise_metrics?: ExerciseMetric[];
+
+  @OneToMany(() => ExerciseCategoryMap, (map) => map.exercise)
+  category_maps?: ExerciseCategoryMap[];
+
+  @OneToMany(() => ExerciseLocationMap, (map) => map.exercise)
+  location_maps?: ExerciseLocationMap[];
+
+  @OneToMany(() => ExerciseBodyPartMap, (map) => map.exercise)
+  body_part_maps?: ExerciseBodyPartMap[];
 }
