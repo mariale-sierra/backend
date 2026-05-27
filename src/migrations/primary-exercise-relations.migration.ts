@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class PrimaryExerciseRelationsMigration implements MigrationInterface {
+export class PrimaryExerciseRelationsMigration1740000000001
+  implements MigrationInterface
+{
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
       `ALTER TABLE "havit"."exercise_category_map" ADD COLUMN IF NOT EXISTS "is_primary" boolean NOT NULL DEFAULT false`,
