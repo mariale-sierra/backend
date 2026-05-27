@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class WorkoutPostModerationMigration implements MigrationInterface {
+export class WorkoutPostModerationMigration1740000000000
+  implements MigrationInterface
+{
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
       `CREATE TYPE "havit"."workout_posts_moderation_status_enum" AS ENUM ('pending', 'approved', 'rejected')`,
