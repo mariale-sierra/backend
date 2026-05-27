@@ -61,7 +61,7 @@ export class ChallengesController {
   @ApiResponse({ status: 200, description: 'Se unió al desafío exitosamente' })
   @ApiResponse({ status: 401, description: 'No autorizado' })
   @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
-  join(@Param('id') challengeId: string, @Req() req) {
+  join(@Param('id', ParseUUIDPipe) challengeId: string, @Req() req) {
     return this.challengesService.joinChallenge(req.user.sub, challengeId);
   }
   @UseGuards(JwtAuthGuard)
@@ -83,7 +83,7 @@ export class ChallengesController {
   })
   @ApiResponse({ status: 401, description: 'No autorizado' })
   @ApiResponse({ status: 404, description: 'Desafío o relación no encontrada' })
-  leaveChallenge(@Param('id') challengeId: string, @Req() req) {
+  leaveChallenge(@Param('id', ParseUUIDPipe) challengeId: string, @Req() req) {
     return this.challengesService.leaveChallenge(req.user.sub, challengeId);
   }
 
@@ -103,7 +103,7 @@ export class ChallengesController {
   })
   @ApiResponse({ status: 401, description: 'No autorizado' })
   @ApiResponse({ status: 404, description: 'Desafío o relación no encontrada' })
-  completeChallenge(@Param('id') challengeId: string, @Req() req) {
+  completeChallenge(@Param('id', ParseUUIDPipe) challengeId: string, @Req() req) {
     return this.challengesService.completeChallenge(req.user.sub, challengeId);
   }
 
@@ -132,7 +132,7 @@ export class ChallengesController {
     description: 'Challenge o día del ciclo no encontrado',
   })
   updateCycleDay(
-    @Param('id') challengeId: string,
+    @Param('id', ParseUUIDPipe) challengeId: string,
     @Param('dayInCycle', ParseIntPipe) dayInCycle: number,
     @Body() dto: UpdateChallengeCycleDayDto,
   ) {
@@ -202,7 +202,7 @@ export class ChallengesController {
   })
   @ApiResponse({ status: 200, description: 'Lista de usuarios en el desafío' })
   @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
-  findUsers(@Param('id') id: string) {
+  findUsers(@Param('id', ParseUUIDPipe) id: string) {
     return this.challengesService.findUsersByChallenge(id);
   }
 
@@ -214,7 +214,7 @@ export class ChallengesController {
   })
   @ApiResponse({ status: 200, description: 'Detalles del desafío' })
   @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.challengesService.findOne(id);
   }
 
@@ -227,7 +227,7 @@ export class ChallengesController {
   @ApiResponse({ status: 200, description: 'Desafío actualizado exitosamente' })
   @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
   update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() updateChallengeDto: UpdateChallengeDto,
   ) {
     return this.challengesService.update(id, updateChallengeDto);
@@ -241,7 +241,7 @@ export class ChallengesController {
   })
   @ApiResponse({ status: 200, description: 'Desafío eliminado exitosamente' })
   @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
-  remove(@Param('id') id: string) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.challengesService.remove(id);
   }
 
@@ -266,7 +266,7 @@ export class ChallengesController {
     status: 404,
     description: 'Challenge no encontrado',
   })
-  getToday(@Param('id') challengeId: string, @Req() req) {
+  getToday(@Param('id', ParseUUIDPipe) challengeId: string, @Req() req) {
     return this.challengesService.getToday(challengeId, req.user.sub);
   }
 
@@ -279,7 +279,7 @@ export class ChallengesController {
   @ApiOkResponse({
     type: ChallengeProgressSummaryDto,
   })
-  getProgressSummary(@Param('id') challengeId: string, @Req() req) {
+  getProgressSummary(@Param('id', ParseUUIDPipe) challengeId: string, @Req() req) {
     return this.challengesService.getProgressSummary(challengeId, req.user.sub);
   }
 }

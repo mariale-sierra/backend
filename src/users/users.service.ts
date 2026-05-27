@@ -28,63 +28,80 @@ export class UsersService {
     return user;
   }
 
-  async getUserChallenges(userId: number) {
-  const challenges = await this.challengeUserRepo
-    .createQueryBuilder('cu')
-    .leftJoinAndSelect('cu.challenge', 'challenge')
-    .where('cu.user_id = :userId', { userId })
-    .getMany();
+  async getUserChallenges(userId: string) {
+    await this.syncExpiredChallengeStatuses(userId);
 
-  const grouped: {
-  active: any[];
-  completed: any[];
-  left: any[];
-  } = {
-    active: [],
-    completed: [],
-    left: [],
-  };
+    const challenges = await this.challengeUserRepo
+      .createQueryBuilder('cu')
+      .leftJoinAndSelect('cu.challenge', 'challenge')
+      .where('cu.user_id = :userId', { userId })
+      .orderBy('cu.joined_at', 'DESC')
+      .getMany();
 
-  const msPerDay = 1000 * 60 * 60 * 24;
-
-  for (const c of challenges) {
-    const formatted: any = {
-      ...c.challenge,
-      status: c.status,
-      joinedAt: c.joined_at,
+    const grouped: {
+      active: any[];
+      completed: any[];
+      left: any[];
+    } = {
+      active: [],
+      completed: [],
+      left: [],
     };
 
-    // If relation is active, compute whether the challenge has actually finished
-    // according to calendar days since `joined_at` versus `duration_days`.
-    if (c.status === 'active') {
-      try {
-        if (c.joined_at && c.challenge && c.challenge.duration_days) {
-          const joinedAt = new Date(c.joined_at);
-          joinedAt.setHours(0, 0, 0, 0);
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          const daysSinceStart = Math.floor((today.getTime() - joinedAt.getTime()) / msPerDay);
-          const currentDay = daysSinceStart + 1;
-          if (currentDay > (c.challenge.duration_days ?? 0)) {
-            // treat as completed for the client view
-            formatted.status = 'completed';
-            grouped.completed.push(formatted);
-            continue;
-          }
-        }
-      } catch (e) {
-        // fallback: if any error, keep original active status
-      }
+    for (const c of challenges) {
+      const formatted: any = {
+        ...c.challenge,
+        status: c.status,
+        joinedAt: c.joined_at,
+      };
 
-      grouped.active.push(formatted);
-      continue;
+      if (c.status === 'completed') {
+        grouped.completed.push(formatted);
+      } else if (c.status === 'left') {
+        grouped.left.push(formatted);
+      } else {
+        grouped.active.push(formatted);
+      }
     }
 
-    if (c.status === 'completed') grouped.completed.push(formatted);
-    else if (c.status === 'left') grouped.left.push(formatted);
-    else grouped.active.push(formatted);
+    return grouped;
   }
 
-  return grouped;
-}
+  private async syncExpiredChallengeStatuses(userId: string) {
+    const activeChallenges = await this.challengeUserRepo
+      .createQueryBuilder('cu')
+      .innerJoinAndSelect('cu.challenge', 'challenge')
+      .where('cu.user_id = :userId', { userId })
+      .andWhere('cu.status = :status', { status: 'active' })
+      .getMany();
+
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const expiredRelations: ChallengeUserMap[] = [];
+
+    for (const relation of activeChallenges) {
+      if (!relation.joined_at || !relation.challenge?.duration_days) {
+        continue;
+      }
+
+      const joinedAt = new Date(relation.joined_at);
+      joinedAt.setHours(0, 0, 0, 0);
+      const daysSinceStart = Math.floor((today.getTime() - joinedAt.getTime()) / msPerDay);
+      const currentDay = daysSinceStart + 1;
+
+      if (currentDay > relation.challenge.duration_days) {
+        relation.status = 'completed';
+        expiredRelations.push(relation);
+      }
+    }
+
+    if (expiredRelations.length > 0) {
+      await this.challengeUserRepo.save(expiredRelations);
+      this.logger.log(
+        `Marked ${expiredRelations.length} expired challenge(s) as completed for user ${userId}`,
+      );
+    }
+  }
 }
