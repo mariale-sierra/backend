@@ -1,4 +1,4 @@
-import { IsEnum, IsInt, IsString, IsOptional } from 'class-validator';
+import { IsArray, IsEnum, IsInt, IsOptional, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Min } from 'class-validator';
 
@@ -55,4 +55,31 @@ export class CreateChallengeDto {
   @IsInt()
   @Min(1)
   cycle_length_days!: number;
+
+  @ApiProperty({
+    description: 'Categorías del desafío',
+    required: false,
+    type: [Object],
+  })
+  @IsOptional()
+  @IsArray()
+  categories?: any[];
+
+  @ApiProperty({
+    description: 'Ubicaciones del desafío',
+    required: false,
+    type: [Object],
+  })
+  @IsOptional()
+  @IsArray()
+  locations?: any[];
+
+  @ApiProperty({
+    description: 'Días del ciclo del desafío',
+    required: false,
+    type: [Object],
+  })
+  @IsOptional()
+  @IsArray()
+  cycle_days?: any[];
 }

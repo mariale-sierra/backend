@@ -228,20 +228,20 @@ export class ExercisesService {
   }
 
   private async findRelationsByExerciseId(exerciseId: number) {
-    const [categoryMaps, locationMaps, bodyPartMaps] = await Promise.all([
-      this.categoryMapRepo.find({
-        where: { exerciseId },
-        relations: { category: true },
-      }),
-      this.locationMapRepo.find({
-        where: { exerciseId },
-        relations: { location: true },
-      }),
-      this.bodyPartMapRepo.find({
-        where: { exerciseId },
-        relations: { bodyPart: true },
-      }),
-    ]);
+    const categoryMaps = await this.categoryMapRepo.find({
+      where: { exerciseId },
+      relations: { category: true },
+    });
+
+    const locationMaps = await this.locationMapRepo.find({
+      where: { exerciseId },
+      relations: { location: true },
+    });
+
+    const bodyPartMaps = await this.bodyPartMapRepo.find({
+      where: { exerciseId },
+      relations: { bodyPart: true },
+    });
 
     return {
       exerciseId,
