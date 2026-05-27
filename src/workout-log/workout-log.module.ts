@@ -4,6 +4,9 @@ import { WorkoutLogService } from './workout-log.service';
 import { WorkoutLogController } from './workout-log.controller';
 import { WorkoutLog } from './entities/workout-log.entity';
 import { WorkoutLogExercise } from './entities/workout-log-exercise.entity';
+import { WorkoutLogExerciseTarget } from './entities/workout-log-exercise-target.entity';
+import { WorkoutLogExerciseSet } from './entities/workout-log-exercise-set.entity';
+import { WorkoutLogExerciseSetTarget } from './entities/workout-log-exercise-set-target.entity';
 import { RoutineExercise } from '../routine/entities/routine-exercise.entity';
 import { Exercise } from '../exercises/entities/exercise.entity';
 import { WorkoutLogExerciseMetric } from '../metrics/entities/workout-log-exercise-metric.entity';
@@ -17,6 +20,9 @@ import { OpenAiModule } from '../openai/openai.module';
     TypeOrmModule.forFeature([
       WorkoutLog,
       WorkoutLogExercise,
+      WorkoutLogExerciseTarget,
+      WorkoutLogExerciseSet,
+      WorkoutLogExerciseSetTarget,
       WorkoutLogExerciseMetric,
       RoutineExercise,
       Exercise,

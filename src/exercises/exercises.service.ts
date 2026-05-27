@@ -93,6 +93,9 @@ export class ExercisesService {
     const locationIds = this.normalizeIds(dto.locationIds);
     const bodyPartIds = this.normalizeIds(dto.bodyPartIds);
 
+    this.assertPrimarySelection(categoryIds, dto.primaryCategoryId, 'category');
+    this.assertPrimarySelection(locationIds, dto.primaryLocationId, 'location');
+
     if (
       categoryIds === undefined &&
       locationIds === undefined &&
@@ -118,6 +121,7 @@ export class ExercisesService {
               manager.create(ExerciseCategoryMap, {
                 exerciseId: id,
                 categoryId,
+                isPrimary: categoryId === dto.primaryCategoryId,
               }),
             ),
           );
@@ -132,6 +136,7 @@ export class ExercisesService {
               manager.create(ExerciseLocationMap, {
                 exerciseId: id,
                 locationId,
+                isPrimary: locationId === dto.primaryLocationId,
               }),
             ),
           );
@@ -164,6 +169,42 @@ export class ExercisesService {
   private normalizeIds(ids?: number[]) {
     if (ids === undefined) return undefined;
     return [...new Set(ids)];
+  }
+
+  private assertPrimarySelection(
+    ids: number[] | undefined,
+    primaryId: number | undefined,
+    label: string,
+  ) {
+    if (ids === undefined) {
+      if (primaryId !== undefined) {
+        throw new BadRequestException(
+          `Primary ${label} cannot be set without ${label} ids`,
+        );
+      }
+      return;
+    }
+
+    if (ids.length === 0) {
+      if (primaryId !== undefined) {
+        throw new BadRequestException(
+          `Primary ${label} cannot be set when the ${label} list is empty`,
+        );
+      }
+      return;
+    }
+
+    if (primaryId === undefined) {
+      throw new BadRequestException(
+        `A primary ${label} is required when saving ${label} relations`,
+      );
+    }
+
+    if (!ids.includes(primaryId)) {
+      throw new BadRequestException(
+        `Primary ${label} must be one of the selected ${label} ids`,
+      );
+    }
   }
 
   private async assertLookupIdsExist(

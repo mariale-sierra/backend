@@ -1,12 +1,22 @@
-import { Injectable, ConflictException, BadRequestException } from '@nestjs/common';
+import {
+    Injectable,
+    ConflictException,
+    BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { WorkoutLog } from './entities/workout-log.entity';
 import { RoutineExercise } from '../routine/entities/routine-exercise.entity';
 import { WorkoutLogExercise } from './entities/workout-log-exercise.entity';
+import { WorkoutLogExerciseTarget } from './entities/workout-log-exercise-target.entity';
+import { WorkoutLogExerciseSet } from './entities/workout-log-exercise-set.entity';
+import { WorkoutLogExerciseSetTarget } from './entities/workout-log-exercise-set-target.entity';
 import { Between } from 'typeorm';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
 import { ModerationService } from '../openai/moderation.service';
+import { RoutineExerciseTarget } from '../routine/entities/routine-exercise-target.entity';
+import { RoutineExerciseSet } from '../routine/entities/routine-exercise-set.entity';
+import { RoutineExerciseSetTarget } from '../routine/entities/routine-exercise-set-target.entity';
 
 @Injectable()
 export class WorkoutLogService {
@@ -19,15 +29,27 @@ export class WorkoutLogService {
 
     private workoutPostsService: WorkoutPostsService,
     private moderationService: ModerationService,
+        private dataSource: DataSource,
 
     @InjectRepository(WorkoutLogExercise)
     private wleRepo: Repository<WorkoutLogExercise>,
     ) {}
-    async createWorkout(dto: { routineId?: number; userId: string; challengeId?: string; imageUrl?: string;
-    caption?: string; visibility?: 'private' | 'followers'; isRestDay?: boolean; }) {
+
+    async createWorkout(dto: {
+        routineId?: number;
+        userId: string;
+        challengeId?: string;
+        imageUrl?: string;
+        caption?: string;
+        visibility?: 'private' | 'followers';
+        isRestDay?: boolean;
+    }) {
         if (!dto.isRestDay && !dto.imageUrl) {
-        throw new BadRequestException('Image is required');
+            throw new BadRequestException(
+                'Se requiere una imagen para guardar este progreso.',
+            );
         }
+
         if (dto.challengeId) {
             const todayStart = new Date();
             todayStart.setHours(0, 0, 0, 0);
@@ -37,64 +59,133 @@ export class WorkoutLogService {
 
             const existing = await this.workoutRepo.findOne({
                 where: {
-                userId: dto.userId,
-                challengeId: dto.challengeId,
-                started_at: Between(todayStart, todayEnd),
+                    userId: dto.userId,
+                    challengeId: dto.challengeId,
+                    started_at: Between(todayStart, todayEnd),
                 },
             });
 
-        if (existing) {
-            throw new ConflictException('You already logged progress today');
-        }
+            if (existing) {
+                throw new ConflictException('You already logged progress today');
+            }
         }
 
         if (!dto.isRestDay && dto.imageUrl) {
-        await this.moderationService.validateWorkoutImage(
-            dto.imageUrl,
-            dto.caption,
-        );
+            await this.moderationService.validateWorkoutImage(
+                dto.imageUrl,
+                dto.caption,
+            );
         }
 
-        const workout = this.workoutRepo.create({
-            routineId: dto.routineId,
-            userId: dto.userId,
-            challengeId: dto.challengeId,
-            status: 'in_progress' as WorkoutLog['status'],
-            started_at: new Date(),
-            
-        });
-
-        const savedWorkout = await this.workoutRepo.save(workout);
-
-        if (!dto.isRestDay) {
-        await this.workoutPostsService.create({
-            workout_log_id: savedWorkout.id,
-            user_id: dto.userId,
-            image_url: dto.imageUrl,
-            caption: dto.caption,
-            visibility: dto.visibility || 'private',
-        });
-        }
-
-        if (dto.routineId) {
-            const routineExercises = await this.routineExerciseRepo.find({
-            where: { routine: { id: dto.routineId } },
-            relations: ['exercise'],
-            order: { order_index: 'ASC' },
+        const savedWorkout = await this.dataSource.transaction(async (manager) => {
+            const workout = manager.create(WorkoutLog, {
+                routineId: dto.routineId,
+                userId: dto.userId,
+                challengeId: dto.challengeId,
+                status: 'in_progress' as WorkoutLog['status'],
+                started_at: new Date(),
             });
 
-            const workoutExercises = routineExercises.map((re) =>
-            this.wleRepo.create({
-                workout: savedWorkout,
-                exercise: re.exercise,
-                orderIndex: re.order_index,
-            }),
-            );
+            const createdWorkout = await manager.save(workout);
 
-            await this.wleRepo.save(workoutExercises);
+            if (dto.routineId) {
+                const routineExercises = await manager.getRepository(RoutineExercise).find({
+                    where: { routine: { id: dto.routineId } },
+                    relations: [
+                        'exercise',
+                        'targets',
+                        'sets',
+                        'sets.targets',
+                    ],
+                    order: { order_index: 'ASC' },
+                });
+
+                const workoutExercises = await manager.save(
+                    routineExercises.map((routineExercise) =>
+                        manager.create(WorkoutLogExercise, {
+                            workout: createdWorkout,
+                            exercise: routineExercise.exercise,
+                            orderIndex: routineExercise.order_index,
+                            notes: routineExercise.notes,
+                        }),
+                    ),
+                );
+
+                for (let index = 0; index < routineExercises.length; index += 1) {
+                    const routineExercise = routineExercises[index];
+                    const workoutExercise = workoutExercises[index];
+
+                    if (routineExercise.targets?.length) {
+                        await manager.save(
+                            routineExercise.targets.map((target) =>
+                                manager.create(WorkoutLogExerciseTarget, {
+                                    workoutLogExercise: workoutExercise,
+                                    metricTypeId: target.metric_type_id,
+                                    targetValueInt: target.target_value_int,
+                                    targetValueDecimal: target.target_value_decimal,
+                                    targetValueText: target.target_value_text,
+                                    targetValueSeconds: target.target_value_seconds,
+                                    targetValueBoolean: target.target_value_boolean,
+                                    unit: target.unit,
+                                }),
+                            ),
+                        );
+                    }
+
+                    if (routineExercise.sets?.length) {
+                        const workoutSets = await manager.save(
+                            routineExercise.sets.map((set) =>
+                                manager.create(WorkoutLogExerciseSet, {
+                                    workoutLogExercise: workoutExercise,
+                                    setNumber: set.set_number,
+                                    restSecondsAfter: set.rest_seconds_after,
+                                    notes: set.notes,
+                                }),
+                            ),
+                        );
+
+                        for (let setIndex = 0; setIndex < routineExercise.sets.length; setIndex += 1) {
+                            const routineSet = routineExercise.sets[setIndex];
+                            const workoutSet = workoutSets[setIndex];
+
+                            if (routineSet.targets?.length) {
+                                await manager.save(
+                                    routineSet.targets.map((target) =>
+                                        manager.create(WorkoutLogExerciseSetTarget, {
+                                            workoutLogExerciseSet: workoutSet,
+                                            metricTypeId: target.metric_type_id,
+                                            targetValueInt: target.target_value_int,
+                                            targetValueDecimal: target.target_value_decimal,
+                                            targetValueText: target.target_value_text,
+                                            targetValueSeconds: target.target_value_seconds,
+                                            targetValueBoolean: target.target_value_boolean,
+                                            unit: target.unit,
+                                        }),
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            return createdWorkout;
+        });
+
+        if (!dto.isRestDay) {
+            await this.workoutPostsService.create(
+                {
+                    workout_log_id: savedWorkout.id,
+                    user_id: dto.userId,
+                    image_url: dto.imageUrl,
+                    caption: dto.caption,
+                    visibility: dto.visibility || 'private',
+                },
+                { skipModeration: true },
+            );
         }
 
-        return savedWorkout;
+        return this.findOne(savedWorkout.id);
     }
 
     async finishWorkout(workoutId: number) {
@@ -114,8 +205,12 @@ export class WorkoutLogService {
         where: { id },
         relations: [
         'exercises',
-        'exercises.exercise', 
-        'exercises.metrics', 
+        'exercises.exercise',
+        'exercises.metrics',
+        'exercises.targets',
+        'exercises.sets',
+        'exercises.sets.targets',
+        'posts',
         ],
     });
 
@@ -128,7 +223,15 @@ export class WorkoutLogService {
 
     async findAll() {
     return this.workoutRepo.find({
-        relations: ['exercises', 'exercises.exercise', 'exercises.metrics'],
+        relations: [
+        'exercises',
+        'exercises.exercise',
+        'exercises.metrics',
+        'exercises.targets',
+        'exercises.sets',
+        'exercises.sets.targets',
+        'posts',
+        ],
     });
     }
 

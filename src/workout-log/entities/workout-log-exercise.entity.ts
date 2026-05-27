@@ -9,6 +9,8 @@
 import { WorkoutLog } from './workout-log.entity';
 import { Exercise } from '../../exercises/entities/exercise.entity';
 import { WorkoutLogExerciseMetric } from '../../metrics/entities/workout-log-exercise-metric.entity';
+import { WorkoutLogExerciseTarget } from './workout-log-exercise-target.entity';
+import { WorkoutLogExerciseSet } from './workout-log-exercise-set.entity';
 
 @Entity({ schema: 'havit', name: 'workout_log_exercises' })
 export class WorkoutLogExercise {
@@ -28,6 +30,15 @@ export class WorkoutLogExercise {
   (metric) => metric.workoutLogExercise,
   )
   metrics?: WorkoutLogExerciseMetric[];
+
+  @OneToMany(
+    () => WorkoutLogExerciseTarget,
+    (target) => target.workoutLogExercise,
+  )
+  targets?: WorkoutLogExerciseTarget[];
+
+  @OneToMany(() => WorkoutLogExerciseSet, (set) => set.workoutLogExercise)
+  sets?: WorkoutLogExerciseSet[];
 
   @Column({ name: 'order_index', nullable: true })
   orderIndex?: number;

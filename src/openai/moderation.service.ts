@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  HttpException,
   Injectable,
   InternalServerErrorException,
   ServiceUnavailableException,
@@ -65,19 +66,21 @@ export class ModerationService {
           .map(([category]) => category);
 
         throw new BadRequestException({
-          message: 'Image or caption was rejected by moderation',
+          message:
+            'No se puede publicar este contenido. La imagen o el texto fueron rechazados por moderación.',
+          code: 'CONTENT_REJECTED',
           categories: flaggedCategories,
         });
       }
 
       return result;
     } catch (error) {
-      if (error instanceof BadRequestException) {
+      if (error instanceof HttpException) {
         throw error;
       }
 
       throw new ServiceUnavailableException(
-        'Content moderation service is not available',
+        'No se pudo validar el contenido en este momento. Intenta nuevamente más tarde.',
       );
     }
   }

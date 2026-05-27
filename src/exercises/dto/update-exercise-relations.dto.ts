@@ -17,6 +17,16 @@ export class UpdateExerciseRelationsDto {
   categoryIds?: number[];
 
   @ApiPropertyOptional({
+    description: 'ID de la categoría principal del ejercicio',
+    example: 1,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  primaryCategoryId?: number;
+
+  @ApiPropertyOptional({
     description: 'IDs de locations del ejercicio',
     example: [1],
     type: [Number],
@@ -28,6 +38,16 @@ export class UpdateExerciseRelationsDto {
   @IsInt({ each: true })
   @Min(1, { each: true })
   locationIds?: number[];
+
+  @ApiPropertyOptional({
+    description: 'ID de la location principal del ejercicio',
+    example: 1,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  primaryLocationId?: number;
 
   @ApiPropertyOptional({
     description: 'IDs de body parts del ejercicio',
