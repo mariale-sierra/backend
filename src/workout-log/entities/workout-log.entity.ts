@@ -6,6 +6,7 @@ import {
   OneToMany,
 } from 'typeorm';
 import { WorkoutLogExercise } from '../../workout-log/entities/workout-log-exercise.entity';
+import { WorkoutPost } from '../../workout-posts/entities/workout-post.entity';
 
 export enum WorkoutStatus {
   IN_PROGRESS = 'in_progress',
@@ -44,4 +45,7 @@ export class WorkoutLog {
 
   @OneToMany(() => WorkoutLogExercise, (wle) => wle.workout)
   exercises?: WorkoutLogExercise[];
+
+  @OneToMany(() => WorkoutPost, (post) => post.workoutLog)
+  posts?: WorkoutPost[];
 }

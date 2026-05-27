@@ -1,7 +1,14 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  ManyToOne,
+  JoinColumn,
+} from 'typeorm';
+import { WorkoutLog } from '../../workout-log/entities/workout-log.entity';
 
-@Entity('workout_posts')
-
+@Entity({ schema: 'havit', name: 'workout_posts' })
 export class WorkoutPost {
   @PrimaryGeneratedColumn()
   id!: number;
@@ -23,4 +30,8 @@ export class WorkoutPost {
 
   @CreateDateColumn()
   created_at!: Date;
+
+  @ManyToOne(() => WorkoutLog, (workoutLog) => workoutLog.posts)
+  @JoinColumn({ name: 'workout_log_id' })
+  workoutLog!: WorkoutLog;
 }
