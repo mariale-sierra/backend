@@ -13,7 +13,6 @@ import { WorkoutLogExerciseSet } from './entities/workout-log-exercise-set.entit
 import { WorkoutLogExerciseSetTarget } from './entities/workout-log-exercise-set-target.entity';
 import { Between } from 'typeorm';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
-import { ModerationService } from '../openai/moderation.service';
 import { RoutineExerciseTarget } from '../routine/entities/routine-exercise-target.entity';
 import { RoutineExerciseSet } from '../routine/entities/routine-exercise-set.entity';
 import { RoutineExerciseSetTarget } from '../routine/entities/routine-exercise-set-target.entity';
@@ -28,7 +27,6 @@ export class WorkoutLogService {
     private workoutRepo: Repository<WorkoutLog>,
 
     private workoutPostsService: WorkoutPostsService,
-    private moderationService: ModerationService,
         private dataSource: DataSource,
 
     @InjectRepository(WorkoutLogExercise)
@@ -68,13 +66,6 @@ export class WorkoutLogService {
             if (existing) {
                 throw new ConflictException('You already logged progress today');
             }
-        }
-
-        if (!dto.isRestDay && dto.imageUrl) {
-            await this.moderationService.validateWorkoutImage(
-                dto.imageUrl,
-                dto.caption,
-            );
         }
 
         const savedWorkout = await this.dataSource.transaction(async (manager) => {
@@ -181,7 +172,6 @@ export class WorkoutLogService {
                     caption: dto.caption,
                     visibility: dto.visibility || 'private',
                 },
-                { skipModeration: true },
             );
         }
 
