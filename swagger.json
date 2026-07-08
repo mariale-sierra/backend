@@ -1,0 +1,696 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "description": "Autentica un usuario con email y contraseña",
+        "operationId": "AuthController_login",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginDto" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Login exitoso, devuelve token JWT" },
+          "400": { "description": "Credenciales inválidas" }
+        },
+        "summary": "Iniciar sesión",
+        "tags": ["Auth"]
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "description": "Crea una nueva cuenta de usuario",
+        "operationId": "AuthController_register",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RegisterDto" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Registro exitoso" },
+          "400": { "description": "Email ya existe o datos inválidos" }
+        },
+        "summary": "Registrar nuevo usuario",
+        "tags": ["Auth"]
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "description": "Devuelve la información del usuario actual basado en el JWT",
+        "operationId": "AuthController_getMe",
+        "parameters": [],
+        "responses": {
+          "200": { "description": "Datos del usuario" },
+          "401": { "description": "No autorizado" }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Obtener datos del usuario autenticado",
+        "tags": ["Auth"]
+      }
+    },
+    "/users/me": {
+      "get": {
+        "description": "Devuelve los detalles completos del usuario autenticado",
+        "operationId": "UsersController_getMe",
+        "parameters": [],
+        "responses": {
+          "200": { "description": "Datos del perfil del usuario" },
+          "401": { "description": "No autorizado" }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Obtener perfil del usuario",
+        "tags": ["Users"]
+      }
+    },
+    "/users/me/challenges": {
+      "get": {
+        "description": "Lista todos los desafíos en los que participa el usuario actual",
+        "operationId": "UsersController_getMyChallenges",
+        "parameters": [],
+        "responses": {
+          "200": { "description": "Lista de desafíos del usuario" },
+          "401": { "description": "No autorizado" }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Obtener mis desafíos",
+        "tags": ["Users"]
+      }
+    },
+    "/challenges": {
+      "post": {
+        "description": "Crea un nuevo desafío para que otros usuarios se unan",
+        "operationId": "ChallengesController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateChallengeDto" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Desafío creado exitosamente" },
+          "401": { "description": "No autorizado" }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Crear nuevo desafío",
+        "tags": ["Challenges"]
+      },
+      "get": {
+        "description": "Lista todos los desafíos disponibles",
+        "operationId": "ChallengesController_findAll",
+        "parameters": [],
+        "responses": { "200": { "description": "Lista de desafíos" } },
+        "summary": "Obtener todos los desafíos",
+        "tags": ["Challenges"]
+      }
+    },
+    "/challenges/{id}/join": {
+      "post": {
+        "description": "El usuario actual se une a un desafío existente",
+        "operationId": "ChallengesController_join",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "ID del desafío",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Se unió al desafío exitosamente" },
+          "401": { "description": "No autorizado" },
+          "404": { "description": "Desafío no encontrado" }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Unirse a un desafío",
+        "tags": ["Challenges"]
+      }
+    },
+    "/challenges/progress": {
+      "get": {
+        "description": "Devuelve el progreso del usuario en el desafío activo, incluyendo día actual, si completó hoy y horas restantes",
+        "operationId": "ChallengesController_getProgress",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Progreso del desafío obtenido exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChallengeProgressDto"
+                }
+              }
+            }
+          },
+          "401": { "description": "No autorizado" },
+          "404": { "description": "No hay desafío activo para el usuario" }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Obtener progreso del desafío actual",
+        "tags": ["Challenges"]
+      },
+      "post": {
+        "description": "Crea un workout asociado al usuario autenticado y al challenge indicado",
+        "operationId": "ChallengesController_createProgress",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkoutProgressDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Progreso registrado exitosamente" },
+          "201": { "description": "Progreso registrado exitosamente" },
+          "400": { "description": "Datos inválidos" },
+          "401": { "description": "No autorizado" }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Registrar progreso del desafío",
+        "tags": ["Challenges"]
+      }
+    },
+    "/challenges/{id}/users": {
+      "get": {
+        "description": "Lista todos los usuarios que están participando en un desafío",
+        "operationId": "ChallengesController_findUsers",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "ID del desafío",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Lista de usuarios en el desafío" },
+          "404": { "description": "Desafío no encontrado" }
+        },
+        "summary": "Obtener usuarios de un desafío",
+        "tags": ["Challenges"]
+      }
+    },
+    "/challenges/{id}": {
+      "get": {
+        "description": "Devuelve la información completa de un desafío específico",
+        "operationId": "ChallengesController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "ID del desafío",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Detalles del desafío" },
+          "404": { "description": "Desafío no encontrado" }
+        },
+        "summary": "Obtener detalles de un desafío",
+        "tags": ["Challenges"]
+      },
+      "patch": {
+        "description": "Actualiza la información de un desafío existente",
+        "operationId": "ChallengesController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "ID del desafío",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateChallengeDto" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Desafío actualizado exitosamente" },
+          "404": { "description": "Desafío no encontrado" }
+        },
+        "summary": "Actualizar desafío",
+        "tags": ["Challenges"]
+      },
+      "delete": {
+        "description": "Elimina un desafío existente",
+        "operationId": "ChallengesController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "ID del desafío",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Desafío eliminado exitosamente" },
+          "404": { "description": "Desafío no encontrado" }
+        },
+        "summary": "Eliminar desafío",
+        "tags": ["Challenges"]
+      }
+    },
+    "/workout-logs": {
+      "post": {
+        "description": "Inicia un nuevo registro de entrenamiento",
+        "operationId": "WorkoutLogController_create",
+        "parameters": [],
+        "responses": {
+          "201": { "description": "Log de entrenamiento creado exitosamente" },
+          "400": { "description": "Datos inválidos" }
+        },
+        "summary": "Crear nuevo log de entrenamiento",
+        "tags": ["Workout Logs"]
+      },
+      "get": {
+        "description": "Lista todos los registros de entrenamiento",
+        "operationId": "WorkoutLogController_findAll",
+        "parameters": [],
+        "responses": {
+          "200": { "description": "Lista de logs de entrenamiento" }
+        },
+        "summary": "Obtener todos los logs de entrenamiento",
+        "tags": ["Workout Logs"]
+      }
+    },
+    "/workout-logs/{id}/finish": {
+      "patch": {
+        "description": "Marca un entrenamiento como finalizado",
+        "operationId": "WorkoutLogController_finish",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "ID del log de entrenamiento",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Entrenamiento finalizado exitosamente" },
+          "404": { "description": "Log de entrenamiento no encontrado" }
+        },
+        "summary": "Finalizar entrenamiento",
+        "tags": ["Workout Logs"]
+      }
+    },
+    "/workout-logs/progress": {
+      "post": {
+        "description": "Crea un registro de progreso para un desafío específico",
+        "operationId": "WorkoutLogController_createProgress",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkoutProgressDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Progreso registrado exitosamente" },
+          "401": { "description": "No autorizado" }
+        },
+        "security": [{ "bearer": [] }],
+        "summary": "Registrar progreso de desafío",
+        "tags": ["Workout Logs"]
+      }
+    },
+    "/workout-logs/{id}": {
+      "get": {
+        "description": "Devuelve los detalles de un log de entrenamiento específico",
+        "operationId": "WorkoutLogController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "ID del log de entrenamiento",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Detalles del log de entrenamiento" },
+          "404": { "description": "Log de entrenamiento no encontrado" }
+        },
+        "summary": "Obtener detalles del log de entrenamiento",
+        "tags": ["Workout Logs"]
+      }
+    },
+    "/exercises": {
+      "post": {
+        "description": "Crea un nuevo ejercicio en la base de datos",
+        "operationId": "ExercisesController_create",
+        "parameters": [],
+        "responses": {
+          "201": { "description": "Ejercicio creado exitosamente" },
+          "400": { "description": "Datos inválidos" }
+        },
+        "summary": "Crear nuevo ejercicio",
+        "tags": ["Exercises"]
+      },
+      "get": {
+        "description": "Lista todos los ejercicios disponibles",
+        "operationId": "ExercisesController_findAll",
+        "parameters": [],
+        "responses": { "200": { "description": "Lista de ejercicios" } },
+        "summary": "Obtener todos los ejercicios",
+        "tags": ["Exercises"]
+      }
+    },
+    "/routine": {
+      "post": {
+        "description": "Crea una nueva rutina de entrenamiento",
+        "operationId": "RoutineController_create",
+        "parameters": [],
+        "responses": {
+          "201": { "description": "Rutina creada exitosamente" },
+          "400": { "description": "Datos inválidos" }
+        },
+        "summary": "Crear nueva rutina",
+        "tags": ["Routine"]
+      },
+      "get": {
+        "description": "Lista todas las rutinas disponibles",
+        "operationId": "RoutineController_findAll",
+        "parameters": [],
+        "responses": { "200": { "description": "Lista de rutinas" } },
+        "summary": "Obtener todas las rutinas",
+        "tags": ["Routine"]
+      }
+    },
+    "/routine/{id}": {
+      "get": {
+        "description": "Devuelve la información completa de una rutina específica",
+        "operationId": "RoutineController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "ID de la rutina",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Detalles de la rutina" },
+          "404": { "description": "Rutina no encontrada" }
+        },
+        "summary": "Obtener detalles de una rutina",
+        "tags": ["Routine"]
+      }
+    },
+    "/routine/{id}/exercises": {
+      "post": {
+        "description": "Agrega un ejercicio a una rutina existente",
+        "operationId": "RoutineController_addExercise",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "ID de la rutina",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Ejercicio añadido exitosamente" },
+          "404": { "description": "Rutina no encontrada" }
+        },
+        "summary": "Añadir ejercicio a rutina",
+        "tags": ["Routine"]
+      }
+    },
+    "/routine/today/{challengeId}": {
+      "get": {
+        "operationId": "RoutineController_getTodayRoutine",
+        "parameters": [
+          {
+            "name": "challengeId",
+            "required": true,
+            "in": "path",
+            "description": "ID del challenge",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": { "200": { "description": "" } },
+        "summary": "Obtener rutina de hoy",
+        "tags": ["Routine"]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "description": "Lista todos los tipos de métricas disponibles",
+        "operationId": "MetricsController_findAll",
+        "parameters": [],
+        "responses": { "200": { "description": "Lista de métricas" } },
+        "summary": "Obtener todas las métricas",
+        "tags": ["Metrics"]
+      }
+    },
+    "/metrics/workout-log-exercises/{id}": {
+      "post": {
+        "description": "Añade una métrica (ej: peso, repeticiones) a un ejercicio registrado",
+        "operationId": "MetricsController_addMetric",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "ID del ejercicio del log de entrenamiento",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "201": { "description": "Métrica agregada exitosamente" },
+          "404": { "description": "Ejercicio no encontrado" }
+        },
+        "summary": "Agregar métrica a ejercicio",
+        "tags": ["Metrics"]
+      }
+    },
+    "/uploads/sign": {
+      "post": {
+        "operationId": "UploadsController_getSignedUrl",
+        "parameters": [],
+        "responses": { "201": { "description": "" } },
+        "tags": ["uploads"]
+      }
+    }
+  },
+  "info": {
+    "title": "Havit - Fitness API",
+    "description": "API completa para la aplicación de fitness Havit. Incluye endpoints para autenticación, usuarios, rutinas, ejercicios, desafíos y tracking de entrenamientos.",
+    "version": "1.0",
+    "contact": {}
+  },
+  "tags": [
+    { "name": "Auth", "description": "Endpoints de autenticación y login" },
+    {
+      "name": "Users",
+      "description": "Endpoints para gestionar usuarios y perfiles"
+    },
+    {
+      "name": "Challenges",
+      "description": "Endpoints para gestionar desafíos"
+    },
+    {
+      "name": "Exercises",
+      "description": "Endpoints para gestionar ejercicios"
+    },
+    { "name": "Routine", "description": "Endpoints para gestionar rutinas" },
+    { "name": "Metrics", "description": "Endpoints para gestionar métricas" },
+    {
+      "name": "Workout Logs",
+      "description": "Endpoints para registrar entrenamientos"
+    }
+  ],
+  "servers": [{ "url": "http://20.63.84.1:3000" }],
+  "components": {
+    "securitySchemes": {
+      "bearer": { "scheme": "bearer", "bearerFormat": "JWT", "type": "http" }
+    },
+    "schemas": {
+      "LoginDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Email del usuario",
+            "example": "usuario@example.com"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "description": "Contraseña del usuario (mínimo 8 caracteres)",
+            "example": "miContraseña123"
+          }
+        },
+        "required": ["email", "password"]
+      },
+      "RegisterDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Email del usuario",
+            "example": "usuario@example.com"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "description": "Contraseña del usuario (mínimo 8 caracteres)",
+            "example": "miContraseña123"
+          },
+          "username": {
+            "type": "string",
+            "description": "Nombre de usuario único",
+            "example": "miUsuario"
+          }
+        },
+        "required": ["email", "password", "username"]
+      },
+      "CreateChallengeDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Nombre del desafío",
+            "example": "Reto de 30 días"
+          },
+          "description": {
+            "type": "string",
+            "description": "Descripción del desafío",
+            "example": "Un desafío para mejorar tu resistencia cardiovascular"
+          },
+          "instructions": {
+            "type": "string",
+            "description": "Instrucciones del desafío",
+            "example": "Realiza 30 minutos de cardio cada día"
+          },
+          "visibility": {
+            "enum": ["public", "private"],
+            "type": "string",
+            "description": "Visibilidad del desafío",
+            "example": "public"
+          },
+          "duration_days": {
+            "type": "number",
+            "description": "Duración del desafío en días",
+            "example": 30
+          },
+          "cycle_length_days": {
+            "type": "number",
+            "description": "Longitud del ciclo en días (opcional)",
+            "example": 7
+          }
+        },
+        "required": ["name", "visibility", "duration_days"]
+      },
+      "ChallengeProgressDto": {
+        "type": "object",
+        "properties": {
+          "challenge": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "description": { "type": "string" },
+              "duration_days": { "type": "number" },
+              "visibility": { "type": "string" }
+            },
+            "required": ["id", "name", "duration_days", "visibility"]
+          },
+          "currentDay": {
+            "type": "number",
+            "description": "Día actual del desafío",
+            "example": 5
+          },
+          "totalDays": {
+            "type": "number",
+            "description": "Total de días del desafío",
+            "example": 30
+          },
+          "completedToday": {
+            "type": "boolean",
+            "description": "Si completó un entrenamiento hoy",
+            "example": true
+          },
+          "hoursLeftToday": {
+            "type": "number",
+            "description": "Horas restantes en el día para completar",
+            "example": 12
+          }
+        },
+        "required": ["challenge", "totalDays"]
+      },
+      "CreateWorkoutProgressDto": {
+        "type": "object",
+        "properties": {
+          "challengeId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID UUID del challenge",
+            "example": "51470538-69e6-40c6-a8ac-248a80fcaf4c"
+          },
+          "routineId": {
+            "type": "number",
+            "description": "ID de la rutina asociada al workout",
+            "example": 1
+          },
+          "imageUrl": {
+            "type": "string",
+            "description": "URL de la imagen del progreso",
+            "example": "https://example.com/progress.jpg"
+          },
+          "caption": {
+            "type": "string",
+            "description": "Caption o comentario del progreso",
+            "example": "Día 3 completado"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": ["private", "followers"],
+            "description": "Visibilidad del post",
+            "example": "private"
+          },
+          "isRestDay": {
+            "type": "boolean",
+            "description": "Indica si es un día de descanso",
+            "example": false
+          }
+        },
+        "required": ["challengeId"]
+      },
+      "UpdateChallengeDto": { "type": "object", "properties": {} }
+    }
+  }
+}
