@@ -2,6 +2,8 @@ import {
     Injectable,
     ConflictException,
     BadRequestException,
+    ForbiddenException,
+    NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -178,19 +180,25 @@ export class WorkoutLogService {
         return this.findOne(savedWorkout.id);
     }
 
-    async finishWorkout(workoutId: number) {
+    async finishWorkout(workoutId: number, userId: string) {
         const workout = await this.workoutRepo.findOneBy({ id: workoutId });
 
-        if (!workout) throw new Error('Workout not found');
+        if (!workout) throw new NotFoundException('Workout not found');
+        if (workout.userId !== userId) {
+            throw new ForbiddenException('You do not have access to this workout log');
+        }
 
         workout.ended_at = new Date();
         workout.status = 'completed' as WorkoutLog['status'];
-        
+
         return this.workoutRepo.save(workout);
 
     }
 
-    async findOne(id: number) {
+    // `userId` is optional: internal callers (e.g. right after createWorkout)
+    // fetch the just-created workout without an ownership check; the
+    // controller-facing GET /workout-logs/:id route always passes it.
+    async findOne(id: number, userId?: string) {
     const workout = await this.workoutRepo.findOne({
         where: { id },
         relations: [
@@ -205,14 +213,19 @@ export class WorkoutLogService {
     });
 
     if (!workout) {
-        throw new Error('Workout not found');
+        throw new NotFoundException('Workout not found');
+    }
+
+    if (userId !== undefined && workout.userId !== userId) {
+        throw new ForbiddenException('You do not have access to this workout log');
     }
 
     return workout;
     }
 
-    async findAll() {
+    async findAll(userId: string) {
     return this.workoutRepo.find({
+        where: { userId },
         relations: [
         'exercises',
         'exercises.exercise',

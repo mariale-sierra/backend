@@ -39,6 +39,10 @@ At the start of any task, right after ARCHITECTURE.
 | Database migration system (`backend/database/`) | ✅ | Added 2026-07-07: SQL-file runner (`init/`/`migrations/`/`seeds/` + `havit.schema_migrations` tracking), replacing ad-hoc schema management. See `docs/ai/db/`. |
 | Legacy TypeORM migrations (`src/migrations/*.migration.ts`) | ❌ frozen | Superseded by `backend/database/`. Kept only for history; do not extend. |
 
+## Known security gaps (being fixed in restructure)
+
+The API currently has real, verified authentication/authorization gaps — most write endpoints have no guard at all, `GET /users/me` leaks `password_hash`, `POST /workout-logs` trusts a `userId` from the request body, and `/uploads/sign` is fully public with no allow-list. These are tracked in detail, with exact file/line references and a remediation checklist, in [`SECURITY.md`](./SECURITY.md) — read it before touching auth, ownership, or any endpoint that reads/writes user data. Do not assume any endpoint is safe by default; verify against that doc.
+
 ## Known issues & debt
 
 - No response envelope or pagination convention anywhere in the API — every list endpoint returns a raw array with no `limit`/`offset`/`cursor` support. Will need a decision before the dataset (challenges, exercises, feed) grows.

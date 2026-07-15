@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -25,8 +25,10 @@ export class RoutineService {
     private challengeRepo: Repository<Challenge>,
   ) {}
 
-  async create(dto: any) {
-    const routine = this.routineRepo.create(dto);
+  async create(dto: any, userId: string) {
+    // Owner always comes from the JWT — any `createdByUserId` sent in the
+    // body (see frontend CreateRoutineRequest) is overridden here.
+    const routine = this.routineRepo.create({ ...dto, createdByUserId: userId });
     return this.routineRepo.save(routine);
   }
 
@@ -43,9 +45,16 @@ export class RoutineService {
     });
   }
 
-  async addExerciseToRoutine(routineId: number, exerciseId: number) {
+  async addExerciseToRoutine(routineId: number, exerciseId: number, userId: string) {
     const routine = await this.routineRepo.findOneBy({ id: routineId });
     if (!routine) throw new Error('Routine not found');
+
+    // Only enforced when the routine has a recorded owner — many existing
+    // routines predate this column and carry no owner (Fase 5 backlog: audit
+    // and backfill ownership on legacy routines).
+    if (routine.createdByUserId && routine.createdByUserId !== userId) {
+      throw new ForbiddenException('You do not own this routine');
+    }
 
     const exercise = await this.exerciseRepo.findOneBy({ id: exerciseId });
     if (!exercise) throw new Error('Exercise not found');

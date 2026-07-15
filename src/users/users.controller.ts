@@ -1,24 +1,22 @@
-import { Controller, Get, UseGuards, Req, Query } from '@nestjs/common';
+import { Controller, Get, Req } from '@nestjs/common';
 import { UsersService } from './users.service';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiOkResponse } from '@nestjs/swagger';
+import { UserResponseDto } from './dto/user-response.dto';
 
 @ApiTags('Users')
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @UseGuards(JwtAuthGuard)
   @Get('me')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Obtener perfil del usuario', description: 'Devuelve los detalles completos del usuario autenticado' })
-  @ApiResponse({ status: 200, description: 'Datos del perfil del usuario' })
+  @ApiOkResponse({ description: 'Datos del perfil del usuario', type: UserResponseDto })
   @ApiResponse({ status: 401, description: 'No autorizado' })
-  getMe(@Req() req) {
+  getMe(@Req() req): Promise<UserResponseDto> {
     return this.usersService.findById(req.user.sub);
   }
 
-  @UseGuards(JwtAuthGuard)
   @Get('me/challenges')
   @ApiBearerAuth()
   @ApiOperation({
