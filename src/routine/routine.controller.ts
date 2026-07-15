@@ -3,6 +3,8 @@ import { RoutineService } from './routine.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
+import { CreateRoutineDto } from './dto/create-routine.dto';
+import { AddRoutineExerciseDto } from './dto/add-routine-exercise.dto';
 
 
 @ApiTags('Routine')
@@ -16,7 +18,7 @@ export class RoutineController {
   @ApiResponse({ status: 201, description: 'Rutina creada exitosamente' })
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
   @ApiResponse({ status: 401, description: 'No autorizado' })
-  create(@Body() body, @CurrentUser() user: AuthenticatedUser) {
+  create(@Body() body: CreateRoutineDto, @CurrentUser() user: AuthenticatedUser) {
     return this.routineService.create(body, user.sub);
   }
 
@@ -48,7 +50,7 @@ export class RoutineController {
   @ApiResponse({ status: 404, description: 'Rutina no encontrada' })
   addExercise(
     @Param('id') routineId: string,
-    @Body() body: { exerciseId: number },
+    @Body() body: AddRoutineExerciseDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.routineService.addExerciseToRoutine(

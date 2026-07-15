@@ -9,6 +9,7 @@ import {
 import { ExercisesService } from './exercises.service';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { UpdateExerciseRelationsDto } from './dto/update-exercise-relations.dto';
+import { CreateExerciseDto } from './dto/create-exercise.dto';
 import { Public } from '../auth/decorators/public.decorator';
 
 @ApiTags('Exercises')
@@ -25,7 +26,7 @@ export class ExercisesController {
   @ApiResponse({ status: 201, description: 'Ejercicio creado exitosamente' })
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
   @ApiResponse({ status: 401, description: 'No autorizado' })
-  create(@Body() body) {
+  create(@Body() body: CreateExerciseDto) {
     return this.exercisesService.create(body);
   }
 

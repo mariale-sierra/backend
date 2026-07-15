@@ -4,6 +4,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBearerAuth } from '@ne
 import { Public } from '../auth/decorators/public.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
+import { AddMetricDto } from './dto/add-metric.dto';
 
 @ApiTags('Metrics')
 @Controller('metrics')
@@ -28,7 +29,7 @@ export class MetricsController {
   @ApiResponse({ status: 404, description: 'Ejercicio no encontrado' })
   addMetric(
     @Param('id') id: string,
-    @Body() body: { metricCode: string; value: number },
+    @Body() body: AddMetricDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.service.addMetric(Number(id), body.metricCode, body.value, user.sub);

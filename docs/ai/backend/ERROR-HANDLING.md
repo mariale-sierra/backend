@@ -13,52 +13,37 @@ Before adding error handling to a service/controller, and before consuming an er
 - Whenever the actual error shape changes (e.g. once the exception filter below is implemented).
 - Whenever a new stable `code` is added to the catalog.
 
-## Current state (as implemented today)
+## Current state (as implemented today, Fase 4)
 
-- No global exception filter exists. Nest's default exception handling produces the built-in shape: `{ statusCode, message, error }` (e.g. `{ "statusCode": 404, "message": "Routine not found", "error": "Not Found" }`).
-- Most services correctly throw Nest HTTP exceptions (`NotFoundException`, `ForbiddenException`, `BadRequestException`, etc.), which map to the right status code.
-- **Six call sites throw plain `new Error(...)` instead**, which Nest does not know how to map to a 4xx — it surfaces as an unhandled exception and becomes an opaque `500 Internal Server Error`, hiding the real cause from the client:
-  - `src/routine/routine.service.ts:48` — `throw new Error('Routine not found')`
-  - `src/routine/routine.service.ts:51` — `throw new Error('Exercise not found')`
-  - `src/workout-log/workout-log.service.ts:184` — `throw new Error('Workout not found')`
-  - `src/workout-log/workout-log.service.ts:208` — `throw new Error('Workout not found')`
-  - `src/workout-log/workout-log-exercise.service.ts:24` — `throw new Error('Workout not found')`
-  - `src/workout-log/workout-log-exercise.service.ts:27` — `throw new Error('Exercise not found')`
-  
-  Every one of these should be `NotFoundException('...')` and currently is not. Treat any of these five files as needing this fix the next time they're touched, even outside a dedicated error-handling pass.
-- No stable machine-readable `code` field exists anywhere in an error response today — only the generic Nest `message`/`error` strings, several of which are in Spanish (matching the Swagger descriptions), some in English. The frontend's Axios response interceptor (`frontend/services/api.ts`) maps by **HTTP status only** (401/403/404/500/network), not by any field in the body.
+- A global `HttpExceptionFilter` (`src/common/filters/http-exception.filter.ts`) is registered as `APP_FILTER` in `src/app.module.ts`. It's `@Catch()` (catches everything, not just `HttpException`), so it's also the safety net for any stray unhandled error.
+- Every error response now has the standard shape below. `statusCode`/`error`/`message` still mirror Nest's previous default shape (non-breaking), `code`/`timestamp`/`path` are new.
+- All `new Error(...)` call sites are gone. `src/routine/routine.service.ts` now throws `NotFoundException('Routine not found')` / `NotFoundException('Exercise not found')`. `src/workout-log/workout-log-exercise.service.ts` — the dead, unregistered `WorkoutLogExerciseService` that had the other two `new Error(...)` sites — was deleted outright (see `CURRENT-STATE.md`/`BACKEND-MAP.md`). `src/workout-log/workout-log.service.ts` already threw `NotFoundException`/`ForbiddenException` by the time this pass started (fixed incidentally during Fase 1's ownership work, ahead of this doc).
+- `code` is populated for essentially every error today, not just migrated call sites: `HttpExceptionFilter` auto-assigns a default `code` from a small status→code map (`src/common/constants/error-code.enum.ts`) whenever the thrown exception doesn't specify its own. A call site can still override with a more specific code by throwing e.g. `new NotFoundException({ message: 'Routine not found', code: 'ROUTINE_NOT_FOUND' })` — the filter reads `code`/`message`/`error` off the exception's response body when present.
+- The frontend's Axios response interceptor (`frontend/services/api.ts`) still maps by **HTTP status only**; it has not been updated to read `code` yet (that's frontend work, Fase 6/transversal, not done in this pass). `message`/`statusCode` are unchanged in meaning, so the interceptor keeps working as-is.
 
-## Target standard (not yet implemented)
-
-> Everything in this section is the plan, not the current behavior. Don't write code or docs elsewhere that assume it already exists — check the controller/service directly, or check "Current state" above.
-
-### Standard error shape
+## Standard error shape (implemented)
 
 ```jsonc
 {
   "statusCode": 404,
   "error": "Not Found",
   "message": "Routine not found",
-  "code": "ROUTINE_NOT_FOUND",   // optional but preferred: stable, machine-readable
+  "code": "NOT_FOUND",
   "timestamp": "2026-07-14T12:00:00.000Z",
   "path": "/routine/abc123"
 }
 ```
 
-- `statusCode` / `error` / `message` mirror Nest's existing convention so this is a low-friction change, not a breaking rewrite of everything.
-- `code` is new: a stable, UPPER_SNAKE_CASE identifier the frontend can switch on instead of parsing `message` strings (which may be in either language and can change wording without notice). `code` is optional per-exception — add it as call sites are migrated, don't block the whole rollout on having a `code` for every single error.
-- `timestamp` and `path` are new, added by the global filter, not by each call site.
+- `statusCode` / `error` / `message` mirror Nest's previous convention — this was a low-friction change, not a breaking rewrite.
+- `code` catalog (`src/common/constants/error-code.enum.ts`, `ErrorCode` enum): `AUTH_REQUIRED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `VALIDATION_ERROR` (400/422), `INTERNAL` (500 / unhandled exceptions). Deliberately generic/small rather than one code per resource — a call site can still attach a more specific `code` string via the exception's response body (see above) without needing a new enum member.
+- `timestamp` and `path` are added by the filter, not by each call site.
+- Unhandled/non-`HttpException` errors (a stray `throw new Error(...)`, a DB driver error, etc.) are still caught, logged server-side with the full stack via `Logger`, and turned into a `500` with `message: "Internal server error"` and `code: "INTERNAL"` — the client never sees a raw stack trace or Express's default HTML error page.
 
-### Implementation plan
+## Not done in this pass
 
-1. Add a global `HttpExceptionFilter` (`@Catch(HttpException)` at minimum, ideally `@Catch()` to also catch the plain-`Error` cases as a safety net) registered via `app.useGlobalFilters(...)` in `main.ts`. It builds the shape above from the caught exception plus `request.url`/`new Date().toISOString()`.
-2. Replace all six `new Error(...)` sites listed above with the matching `NotFoundException`/`BadRequestException`, etc. This alone fixes the "404 hidden behind a 500" class of bug (see `docs/ai/SECURITY.md` and the testing list in `TESTING-GUIDE.md`: *"should return 404 (not 500) when routine id does not exist"*).
-3. Define a small `code` catalog as they're needed — don't invent a large enum speculatively. Start from real error sites: `ROUTINE_NOT_FOUND`, `EXERCISE_NOT_FOUND`, `WORKOUT_NOT_FOUND`, `CHALLENGE_NOT_FOUND`, `NOT_OWNER` (ownership check failures), `INVALID_CREDENTIALS`, `EMAIL_ALREADY_REGISTERED`.
-4. Decide (and this doc will then record) whether a response **envelope** (e.g. `{ data, meta }` wrapping successful responses) is adopted alongside this. As of this plan, **no envelope decision has been made** — don't invent one for a single endpoint; see `API-STANDARDS.md`.
-
-### How the frontend should consume `code` (target)
-
-Once `code` exists, the frontend's Axios response interceptor (currently in `frontend/services/api.ts`, mapping by HTTP status only) should additionally read `error.response.data.code` when present and map it to a translated string via `i18n.t('errors.' + code)`, falling back to the existing status-based generic message when `code` is absent (during the migration window, most errors still won't have one). See `frontend/docs/ai/frontend/I18N-GUIDE.md` for the `errors.<code>` key convention and `frontend/docs/ai/TROUBLESHOOTING.md` for what a raw (non-translated) error currently looks like to a user.
+- The frontend does not yet read `error.response.data.code` — see `frontend/docs/ai/frontend/I18N-GUIDE.md` for the target `errors.<code>` → i18n mapping when that's picked up.
+- No response **envelope** (e.g. `{ data, meta }` wrapping successful responses) was adopted — out of scope; see `API-STANDARDS.md`.
+- Per-resource codes (`ROUTINE_NOT_FOUND`, `WORKOUT_NOT_FOUND`, etc.) were not threaded through every call site — the generic status-derived `code` covers all of them today; add a specific one only where a call site genuinely needs to be distinguished from its status-mates.
 
 ## Related docs
 
