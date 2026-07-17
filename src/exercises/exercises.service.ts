@@ -7,6 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { Exercise } from './entities/exercise.entity';
 import { UpdateExerciseRelationsDto } from './dto/update-exercise-relations.dto';
+import { CreateExerciseDto } from './dto/create-exercise.dto';
 import { ExerciseCategory } from './entities/exercise-category.entity';
 import { ExerciseLocation } from './entities/exercise-location.entity';
 import { ExerciseBodyPart } from './entities/exercise-body-part.entity';
@@ -34,7 +35,7 @@ export class ExercisesService {
     private bodyPartMapRepo: Repository<ExerciseBodyPartMap>,
   ) {}
 
-  async create(dto: any) {
+  async create(dto: CreateExerciseDto) {
     const exercise = this.exerciseRepo.create(dto);
     return this.exerciseRepo.save(exercise);
   }

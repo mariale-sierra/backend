@@ -6,6 +6,7 @@ import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.enti
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengeCategoryMap } from '../challenges/entities/challenge-category-map.entity';
 import { ChallengeLocationMap } from '../challenges/entities/challenge-location-map.entity';
+import { UserResponseDto } from './dto/user-response.dto';
 
 @Injectable()
 export class UsersService {
@@ -22,10 +23,14 @@ export class UsersService {
     private challengeLocationMapRepo: Repository<ChallengeLocationMap>,
   ) {}
 
-  async findById(id: string) {
-    const user = await this.userRepo.findOne({ where: { id } });
+  async findById(id: string): Promise<UserResponseDto> {
+    // select explicitly — never pull password_hash off the DB for a response path.
+    const user = await this.userRepo.findOne({
+      where: { id },
+      select: ['id', 'username', 'email', 'is_active'],
+    });
     if (!user) throw new NotFoundException('User not found');
-    return user;
+    return UserResponseDto.fromEntity(user);
   }
 
   async findByEmail(email: string) {
