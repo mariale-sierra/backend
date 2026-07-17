@@ -77,17 +77,16 @@ export class WorkoutPostsService {
           caption,
         );
 
+        // A flagged result is a successful, definitive moderation call —
+        // apply it immediately, never retry it (retrying can't change a
+        // real moderation verdict, only real service errors below should
+        // be retried).
         if (result.flagged) {
-          const flaggedCategories = Object.entries(result.categories)
-            .filter(([, isFlagged]) => isFlagged)
-            .map(([category]) => category)
-            .join(', ');
-
           await this.repo.update(postId, {
             moderationStatus: WorkoutPostModerationStatus.REJECTED,
             moderationReason:
-              flaggedCategories.length > 0
-                ? `Contenido rechazado por moderación: ${flaggedCategories}`
+              result.flaggedCategories.length > 0
+                ? `Contenido rechazado por moderación: ${result.flaggedCategories.join(', ')}`
                 : 'Contenido rechazado por moderación',
             moderatedAt: new Date(),
           });
@@ -101,11 +100,15 @@ export class WorkoutPostsService {
         });
         return;
       } catch (error) {
-        if (attempt < maxAttempts && error instanceof Error) {
+        // Only real service/API failures land here (validateWorkoutImage
+        // throws ServiceUnavailableException/InternalServerErrorException,
+        // it never throws for a flagged result) — retrying those is correct.
+        if (attempt < maxAttempts) {
           await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
           continue;
         }
 
+        console.error('MODERATION RETRY EXHAUSTED:', error);
         await this.repo.update(postId, {
           moderationStatus: WorkoutPostModerationStatus.PENDING,
           moderationReason:
