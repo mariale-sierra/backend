@@ -29,6 +29,9 @@ import { CreateWorkoutProgressDto } from '../workout-log/dto/create-workout-prog
 import { UseGuards } from '@nestjs/common';
 import { ChallengeProgressSummaryDto } from './dto/challenge-progress-summary.dto';
 import { UpdateChallengeCycleDayDto } from './dto/update-challenge-cycle-day.dto';
+import { Public } from '../auth/decorators/public.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 
 @ApiTags('Challenges')
 @Controller('challenges')
@@ -136,10 +139,17 @@ export class ChallengesController {
     @Param('id', ParseUUIDPipe) challengeId: string,
     @Param('dayInCycle', ParseIntPipe) dayInCycle: number,
     @Body() dto: UpdateChallengeCycleDayDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.challengesService.updateCycleDay(challengeId, dayInCycle, dto);
+    return this.challengesService.updateCycleDay(
+      challengeId,
+      dayInCycle,
+      dto,
+      user.sub,
+    );
   }
 
+  @Public()
   @Get()
   @ApiOperation({
     summary: 'Obtener todos los desafíos',
@@ -195,18 +205,21 @@ export class ChallengesController {
   }
 
   @Get(':id/users')
+  @ApiBearerAuth()
   @ApiParam({ name: 'id', description: 'ID del desafío' })
   @ApiOperation({
     summary: 'Obtener usuarios de un desafío',
     description:
-      'Lista todos los usuarios que están participando en un desafío',
+      'Lista todos los usuarios que están participando en un desafío. No incluye el email de los participantes.',
   })
   @ApiResponse({ status: 200, description: 'Lista de usuarios en el desafío' })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
   @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
   findUsers(@Param('id', ParseUUIDPipe) id: string) {
     return this.challengesService.findUsersByChallenge(id);
   }
 
+  @Public()
   @Get(':id')
   @ApiParam({ name: 'id', description: 'ID del desafío' })
   @ApiOperation({
@@ -220,30 +233,37 @@ export class ChallengesController {
   }
 
   @Patch(':id')
+  @ApiBearerAuth()
   @ApiParam({ name: 'id', description: 'ID del desafío' })
   @ApiOperation({
     summary: 'Actualizar desafío',
-    description: 'Actualiza la información de un desafío existente',
+    description: 'Actualiza la información de un desafío existente. Solo el creador del desafío puede actualizarlo.',
   })
   @ApiResponse({ status: 200, description: 'Desafío actualizado exitosamente' })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({ status: 403, description: 'No eres el creador de este desafío' })
   @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateChallengeDto: UpdateChallengeDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.challengesService.update(id, updateChallengeDto);
+    return this.challengesService.update(id, updateChallengeDto, user.sub);
   }
 
   @Delete(':id')
+  @ApiBearerAuth()
   @ApiParam({ name: 'id', description: 'ID del desafío' })
   @ApiOperation({
     summary: 'Eliminar desafío',
-    description: 'Elimina un desafío existente',
+    description: 'Elimina un desafío existente. Solo el creador del desafío puede eliminarlo.',
   })
   @ApiResponse({ status: 200, description: 'Desafío eliminado exitosamente' })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({ status: 403, description: 'No eres el creador de este desafío' })
   @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
-  remove(@Param('id', ParseUUIDPipe) id: string) {
-    return this.challengesService.remove(id);
+  remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.challengesService.remove(id, user.sub);
   }
 
   @UseGuards(JwtAuthGuard)

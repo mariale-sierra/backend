@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
+import { UserResponseDto } from './dto/user-response.dto';
 
 @Injectable()
 export class UsersService {
@@ -13,10 +14,14 @@ export class UsersService {
     private challengeUserRepo: Repository<ChallengeUserMap>,
   ) {}
 
-  async findById(id: string) {
-    const user = await this.userRepo.findOne({ where: { id } });
+  async findById(id: string): Promise<UserResponseDto> {
+    // select explicitly — never pull password_hash off the DB for a response path.
+    const user = await this.userRepo.findOne({
+      where: { id },
+      select: ['id', 'username', 'email', 'is_active'],
+    });
     if (!user) throw new NotFoundException('User not found');
-    return user;
+    return UserResponseDto.fromEntity(user);
   }
 
   async findByEmail(email: string) {

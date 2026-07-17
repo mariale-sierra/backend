@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MetricType } from './entities/metric-type.entity';
@@ -26,13 +26,18 @@ export class MetricsService {
     return this.metricTypeRepo.find();
   }
 
-  async addMetric(wleId: number, metricCode: string, value: number) {
-    // 1. Validar wle con su ejercicio
+  async addMetric(wleId: number, metricCode: string, value: number, userId: string) {
+    // 1. Validar wle con su ejercicio y su workout log (para ownership)
     const wle = await this.wleRepo.findOne({
       where: { id: wleId },
-      relations: { exercise: true },
+      relations: { exercise: true, workout: true },
     });
-    if (!wle) throw new BadRequestException('WorkoutLogExercise not found');
+    if (!wle) throw new NotFoundException('WorkoutLogExercise not found');
+    if (wle.workout.userId !== userId) {
+      throw new ForbiddenException(
+        'You do not have access to this workout log exercise',
+      );
+    }
 
     // 2. Buscar metricType por code
     const metricType = await this.metricTypeRepo.findOneBy({ code: metricCode });

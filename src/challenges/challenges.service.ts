@@ -16,6 +16,7 @@ import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengeCycleDay } from './entities/challenge-cycle-days.entity';
 import { Routine } from '../routine/entities/routine.entity';
 import { UpdateChallengeCycleDayDto } from './dto/update-challenge-cycle-day.dto';
+import { assertOwnership } from '../auth/utils/assert-ownership';
 
 @Injectable()
 export class ChallengesService {
@@ -86,9 +87,10 @@ export class ChallengesService {
     return challenge;
   }
 
-  async update(id: string, updateChallengeDto: UpdateChallengeDto) {
+  async update(id: string, updateChallengeDto: UpdateChallengeDto, userId: string) {
     const challenge = await this.challengeRepo.findOne({ where: { id } });
     if (!challenge) throw new NotFoundException('Challenge not found');
+    assertOwnership(challenge.created_by_user_id, userId);
 
     Object.assign(challenge, updateChallengeDto);
     const updated = await this.challengeRepo.save(challenge);
@@ -99,9 +101,10 @@ export class ChallengesService {
     };
   }
 
-  async remove(id: string) {
+  async remove(id: string, userId: string) {
     const challenge = await this.challengeRepo.findOne({ where: { id } });
     if (!challenge) throw new NotFoundException('Challenge not found');
+    assertOwnership(challenge.created_by_user_id, userId);
 
     await this.challengeRepo.remove(challenge);
     return { message: 'Challenge deleted successfully' };
@@ -164,6 +167,7 @@ export class ChallengesService {
     challengeId: string,
     dayInCycle: number,
     dto: UpdateChallengeCycleDayDto,
+    userId: string,
   ) {
     const challenge = await this.challengeRepo.findOne({
       where: { id: challengeId },
@@ -172,6 +176,7 @@ export class ChallengesService {
     if (!challenge) {
       throw new NotFoundException('Challenge not found');
     }
+    assertOwnership(challenge.created_by_user_id, userId);
 
     if (dayInCycle < 1 || dayInCycle > challenge.cycle_length_days) {
       throw new BadRequestException(
@@ -280,6 +285,7 @@ export class ChallengesService {
       throw new NotFoundException('Challenge not found');
     }
 
+    // Public-profile fields only — never expose participant emails here.
     const users = await this.challengeUserMapRepo
       .createQueryBuilder('map')
       .innerJoin(User, 'user', 'user.id = map.user_id')
@@ -287,7 +293,6 @@ export class ChallengesService {
       .select([
         'user.id AS id',
         'user.username AS username',
-        'user.email AS email',
         'map.role AS role',
         'map.status AS status',
         'map.joined_at AS joined_at',
@@ -316,20 +321,14 @@ export class ChallengesService {
     if (!challenge) return null;
 
     // nueva lógica para calcular currentDay y currentDayInCycle
-    const joinedAt = new Date(relation.joined_at!);
-    joinedAt.setHours(0, 0, 0, 0);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const msPerDay = 1000 * 60 * 60 * 24;
-    const daysSinceStart = Math.floor(
-      (today.getTime() - joinedAt.getTime()) / msPerDay,
-    );
-    const currentDay = daysSinceStart + 1;
+    const currentDay = this.calculateCurrentDay(relation.joined_at!);
     if (!challenge.cycle_length_days) {
       throw new BadRequestException('Challenge cycle length not configured');
     }
-    const currentDayInCycle =
-      ((currentDay - 1) % challenge.cycle_length_days) + 1;
+    const currentDayInCycle = this.calculateCurrentDayInCycle(
+      currentDay,
+      challenge.cycle_length_days,
+    );
 
     // completedToday
     const start = new Date();
@@ -385,21 +384,14 @@ export class ChallengesService {
       throw new NotFoundException('Challenge not found');
     }
 
-    const joinedAt = new Date(relation.joined_at!);
-    joinedAt.setHours(0, 0, 0, 0);
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const msPerDay = 1000 * 60 * 60 * 24;
-    const daysSinceStart = Math.floor(
-      (today.getTime() - joinedAt.getTime()) / msPerDay,
-    );
-    const currentDay = daysSinceStart + 1;
+    const currentDay = this.calculateCurrentDay(relation.joined_at!);
     if (!challenge.cycle_length_days) {
       throw new BadRequestException('Challenge cycle length not configured');
     }
-    const currentDayInCycle =
-      ((currentDay - 1) % challenge.cycle_length_days) + 1;
+    const currentDayInCycle = this.calculateCurrentDayInCycle(
+      currentDay,
+      challenge.cycle_length_days,
+    );
 
     const cycleDay = await this.findCycleDayWithRoutine(
       challengeId,
@@ -459,6 +451,34 @@ export class ChallengesService {
     };
   }
 
+  /**
+   * Days elapsed since `joinedAt` (inclusive, 1-indexed) as of "today" at
+   * local midnight. Shared by `getProgress`/`getToday`/`getProgressSummary`,
+   * which previously copy-pasted this exact calculation.
+   */
+  private calculateCurrentDay(joinedAt: Date): number {
+    const joinedDate = new Date(joinedAt);
+    joinedDate.setHours(0, 0, 0, 0);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const daysSinceStart = Math.floor(
+      (today.getTime() - joinedDate.getTime()) / msPerDay,
+    );
+
+    return daysSinceStart + 1;
+  }
+
+  /** Maps an absolute `currentDay` onto a 1-indexed position within the challenge's cycle. */
+  private calculateCurrentDayInCycle(
+    currentDay: number,
+    cycleLengthDays: number,
+  ): number {
+    return ((currentDay - 1) % cycleLengthDays) + 1;
+  }
+
   private findCycleDayWithRoutine(challengeId: string, dayInCycle: number) {
     return this.challengeCycleDaysRepo
       .createQueryBuilder('cycleDay')
@@ -492,21 +512,7 @@ export class ChallengesService {
     }
 
     // calcular currentDay
-    const joinedAt = new Date(relation.joined_at!);
-
-    joinedAt.setHours(0, 0, 0, 0);
-
-    const today = new Date();
-
-    today.setHours(0, 0, 0, 0);
-
-    const msPerDay = 1000 * 60 * 60 * 24;
-
-    const daysSinceStart = Math.floor(
-      (today.getTime() - joinedAt.getTime()) / msPerDay,
-    );
-
-    const currentDay = daysSinceStart + 1;
+    const currentDay = this.calculateCurrentDay(relation.joined_at!);
 
     // contar workouts completados
     const completedDays = await this.workoutRepo.count({

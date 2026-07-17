@@ -61,4 +61,22 @@ No entities exist yet for `user_follows`, `workout_post_likes`, `spaces`/`space_
 | JWT guard | `src/auth/guards/jwt-auth.guard.ts` |
 | Auth service/controller | `src/auth/auth.service.ts`, `src/auth/auth.controller.ts` |
 
+## Cross-cutting (`src/common/`, `src/config/`)
+
+Introduced in Fase 4 — the first cross-cutting concerns beyond the auth guard, so a shared folder became warranted (see `CURRENT-STATE.md`'s prior note that one didn't exist yet).
+
+| Concern | Path |
+| --- | --- |
+| Global exception filter (standard error shape) | `src/common/filters/http-exception.filter.ts` |
+| Error code catalog | `src/common/constants/error-code.enum.ts` |
+| Global request logging interceptor | `src/common/interceptors/logging.interceptor.ts` |
+| Fail-fast env validation for `ConfigModule.forRoot` | `src/config/env.validation.ts` |
+
+Both the filter and interceptor are registered as `APP_FILTER`/`APP_INTERCEPTOR` in `src/app.module.ts`, alongside the existing `APP_GUARD` registrations.
+
+## Removed (Fase 4)
+
+- `src/workout-log/workout-log-exercise.service.ts` (`WorkoutLogExerciseService`) — deleted. It was never registered in any module's `providers`/`controllers` and had no callers; the two `new Error(...)` sites it contained went with it.
+- `src/migrations/*.migration.ts`, `src/data-source.ts` — deleted. The legacy TypeORM migration system is fully retired; `backend/database/` (see `docs/ai/db/`) is the only schema-management path now. `npm run migration:generate|run|revert` (and the `typeorm` helper script) were removed from `package.json`. `tsconfig.typeorm.json` was left in place (now unused) — it wasn't in this pass's write scope (`src/**` + `package.json` only).
+
 > Must reflect the real current backend, not assumptions.
