@@ -1,6 +1,8 @@
-import { IsArray, IsEnum, IsInt, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsEnum, IsInt, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { CreateChallengeCycleDayDto } from './create-challenge-cycle-day.dto';
 
 export enum ChallengeVisibility {
   PUBLIC = 'public',
@@ -57,29 +59,34 @@ export class CreateChallengeDto {
   cycle_length_days!: number;
 
   @ApiProperty({
-    description: 'Categorías del desafío',
+    description: 'Categorías del desafío (nombres, ej. "Strength")',
     required: false,
-    type: [Object],
+    type: [String],
   })
   @IsOptional()
   @IsArray()
-  categories?: any[];
+  @IsString({ each: true })
+  categories?: string[];
 
   @ApiProperty({
-    description: 'Ubicaciones del desafío',
+    description: 'Ubicaciones del desafío (nombres, ej. "Gym")',
     required: false,
-    type: [Object],
+    type: [String],
   })
   @IsOptional()
   @IsArray()
-  locations?: any[];
+  @IsString({ each: true })
+  locations?: string[];
 
   @ApiProperty({
-    description: 'Días del ciclo del desafío',
+    description:
+      'Días del ciclo del desafío, con la rutina/ejercicios de cada día (workout) o vacío para días de descanso',
     required: false,
-    type: [Object],
+    type: [CreateChallengeCycleDayDto],
   })
   @IsOptional()
   @IsArray()
-  cycle_days?: any[];
+  @ValidateNested({ each: true })
+  @Type(() => CreateChallengeCycleDayDto)
+  cycle_days?: CreateChallengeCycleDayDto[];
 }
