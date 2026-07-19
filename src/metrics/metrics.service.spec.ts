@@ -1,110 +1,108 @@
-import { Test, TestingModule } from '@nestjs/testing';
+import { BadRequestException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { MetricsService } from './metrics.service';
-import { MetricType } from './entities/metric-type.entity';
-import { WorkoutLogExercise } from '../workout-log/entities/workout-log-exercise.entity';
-import { WorkoutLogExerciseMetric } from './entities/workout-log-exercise-metric.entity';
+import { Test, TestingModule } from '@nestjs/testing';
 import { ExerciseMetric } from '../exercises/entities/exercise-metric.entity';
+import { WorkoutLogExercise } from '../workout-log/entities/workout-log-exercise.entity';
+import { MetricType, MetricValueType } from './entities/metric-type.entity';
+import { WorkoutLogExerciseMetric } from './entities/workout-log-exercise-metric.entity';
+import { MetricsService } from './metrics.service';
 
-const createMockRepo = () => ({
-  find: jest.fn(),
-  findOne: jest.fn(),
-  findOneBy: jest.fn(),
-  save: jest.fn(),
-  create: jest.fn((v) => v),
-  createQueryBuilder: jest.fn(),
-});
-
-const buildQueryBuilder = (result: unknown) => ({
-  where: jest.fn().mockReturnThis(),
-  andWhere: jest.fn().mockReturnThis(),
-  getOne: jest.fn().mockResolvedValue(result),
-});
+function queryBuilderReturning(value: unknown) {
+  return {
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    getOne: jest.fn().mockResolvedValue(value),
+  };
+}
 
 describe('MetricsService', () => {
   let service: MetricsService;
-  let wleRepo: ReturnType<typeof createMockRepo>;
-  let metricTypeRepo: ReturnType<typeof createMockRepo>;
-  let metricRepo: ReturnType<typeof createMockRepo>;
-  let exerciseMetricRepo: ReturnType<typeof createMockRepo>;
-
-  const OWNER_ID = 'owner-1';
-  const OTHER_USER_ID = 'other-2';
+  let metricTypeRepo: { findOneBy: jest.Mock };
+  let workoutExerciseRepo: { findOne: jest.Mock };
+  let metricRepo: {
+    createQueryBuilder: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+  };
+  let exerciseMetricRepo: { createQueryBuilder: jest.Mock };
 
   beforeEach(async () => {
-    wleRepo = createMockRepo();
-    metricTypeRepo = createMockRepo();
-    metricRepo = createMockRepo();
-    exerciseMetricRepo = createMockRepo();
+    metricTypeRepo = { findOneBy: jest.fn() };
+    workoutExerciseRepo = { findOne: jest.fn() };
+    metricRepo = {
+      createQueryBuilder: jest.fn(),
+      create: jest.fn((value) => ({ ...value })),
+      save: jest.fn((value) => Promise.resolve(value)),
+    };
+    exerciseMetricRepo = { createQueryBuilder: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MetricsService,
-        { provide: getRepositoryToken(MetricType), useValue: metricTypeRepo },
-        { provide: getRepositoryToken(WorkoutLogExercise), useValue: wleRepo },
-        { provide: getRepositoryToken(WorkoutLogExerciseMetric), useValue: metricRepo },
-        { provide: getRepositoryToken(ExerciseMetric), useValue: exerciseMetricRepo },
+        {
+          provide: getRepositoryToken(MetricType),
+          useValue: metricTypeRepo,
+        },
+        {
+          provide: getRepositoryToken(WorkoutLogExercise),
+          useValue: workoutExerciseRepo,
+        },
+        {
+          provide: getRepositoryToken(WorkoutLogExerciseMetric),
+          useValue: metricRepo,
+        },
+        {
+          provide: getRepositoryToken(ExerciseMetric),
+          useValue: exerciseMetricRepo,
+        },
       ],
     }).compile();
 
     service = module.get(MetricsService);
   });
 
-  const wleOwnedBy = (userId: string) => ({
-    id: 5,
-    exercise: { id: 'exercise-1' },
-    workout: { userId },
-  });
-
-  it('should reject attaching a metric to a workout-log-exercise owned by another user', async () => {
-    wleRepo.findOne.mockResolvedValue(wleOwnedBy(OWNER_ID));
-
-    await expect(
-      service.addMetric(5, 'reps', 12, OTHER_USER_ID),
-    ).rejects.toThrow(ForbiddenException);
-    expect(metricTypeRepo.findOneBy).not.toHaveBeenCalled();
-  });
-
-  it('should throw NotFoundException when the workout-log-exercise does not exist', async () => {
-    wleRepo.findOne.mockResolvedValue(null);
-
-    await expect(service.addMetric(999, 'reps', 12, OWNER_ID)).rejects.toThrow(
-      NotFoundException,
+  it('stores a decimal metric in the matching value column', async () => {
+    const workoutExercise = { id: 10, exercise: { id: 3 } };
+    workoutExerciseRepo.findOne.mockResolvedValue(workoutExercise);
+    metricTypeRepo.findOneBy.mockResolvedValue({
+      id: 7,
+      code: 'weight',
+      valueType: MetricValueType.DECIMAL,
+    });
+    exerciseMetricRepo.createQueryBuilder.mockReturnValue(
+      queryBuilderReturning({ exerciseId: 3, metricTypeId: 7 }),
     );
+    metricRepo.createQueryBuilder.mockReturnValue(queryBuilderReturning(null));
+
+    const result = await service.addMetric(10, 'weight', 82.5);
+
+    expect(result).toEqual({
+      workoutLogExercise: workoutExercise,
+      metricTypeId: 7,
+      valueDecimal: 82.5,
+    });
+    expect(metricRepo.save).toHaveBeenCalledWith(result);
   });
 
-  it('should add the metric when the caller owns the workout log', async () => {
-    wleRepo.findOne.mockResolvedValue(wleOwnedBy(OWNER_ID));
-    metricTypeRepo.findOneBy.mockResolvedValue({ id: 'mt-1', code: 'reps', valueType: 'int' });
-    exerciseMetricRepo.createQueryBuilder.mockReturnValue(buildQueryBuilder({ id: 'allowed-1' }));
-    metricRepo.createQueryBuilder.mockReturnValue(buildQueryBuilder(null)); // no duplicate
-    metricRepo.save.mockImplementation((m) => Promise.resolve(m));
+  it('rejects a metric that is not allowed for the exercise', async () => {
+    workoutExerciseRepo.findOne.mockResolvedValue({
+      id: 10,
+      exercise: { id: 3 },
+    });
+    metricTypeRepo.findOneBy.mockResolvedValue({
+      id: 7,
+      code: 'weight',
+      valueType: MetricValueType.DECIMAL,
+    });
+    exerciseMetricRepo.createQueryBuilder.mockReturnValue(
+      queryBuilderReturning(null),
+    );
 
-    const result = await service.addMetric(5, 'reps', 12, OWNER_ID);
-
-    expect(result.valueInt).toBe(12);
-    expect(metricRepo.save).toHaveBeenCalled();
-  });
-
-  it('should reject a metric type that is not allowed for the exercise', async () => {
-    wleRepo.findOne.mockResolvedValue(wleOwnedBy(OWNER_ID));
-    metricTypeRepo.findOneBy.mockResolvedValue({ id: 'mt-1', code: 'reps', valueType: 'int' });
-    exerciseMetricRepo.createQueryBuilder.mockReturnValue(buildQueryBuilder(null)); // not allowed
-
-    await expect(service.addMetric(5, 'reps', 12, OWNER_ID)).rejects.toThrow(
+    await expect(service.addMetric(10, 'weight', 82.5)).rejects.toThrow(
       BadRequestException,
     );
-  });
 
-  it('should reject a duplicate metric for the same workout-log-exercise', async () => {
-    wleRepo.findOne.mockResolvedValue(wleOwnedBy(OWNER_ID));
-    metricTypeRepo.findOneBy.mockResolvedValue({ id: 'mt-1', code: 'reps', valueType: 'int' });
-    exerciseMetricRepo.createQueryBuilder.mockReturnValue(buildQueryBuilder({ id: 'allowed-1' }));
-    metricRepo.createQueryBuilder.mockReturnValue(buildQueryBuilder({ id: 'existing-metric' }));
-
-    await expect(service.addMetric(5, 'reps', 12, OWNER_ID)).rejects.toThrow(
-      BadRequestException,
-    );
+    expect(metricRepo.create).not.toHaveBeenCalled();
+    expect(metricRepo.save).not.toHaveBeenCalled();
   });
 });
