@@ -7,9 +7,13 @@ import { User } from '../users/entities/user.entity';
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengesService } from './challenges.service';
 import { ChallengeVisibility } from './dto/create-challenge.dto';
+import { ChallengeCategoryMap } from './entities/challenge-category-map.entity';
 import { ChallengeCycleDay } from './entities/challenge-cycle-days.entity';
+import { ChallengeLocationMap } from './entities/challenge-location-map.entity';
 import { ChallengeUserMap } from './entities/challenge-user-map.entity';
 import { Challenge } from './entities/challenge.entity';
+import { ExerciseCategory } from '../exercises/entities/exercise-category.entity';
+import { ExerciseLocation } from '../exercises/entities/exercise-location.entity';
 
 describe('ChallengesService', () => {
   let service: ChallengesService;
@@ -43,6 +47,10 @@ describe('ChallengesService', () => {
         { provide: getRepositoryToken(WorkoutLog), useValue: {} },
         { provide: getRepositoryToken(ChallengeCycleDay), useValue: {} },
         { provide: getRepositoryToken(Routine), useValue: {} },
+        { provide: getRepositoryToken(ChallengeCategoryMap), useValue: {} },
+        { provide: getRepositoryToken(ChallengeLocationMap), useValue: {} },
+        { provide: getRepositoryToken(ExerciseCategory), useValue: {} },
+        { provide: getRepositoryToken(ExerciseLocation), useValue: {} },
       ],
     }).compile();
 

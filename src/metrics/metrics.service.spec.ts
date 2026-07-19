@@ -62,7 +62,11 @@ describe('MetricsService', () => {
   });
 
   it('stores a decimal metric in the matching value column', async () => {
-    const workoutExercise = { id: 10, exercise: { id: 3 } };
+    const workoutExercise = {
+      id: 10,
+      exercise: { id: 3 },
+      workout: { userId: 'user-1' },
+    };
     workoutExerciseRepo.findOne.mockResolvedValue(workoutExercise);
     metricTypeRepo.findOneBy.mockResolvedValue({
       id: 7,
@@ -74,7 +78,7 @@ describe('MetricsService', () => {
     );
     metricRepo.createQueryBuilder.mockReturnValue(queryBuilderReturning(null));
 
-    const result = await service.addMetric(10, 'weight', 82.5);
+    const result = await service.addMetric(10, 'weight', 82.5, 'user-1');
 
     expect(result).toEqual({
       workoutLogExercise: workoutExercise,
@@ -88,6 +92,7 @@ describe('MetricsService', () => {
     workoutExerciseRepo.findOne.mockResolvedValue({
       id: 10,
       exercise: { id: 3 },
+      workout: { userId: 'user-1' },
     });
     metricTypeRepo.findOneBy.mockResolvedValue({
       id: 7,
@@ -98,7 +103,7 @@ describe('MetricsService', () => {
       queryBuilderReturning(null),
     );
 
-    await expect(service.addMetric(10, 'weight', 82.5)).rejects.toThrow(
+    await expect(service.addMetric(10, 'weight', 82.5, 'user-1')).rejects.toThrow(
       BadRequestException,
     );
 
