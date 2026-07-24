@@ -2,7 +2,10 @@ import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 import { IsBoolean, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class CreateRoutineDto {
-  @ApiProperty({ description: 'Nombre de la rutina', example: 'Piernas - Día 1' })
+  @ApiProperty({
+    description: 'Nombre de la rutina',
+    example: 'Piernas - Día 1',
+  })
   @IsString()
   name!: string;
 

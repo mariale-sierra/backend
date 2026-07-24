@@ -36,17 +36,15 @@ export class RoutineExerciseSet {
   })
   notes?: string;
 
-  @ManyToOne(
-    () => RoutineExercise,
-    routineExercise => routineExercise.sets,
-    { onDelete: 'CASCADE' },
-  )
+  @ManyToOne(() => RoutineExercise, (routineExercise) => routineExercise.sets, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'routine_exercise_id' })
   routineExercise!: RoutineExercise;
 
   @OneToMany(
     () => RoutineExerciseSetTarget,
-    target => target.routineExerciseSet,
+    (target) => target.routineExerciseSet,
   )
   targets!: RoutineExerciseSetTarget[];
 }

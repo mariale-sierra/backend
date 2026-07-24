@@ -1,4 +1,8 @@
-import {Injectable, UnauthorizedException, ConflictException} from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  ConflictException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -47,10 +51,10 @@ export class AuthService {
       const savedUser = await manager.save(newUser);
 
       const profile = manager.create(UserProfile, {
-      user_id: savedUser.id,
-      display_name: username,
-      preferred_language: 'es',
-    });
+        user_id: savedUser.id,
+        display_name: username,
+        preferred_language: 'es',
+      });
       await manager.save(profile);
 
       return savedUser;

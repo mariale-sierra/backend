@@ -24,7 +24,7 @@ export class UploadsService {
 
     try {
       const command = new PutObjectCommand({
-        Bucket: process.env['CLOUDFLARE_R2_BUCKET_NAME'] as string,
+        Bucket: process.env['CLOUDFLARE_R2_BUCKET_NAME'],
         Key: key,
       });
 

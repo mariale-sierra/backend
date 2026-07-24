@@ -1,6 +1,11 @@
 import { Controller, Post, Body } from '@nestjs/common';
 import { UploadsService } from './uploads.service';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { SignUploadDto } from './dto/sign-upload.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
@@ -17,7 +22,10 @@ export class UploadsController {
     description:
       'Genera una URL presignada de escritura a R2, con la clave del objeto prefijada por el usuario autenticado. Solo acepta image/jpeg, image/png o image/webp.',
   })
-  @ApiResponse({ status: 201, description: 'URL firmada generada exitosamente' })
+  @ApiResponse({
+    status: 201,
+    description: 'URL firmada generada exitosamente',
+  })
   @ApiResponse({ status: 400, description: 'Tipo de archivo no permitido' })
   @ApiResponse({ status: 401, description: 'No autorizado' })
   async getSignedUrl(

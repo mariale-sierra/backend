@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MetricType } from './entities/metric-type.entity';
@@ -26,7 +31,12 @@ export class MetricsService {
     return this.metricTypeRepo.find();
   }
 
-  async addMetric(wleId: number, metricCode: string, value: number, userId: string) {
+  async addMetric(
+    wleId: number,
+    metricCode: string,
+    value: number,
+    userId: string,
+  ) {
     // 1. Validar wle con su ejercicio y su workout log (para ownership)
     const wle = await this.wleRepo.findOne({
       where: { id: wleId },
@@ -40,29 +50,40 @@ export class MetricsService {
     }
 
     // 2. Buscar metricType por code
-    const metricType = await this.metricTypeRepo.findOneBy({ code: metricCode });
-    if (!metricType) throw new BadRequestException(`Metric type '${metricCode}' not found`);
+    const metricType = await this.metricTypeRepo.findOneBy({
+      code: metricCode,
+    });
+    if (!metricType)
+      throw new BadRequestException(`Metric type '${metricCode}' not found`);
 
     // 3. Validar que la métrica está permitida para ese ejercicio
     const allowedMetric = await this.exerciseMetricRepo
       .createQueryBuilder('em')
       .where('em.exercise = :exerciseId', { exerciseId: wle.exercise.id })
-      .andWhere('em.metricType = :metricTypeId', { metricTypeId: metricType.id })
+      .andWhere('em.metricType = :metricTypeId', {
+        metricTypeId: metricType.id,
+      })
       .getOne();
 
     if (!allowedMetric) {
-      throw new BadRequestException(`Metric '${metricCode}' is not allowed for this exercise`);
+      throw new BadRequestException(
+        `Metric '${metricCode}' is not allowed for this exercise`,
+      );
     }
 
     // 4. Validar duplicado
     const existing = await this.metricRepo
       .createQueryBuilder('m')
       .where('m.workoutLogExercise = :wleId', { wleId })
-      .andWhere('m.metricTypeId = :metricTypeId', { metricTypeId: metricType.id })
+      .andWhere('m.metricTypeId = :metricTypeId', {
+        metricTypeId: metricType.id,
+      })
       .getOne();
 
     if (existing) {
-      throw new BadRequestException(`Metric '${metricCode}' already exists for this exercise`);
+      throw new BadRequestException(
+        `Metric '${metricCode}' already exists for this exercise`,
+      );
     }
 
     // 5. Crear y guardar

@@ -1,10 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsBoolean,
-  IsEnum,
-  IsOptional,
-  IsString,
-} from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional, IsString } from 'class-validator';
 import { TrackingMode } from '../entities/exercise.entity';
 
 export class CreateExerciseDto {

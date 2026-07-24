@@ -2,14 +2,19 @@
   "compilerOptions": {
     "module": "commonjs",
     "moduleResolution": "node",
-    "target": "es2020",
     "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "experimentalDecorators": true,
+    "resolveJsonModule": true,
+    "isolatedModules": false,
     "emitDecoratorMetadata": true,
-    "strictNullChecks": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "es2020",
+    "sourceMap": true,
     "skipLibCheck": true,
-    "types": ["jest", "node"]
-  },
-  "include": ["src/**/*.ts"]
+    "strictNullChecks": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": false,
+    "strictBindCallApply": false,
+    "noFallthroughCasesInSwitch": false
+  }
 }

@@ -39,7 +39,7 @@ export class WorkoutPostsService {
 
   async create(data: Partial<WorkoutPost>) {
     const supportsModeration = await this.supportsModerationColumns();
-    const post = this.repo.create() as WorkoutPost;
+    const post = this.repo.create();
     Object.assign(post, data);
 
     if (supportsModeration) {
@@ -53,7 +53,11 @@ export class WorkoutPostsService {
     const savedPost = await this.repo.save(post);
 
     if (supportsModeration && savedPost.image_url) {
-      void this.reviewPostModeration(savedPost.id, savedPost.image_url, savedPost.caption);
+      void this.reviewPostModeration(
+        savedPost.id,
+        savedPost.image_url,
+        savedPost.caption,
+      );
     }
 
     return savedPost;

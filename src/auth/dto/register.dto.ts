@@ -25,4 +25,3 @@ export class RegisterDto {
   @IsString()
   username!: string;
 }
-

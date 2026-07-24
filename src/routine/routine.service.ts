@@ -1,4 +1,8 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -29,7 +33,10 @@ export class RoutineService {
   async create(dto: CreateRoutineDto, userId: string) {
     // Owner always comes from the JWT — any `createdByUserId` sent in the
     // body (see frontend CreateRoutineRequest) is overridden here.
-    const routine = this.routineRepo.create({ ...dto, createdByUserId: userId });
+    const routine = this.routineRepo.create({
+      ...dto,
+      createdByUserId: userId,
+    });
     return this.routineRepo.save(routine);
   }
 
@@ -46,7 +53,11 @@ export class RoutineService {
     });
   }
 
-  async addExerciseToRoutine(routineId: number, exerciseId: number, userId: string) {
+  async addExerciseToRoutine(
+    routineId: number,
+    exerciseId: number,
+    userId: string,
+  ) {
     const routine = await this.routineRepo.findOneBy({ id: routineId });
     if (!routine) throw new NotFoundException('Routine not found');
 

@@ -1,4 +1,4 @@
- import {
+import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
@@ -26,8 +26,8 @@ export class WorkoutLogExercise {
   exercise!: Exercise;
 
   @OneToMany(
-  () => WorkoutLogExerciseMetric,
-  (metric) => metric.workoutLogExercise,
+    () => WorkoutLogExerciseMetric,
+    (metric) => metric.workoutLogExercise,
   )
   metrics?: WorkoutLogExerciseMetric[];
 

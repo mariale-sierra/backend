@@ -7,7 +7,6 @@ import {
   Param,
   Delete,
   Req,
-  Query,
   ParseIntPipe,
   ParseUUIDPipe,
 } from '@nestjs/common';
@@ -107,7 +106,10 @@ export class ChallengesController {
   })
   @ApiResponse({ status: 401, description: 'No autorizado' })
   @ApiResponse({ status: 404, description: 'Desafío o relación no encontrada' })
-  completeChallenge(@Param('id', ParseUUIDPipe) challengeId: string, @Req() req) {
+  completeChallenge(
+    @Param('id', ParseUUIDPipe) challengeId: string,
+    @Req() req,
+  ) {
     return this.challengesService.completeChallenge(req.user.sub, challengeId);
   }
 
@@ -237,11 +239,15 @@ export class ChallengesController {
   @ApiParam({ name: 'id', description: 'ID del desafío' })
   @ApiOperation({
     summary: 'Actualizar desafío',
-    description: 'Actualiza la información de un desafío existente. Solo el creador del desafío puede actualizarlo.',
+    description:
+      'Actualiza la información de un desafío existente. Solo el creador del desafío puede actualizarlo.',
   })
   @ApiResponse({ status: 200, description: 'Desafío actualizado exitosamente' })
   @ApiResponse({ status: 401, description: 'No autorizado' })
-  @ApiResponse({ status: 403, description: 'No eres el creador de este desafío' })
+  @ApiResponse({
+    status: 403,
+    description: 'No eres el creador de este desafío',
+  })
   @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
   update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -256,13 +262,20 @@ export class ChallengesController {
   @ApiParam({ name: 'id', description: 'ID del desafío' })
   @ApiOperation({
     summary: 'Eliminar desafío',
-    description: 'Elimina un desafío existente. Solo el creador del desafío puede eliminarlo.',
+    description:
+      'Elimina un desafío existente. Solo el creador del desafío puede eliminarlo.',
   })
   @ApiResponse({ status: 200, description: 'Desafío eliminado exitosamente' })
   @ApiResponse({ status: 401, description: 'No autorizado' })
-  @ApiResponse({ status: 403, description: 'No eres el creador de este desafío' })
+  @ApiResponse({
+    status: 403,
+    description: 'No eres el creador de este desafío',
+  })
   @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
-  remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     return this.challengesService.remove(id, user.sub);
   }
 
@@ -300,7 +313,10 @@ export class ChallengesController {
   @ApiOkResponse({
     type: ChallengeProgressSummaryDto,
   })
-  getProgressSummary(@Param('id', ParseUUIDPipe) challengeId: string, @Req() req) {
+  getProgressSummary(
+    @Param('id', ParseUUIDPipe) challengeId: string,
+    @Req() req,
+  ) {
     return this.challengesService.getProgressSummary(challengeId, req.user.sub);
   }
 }

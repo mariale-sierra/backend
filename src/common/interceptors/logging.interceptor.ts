@@ -30,7 +30,9 @@ export class LoggingInterceptor implements NestInterceptor {
       tap({
         next: () => {
           const duration = Date.now() - start;
-          this.logger.log(`${method} ${path} ${response.statusCode} +${duration}ms`);
+          this.logger.log(
+            `${method} ${path} ${response.statusCode} +${duration}ms`,
+          );
         },
         error: (err: unknown) => {
           const duration = Date.now() - start;

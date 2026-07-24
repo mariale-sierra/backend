@@ -59,7 +59,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
         message = body;
       } else if (body && typeof body === 'object') {
         const record = body as Record<string, unknown>;
-        if (typeof record.message === 'string' || Array.isArray(record.message)) {
+        if (
+          typeof record.message === 'string' ||
+          Array.isArray(record.message)
+        ) {
           message = record.message as string | string[];
         } else {
           message = exception.message;

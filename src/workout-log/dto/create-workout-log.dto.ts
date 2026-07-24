@@ -17,7 +17,8 @@ export class CreateWorkoutLogDto {
   // whitelist while the frontend still sends it. Frontend should stop
   // sending it in Fase 2.
   @ApiPropertyOptional({
-    description: 'Ignorado por el servidor — el userId siempre se toma del JWT autenticado.',
+    description:
+      'Ignorado por el servidor — el userId siempre se toma del JWT autenticado.',
     deprecated: true,
   })
   @IsOptional()

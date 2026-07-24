@@ -11,17 +11,21 @@ export const ACTIVITY_TYPE_TO_CATEGORY_NAME: Record<string, string> = {
   functional: 'Functional',
 };
 
-export const CATEGORY_NAME_TO_ACTIVITY_TYPE: Record<string, string> = Object.fromEntries(
-  Object.entries(ACTIVITY_TYPE_TO_CATEGORY_NAME).map(([activityType, name]) => [
-    name.toLowerCase(),
-    activityType,
-  ]),
-);
+export const CATEGORY_NAME_TO_ACTIVITY_TYPE: Record<string, string> =
+  Object.fromEntries(
+    Object.entries(ACTIVITY_TYPE_TO_CATEGORY_NAME).map(
+      ([activityType, name]) => [name.toLowerCase(), activityType],
+    ),
+  );
 
 export function activityTypeToCategoryName(activityType: string): string {
   return ACTIVITY_TYPE_TO_CATEGORY_NAME[activityType] ?? activityType;
 }
 
-export function categoryNameToActivityType(categoryName: string): string | null {
-  return CATEGORY_NAME_TO_ACTIVITY_TYPE[categoryName.trim().toLowerCase()] ?? null;
+export function categoryNameToActivityType(
+  categoryName: string,
+): string | null {
+  return (
+    CATEGORY_NAME_TO_ACTIVITY_TYPE[categoryName.trim().toLowerCase()] ?? null
+  );
 }

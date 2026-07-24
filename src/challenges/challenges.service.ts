@@ -95,11 +95,19 @@ export class ChallengesService {
       await manager.save(ownerMap);
 
       if (categories?.length) {
-        await this.linkChallengeCategories(manager, savedChallenge.id, categories);
+        await this.linkChallengeCategories(
+          manager,
+          savedChallenge.id,
+          categories,
+        );
       }
 
       if (locations?.length) {
-        await this.linkChallengeLocations(manager, savedChallenge.id, locations);
+        await this.linkChallengeLocations(
+          manager,
+          savedChallenge.id,
+          locations,
+        );
       }
 
       if (cycle_days?.length) {
@@ -162,7 +170,9 @@ export class ChallengesService {
     challengeId: string,
     categories: string[],
   ) {
-    const uniqueNames = [...new Set(categories.map((c) => c.trim()).filter(Boolean))];
+    const uniqueNames = [
+      ...new Set(categories.map((c) => c.trim()).filter(Boolean)),
+    ];
     for (const name of uniqueNames) {
       const categoryId = await this.findOrCreateCategoryId(manager, name);
       await manager.save(
@@ -176,7 +186,9 @@ export class ChallengesService {
     challengeId: string,
     locations: string[],
   ) {
-    const uniqueNames = [...new Set(locations.map((l) => l.trim()).filter(Boolean))];
+    const uniqueNames = [
+      ...new Set(locations.map((l) => l.trim()).filter(Boolean)),
+    ];
     for (const name of uniqueNames) {
       const locationId = await this.findOrCreateLocationId(manager, name);
       await manager.save(
@@ -186,14 +198,19 @@ export class ChallengesService {
   }
 
   private slugify(name: string): string {
-    return name
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'exercise';
+    return (
+      name
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'exercise'
+    );
   }
 
-  private async uniqueSlug(manager: EntityManager, base: string): Promise<string> {
+  private async uniqueSlug(
+    manager: EntityManager,
+    base: string,
+  ): Promise<string> {
     const exerciseRepo = manager.getRepository(Exercise);
     let candidate = base;
     let suffix = 2;
@@ -226,7 +243,9 @@ export class ChallengesService {
     if (!exercise) {
       const slug = await this.uniqueSlug(manager, this.slugify(name));
       const trackingMode =
-        dto.metric_type === 'strength' ? TrackingMode.SETS : TrackingMode.SINGLE;
+        dto.metric_type === 'strength'
+          ? TrackingMode.SETS
+          : TrackingMode.SINGLE;
 
       exercise = await manager.save(
         exerciseRepo.create({
@@ -256,7 +275,9 @@ export class ChallengesService {
     const categoryId = await this.findOrCreateCategoryId(manager, categoryName);
 
     const mapRepo = manager.getRepository(ExerciseCategoryMap);
-    const existing = await mapRepo.findOne({ where: { exerciseId, categoryId } });
+    const existing = await mapRepo.findOne({
+      where: { exerciseId, categoryId },
+    });
     if (existing) return;
 
     const hasPrimary = await mapRepo.findOne({
@@ -276,7 +297,9 @@ export class ChallengesService {
     const locationId = await this.findOrCreateLocationId(manager, locationName);
 
     const mapRepo = manager.getRepository(ExerciseLocationMap);
-    const existing = await mapRepo.findOne({ where: { exerciseId, locationId } });
+    const existing = await mapRepo.findOne({
+      where: { exerciseId, locationId },
+    });
     if (existing) return;
 
     const hasPrimary = await mapRepo.findOne({
@@ -295,7 +318,10 @@ export class ChallengesService {
     return manager.getRepository(MetricType).findOne({ where: { code } });
   }
 
-  private async ensureExerciseMetrics(manager: EntityManager, exerciseId: number) {
+  private async ensureExerciseMetrics(
+    manager: EntityManager,
+    exerciseId: number,
+  ) {
     const metricRepo = manager.getRepository(ExerciseMetric);
     for (const code of ['reps', 'weight']) {
       const metricType = await this.getMetricTypeByCode(manager, code);
@@ -553,7 +579,11 @@ export class ChallengesService {
     };
   }
 
-  async update(id: string, updateChallengeDto: UpdateChallengeDto, userId: string) {
+  async update(
+    id: string,
+    updateChallengeDto: UpdateChallengeDto,
+    userId: string,
+  ) {
     const challenge = await this.challengeRepo.findOne({ where: { id } });
     if (!challenge) throw new NotFoundException('Challenge not found');
     assertOwnership(challenge.created_by_user_id, userId);

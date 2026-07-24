@@ -1,4 +1,11 @@
-import { Entity, Index, JoinColumn, ManyToOne, PrimaryColumn, Column } from 'typeorm';
+import {
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryColumn,
+  Column,
+} from 'typeorm';
 import { Exercise } from './exercise.entity';
 import { ExerciseLocation } from './exercise-location.entity';
 

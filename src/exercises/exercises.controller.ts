@@ -7,7 +7,13 @@ import {
   Post,
 } from '@nestjs/common';
 import { ExercisesService } from './exercises.service';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { UpdateExerciseRelationsDto } from './dto/update-exercise-relations.dto';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
 import { Public } from '../auth/decorators/public.decorator';

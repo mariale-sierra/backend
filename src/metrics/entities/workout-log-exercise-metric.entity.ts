@@ -12,22 +12,25 @@ export class WorkoutLogExerciseMetric {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  @ManyToOne(
-    () => WorkoutLogExercise,
-    (wle) => wle.metrics,
-    { onDelete: 'CASCADE' },
-  )
+  @ManyToOne(() => WorkoutLogExercise, (wle) => wle.metrics, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'workout_log_exercise_id' })
   workoutLogExercise!: WorkoutLogExercise;
 
   @Column({ name: 'metric_type_id' })
   metricTypeId!: number;
 
-
   @Column({ name: 'value_int', type: 'int', nullable: true })
   valueInt?: number;
 
-  @Column({ name: 'value_decimal', type: 'numeric', precision: 12, scale: 4, nullable: true })
+  @Column({
+    name: 'value_decimal',
+    type: 'numeric',
+    precision: 12,
+    scale: 4,
+    nullable: true,
+  })
   valueDecimal?: number;
 
   @Column({ name: 'value_text', type: 'text', nullable: true })
