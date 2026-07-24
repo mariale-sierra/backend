@@ -6,6 +6,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ChallengesModule } from './challenges/challenges.module';
+import { ChallengeInvitesModule } from './challenge-invites/challenge-invites.module';
 import { ExercisesModule } from './exercises/exercises.module';
 import { RoutineModule } from './routine/routine.module';
 import { WorkoutLogModule } from './workout-log/workout-log.module';
@@ -59,6 +60,7 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
     AuthModule,
     UsersModule,
     ChallengesModule,
+    ChallengeInvitesModule,
     ExercisesModule,
     RoutineModule,
     WorkoutLogModule,
