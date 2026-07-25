@@ -1,18 +1,26 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, In, Repository } from 'typeorm';
+import { Between, ILike, In, Not, Repository } from 'typeorm';
 import { User } from './entities/user.entity';
+import { UserProfile } from './entities/user-profile.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengeCategoryMap } from '../challenges/entities/challenge-category-map.entity';
 import { ChallengeLocationMap } from '../challenges/entities/challenge-location-map.entity';
 import { UserResponseDto } from './dto/user-response.dto';
+import { UpdateUserProfileDto } from './dto/update-user-profile.dto';
+import {
+  ProfileResponseDto,
+  PublicProfileResponseDto,
+} from './dto/profile-response.dto';
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(User)
     private userRepo: Repository<User>,
+    @InjectRepository(UserProfile)
+    private profileRepo: Repository<UserProfile>,
     @InjectRepository(ChallengeUserMap)
     private challengeUserRepo: Repository<ChallengeUserMap>,
     @InjectRepository(WorkoutLog)
@@ -40,6 +48,156 @@ export class UsersService {
   }
 
   /**
+   * Loads the authenticated user's profile. Users created before profiles
+   * existed have no `user_profiles` row yet — those get sensible defaults
+   * (username as display name) without writing anything until they edit.
+   */
+  async getMyProfile(userId: string): Promise<ProfileResponseDto> {
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      select: ['id', 'username', 'email', 'is_active'],
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const profile = await this.profileRepo.findOne({
+      where: { user_id: userId },
+    });
+    return ProfileResponseDto.build(user, profile ?? null);
+  }
+
+  /**
+   * Partial update: only the fields present in the DTO are written, the rest
+   * are preserved. Creates the `user_profiles` row on first edit (upsert).
+   * Normalizes whitespace; an explicit empty bio clears the field.
+   */
+  async updateProfile(
+    userId: string,
+    dto: UpdateUserProfileDto,
+  ): Promise<ProfileResponseDto> {
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      select: ['id', 'username', 'email', 'is_active'],
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    let profile = await this.profileRepo.findOne({
+      where: { user_id: userId },
+    });
+    if (!profile) {
+      profile = this.profileRepo.create({
+        user_id: userId,
+        display_name: user.username,
+        preferred_language: 'en',
+        is_private: false,
+      });
+    }
+
+    if (dto.display_name !== undefined) {
+      profile.display_name = dto.display_name.trim() || user.username;
+    }
+    if (dto.bio !== undefined) {
+      const bio = dto.bio.trim();
+      // null (not undefined) so TypeORM actually clears the column on save.
+      profile.bio = bio.length > 0 ? bio : null;
+    }
+    if (dto.preferred_language !== undefined) {
+      profile.preferred_language = dto.preferred_language;
+    }
+    if (dto.is_private !== undefined) {
+      profile.is_private = dto.is_private;
+    }
+
+    await this.profileRepo.save(profile);
+    return ProfileResponseDto.build(user, profile);
+  }
+
+  /**
+   * Stores the new photo URL produced by the existing uploads flow
+   * (POST /uploads/sign + direct PUT to R2). The URL itself is validated in
+   * the DTO; this only persists the reference.
+   */
+  async updateProfilePhoto(
+    userId: string,
+    profileImageUrl: string,
+  ): Promise<ProfileResponseDto> {
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      select: ['id', 'username', 'email', 'is_active'],
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    let profile = await this.profileRepo.findOne({
+      where: { user_id: userId },
+    });
+    if (!profile) {
+      profile = this.profileRepo.create({
+        user_id: userId,
+        display_name: user.username,
+        preferred_language: 'en',
+        is_private: false,
+      });
+    }
+
+    profile.profile_image_url = profileImageUrl;
+    await this.profileRepo.save(profile);
+    return ProfileResponseDto.build(user, profile);
+  }
+
+  /**
+   * Public view of another user's profile. Respects `is_private`: private
+   * profiles only expose username/display name/photo, never bio. Emails are
+   * never exposed on the public shape regardless of privacy.
+   */
+  async getPublicProfile(
+    targetUserId: string,
+  ): Promise<PublicProfileResponseDto> {
+    const user = await this.userRepo.findOne({
+      where: { id: targetUserId, is_active: true },
+      select: ['id', 'username'],
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const profile = await this.profileRepo.findOne({
+      where: { user_id: targetUserId },
+    });
+    return PublicProfileResponseDto.build(user, profile ?? null);
+  }
+
+  /**
+   * Username lookup used by the invite flow. Only active users, excludes the
+   * caller, capped at 20 rows, and returns the same safe public shape as
+   * getPublicProfile (no emails).
+   */
+  async searchUsers(
+    query: string,
+    viewerUserId: string,
+  ): Promise<PublicProfileResponseDto[]> {
+    const q = query.trim();
+    if (q.length === 0) return [];
+
+    const users = await this.userRepo.find({
+      where: {
+        username: ILike(`%${q}%`),
+        is_active: true,
+        id: Not(viewerUserId),
+      },
+      select: ['id', 'username'],
+      take: 20,
+      order: { username: 'ASC' },
+    });
+    if (users.length === 0) return [];
+
+    const profiles = await this.profileRepo.find({
+      where: { user_id: In(users.map((u) => u.id)) },
+    });
+    const profileByUser = new Map(profiles.map((p) => [p.user_id, p]));
+
+    return users.map((u) =>
+      PublicProfileResponseDto.build(u, profileByUser.get(u.id) ?? null),
+    );
+  }
+
+  /**
    * Computes the same current_day/today_completed/progress_percent fields
    * ChallengesService.getProgress()/getProgressSummary() compute for a single
    * challenge, but for every challenge the user is enrolled in. Without this,
@@ -49,13 +207,24 @@ export class UsersService {
    * challenges looked "stuck" on the home screen and the progress bar on the
    * Challenges tab never moved.
    */
-  private async attachProgress(
-    relations: ChallengeUserMap[],
-  ): Promise<Map<string, { current_day: number; today_completed: boolean; progress_percent: number }>> {
+  private async attachProgress(relations: ChallengeUserMap[]): Promise<
+    Map<
+      string,
+      {
+        current_day: number;
+        today_completed: boolean;
+        progress_percent: number;
+      }
+    >
+  > {
     const activeRelations = relations.filter((r) => r.status === 'active');
     const result = new Map<
       string,
-      { current_day: number; today_completed: boolean; progress_percent: number }
+      {
+        current_day: number;
+        today_completed: boolean;
+        progress_percent: number;
+      }
     >();
 
     if (activeRelations.length === 0) return result;
@@ -104,13 +273,19 @@ export class UsersService {
       );
       const currentDay = Math.max(daysSinceStart + 1, 1);
 
-      const completedDays = completedByChallenge.get(relation.challenge_id) ?? 0;
+      const completedDays =
+        completedByChallenge.get(relation.challenge_id) ?? 0;
       const progressPercent = durationDays
-        ? Math.max(0, Math.min(100, Math.round((completedDays / durationDays) * 100)))
+        ? Math.max(
+            0,
+            Math.min(100, Math.round((completedDays / durationDays) * 100)),
+          )
         : 0;
 
       result.set(relation.challenge_id, {
-        current_day: durationDays ? Math.min(currentDay, durationDays) : currentDay,
+        current_day: durationDays
+          ? Math.min(currentDay, durationDays)
+          : currentDay,
         today_completed: todayByChallenge.has(relation.challenge_id),
         progress_percent: progressPercent,
       });
@@ -163,7 +338,9 @@ export class UsersService {
 
     const progressByChallenge = await this.attachProgress(challenges);
     const { categoriesByChallenge, locationsByChallenge } =
-      await this.attachCategoriesAndLocations(challenges.map((c) => c.challenge_id));
+      await this.attachCategoriesAndLocations(
+        challenges.map((c) => c.challenge_id),
+      );
 
     const grouped: {
       active: any[];

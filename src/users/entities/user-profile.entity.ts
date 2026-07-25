@@ -14,7 +14,7 @@ export class UserProfile {
   display_name!: string;
 
   @Column({ nullable: true, type: 'text' })
-  bio?: string;
+  bio?: string | null;
 
   @Column({ nullable: true })
   preferred_language?: string;
