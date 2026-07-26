@@ -10,15 +10,16 @@
 
 const fs = require('fs');
 const {
-  createClient,
+  connectWithRetry,
   listAllSqlFiles,
   ensureMigrationsTable,
   getAppliedFilenames,
 } = require('./lib');
 
 async function run() {
-  const client = createClient();
-  await client.connect();
+  // Waits for the database to be reachable before applying anything, so a
+  // container start never fails just because the DB was momentarily away.
+  const client = await connectWithRetry();
 
   try {
     await ensureMigrationsTable(client);
