@@ -9,6 +9,10 @@ import { ChallengeUserMap } from './entities/challenge-user-map.entity';
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengeCycleDay } from './entities/challenge-cycle-days.entity';
 import { Routine } from '../routine/entities/routine.entity';
+import { ChallengeCategoryMap } from './entities/challenge-category-map.entity';
+import { ChallengeLocationMap } from './entities/challenge-location-map.entity';
+import { ExerciseCategory } from '../exercises/entities/exercise-category.entity';
+import { ExerciseLocation } from '../exercises/entities/exercise-location.entity';
 
 type MockRepo = {
   find: jest.Mock;
@@ -32,6 +36,8 @@ describe('ChallengesService', () => {
   let service: ChallengesService;
   let challengeRepo: MockRepo;
   let challengeCycleDaysRepo: MockRepo;
+  let userRepo: MockRepo;
+  let challengeUserMapRepo: MockRepo;
 
   const OWNER_ID = 'owner-1';
   const OTHER_USER_ID = 'other-2';
@@ -48,16 +54,40 @@ describe('ChallengesService', () => {
   beforeEach(async () => {
     challengeRepo = createMockRepo();
     challengeCycleDaysRepo = createMockRepo();
+    userRepo = createMockRepo();
+    challengeUserMapRepo = createMockRepo();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ChallengesService,
         { provide: getRepositoryToken(Challenge), useValue: challengeRepo },
-        { provide: getRepositoryToken(User), useValue: createMockRepo() },
-        { provide: getRepositoryToken(ChallengeUserMap), useValue: createMockRepo() },
+        { provide: getRepositoryToken(User), useValue: userRepo },
+        {
+          provide: getRepositoryToken(ChallengeUserMap),
+          useValue: challengeUserMapRepo,
+        },
         { provide: getRepositoryToken(WorkoutLog), useValue: createMockRepo() },
-        { provide: getRepositoryToken(ChallengeCycleDay), useValue: challengeCycleDaysRepo },
+        {
+          provide: getRepositoryToken(ChallengeCycleDay),
+          useValue: challengeCycleDaysRepo,
+        },
         { provide: getRepositoryToken(Routine), useValue: createMockRepo() },
+        {
+          provide: getRepositoryToken(ChallengeCategoryMap),
+          useValue: createMockRepo(),
+        },
+        {
+          provide: getRepositoryToken(ChallengeLocationMap),
+          useValue: createMockRepo(),
+        },
+        {
+          provide: getRepositoryToken(ExerciseCategory),
+          useValue: createMockRepo(),
+        },
+        {
+          provide: getRepositoryToken(ExerciseLocation),
+          useValue: createMockRepo(),
+        },
         { provide: DataSource, useValue: { transaction: jest.fn() } },
       ],
     }).compile();
@@ -71,7 +101,11 @@ describe('ChallengesService', () => {
       challengeRepo.findOne.mockResolvedValue(challenge);
       challengeRepo.save.mockResolvedValue({ ...challenge, name: 'Updated' });
 
-      const result = await service.update(CHALLENGE_ID, { name: 'Updated' } as any, OWNER_ID);
+      const result = await service.update(
+        CHALLENGE_ID,
+        { name: 'Updated' },
+        OWNER_ID,
+      );
 
       expect(challengeRepo.save).toHaveBeenCalled();
       expect(result.challenge.name).toBe('Updated');
@@ -134,10 +168,20 @@ describe('ChallengesService', () => {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
-        getOne: jest.fn().mockResolvedValue({ id: 'cycle-1', day_in_cycle: 1, day_type: 'workout', routine_id: null }),
+        getOne: jest.fn().mockResolvedValue({
+          id: 'cycle-1',
+          day_in_cycle: 1,
+          day_type: 'workout',
+          routine_id: null,
+        }),
       });
 
-      const result = await service.updateCycleDay(CHALLENGE_ID, 1, cycleDayDto, OWNER_ID);
+      const result = await service.updateCycleDay(
+        CHALLENGE_ID,
+        1,
+        cycleDayDto,
+        OWNER_ID,
+      );
 
       expect(challengeCycleDaysRepo.save).toHaveBeenCalled();
       expect(result.message).toBe('Challenge cycle day updated successfully');
@@ -157,6 +201,62 @@ describe('ChallengesService', () => {
 
       await expect(
         service.updateCycleDay('missing-id', 1, cycleDayDto, OWNER_ID),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+  describe('joinChallenge', () => {
+    it('should join an existing challenge as an active participant', async () => {
+      userRepo.findOne.mockResolvedValue({ id: OTHER_USER_ID });
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      challengeUserMapRepo.findOne.mockResolvedValue(null);
+      challengeUserMapRepo.create.mockImplementation((data: object) => ({
+        ...data,
+      }));
+      challengeUserMapRepo.save.mockImplementation((m: object) =>
+        Promise.resolve(m),
+      );
+
+      const result = await service.joinChallenge(OTHER_USER_ID, CHALLENGE_ID);
+
+      expect(challengeUserMapRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user_id: OTHER_USER_ID,
+          challenge_id: CHALLENGE_ID,
+          role: 'participant',
+          status: 'active',
+        }),
+      );
+      expect(result.message).toBe('Joined successfully');
+    });
+
+    it('should reject the creator joining their own challenge', async () => {
+      userRepo.findOne.mockResolvedValue({ id: OWNER_ID });
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+
+      await expect(
+        service.joinChallenge(OWNER_ID, CHALLENGE_ID),
+      ).rejects.toThrow('You cannot join a challenge you created');
+    });
+
+    it('should reject joining twice', async () => {
+      userRepo.findOne.mockResolvedValue({ id: OTHER_USER_ID });
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      challengeUserMapRepo.findOne.mockResolvedValue({
+        user_id: OTHER_USER_ID,
+        challenge_id: CHALLENGE_ID,
+      });
+
+      await expect(
+        service.joinChallenge(OTHER_USER_ID, CHALLENGE_ID),
+      ).rejects.toThrow('Already joined this challenge');
+    });
+
+    it('should throw NotFoundException when the challenge does not exist', async () => {
+      userRepo.findOne.mockResolvedValue({ id: OTHER_USER_ID });
+      challengeRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.joinChallenge(OTHER_USER_ID, CHALLENGE_ID),
       ).rejects.toThrow(NotFoundException);
     });
   });
