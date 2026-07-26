@@ -7,6 +7,31 @@ import {
 } from './entities/workout-post.entity';
 import { ModerationService } from '../openai/moderation.service';
 
+/** Shape consumed by the frontend (types/challenge.ts ChallengePhoto). */
+export interface ChallengePhoto {
+  id: string;
+  challengeId: string;
+  userName: string;
+  imageUrl: string | null;
+  day: number;
+  visibility: 'public' | 'private';
+  metrics: Array<{ label: string; value: string }>;
+  description: string;
+}
+
+interface PhotoRow {
+  id: number | string;
+  image_url: string | null;
+  caption: string | null;
+  visibility: string;
+  created_at: Date;
+  moderation_status: string | null;
+  challenge_id: string;
+  workout_log_id: number | string;
+  user_name: string;
+  joined_at: Date | null;
+}
+
 @Injectable()
 export class WorkoutPostsService {
   private moderationColumnsSupportPromise?: Promise<boolean>;
@@ -159,5 +184,143 @@ export class WorkoutPostsService {
         },
       })),
     };
+  }
+
+  // ---------------------------------------------------------------------
+  // Progress photos (challenge gallery + profile grid)
+  // ---------------------------------------------------------------------
+
+  /**
+   * Which moderation statuses are visible. Production shows only approved
+   * photos; a local/dev environment can set PHOTOS_INCLUDE_PENDING=true to also
+   * surface pending ones (moderation runs async, so freshly uploaded photos sit
+   * as 'pending' until OpenAI approves them).
+   */
+  private visibleModerationStatuses(): WorkoutPostModerationStatus[] {
+    const includePending = process.env.PHOTOS_INCLUDE_PENDING === 'true';
+    return includePending
+      ? [
+          WorkoutPostModerationStatus.APPROVED,
+          WorkoutPostModerationStatus.PENDING,
+        ]
+      : [WorkoutPostModerationStatus.APPROVED];
+  }
+
+  /** All progress photos for a challenge, newest first. */
+  async getChallengePhotos(challengeId: string): Promise<ChallengePhoto[]> {
+    return this.fetchPhotos('wl.challenge_id = $1', [challengeId]);
+  }
+
+  /** Every progress photo the given user has posted, across all challenges. */
+  async getUserPhotos(userId: string): Promise<ChallengePhoto[]> {
+    return this.fetchPhotos('p.user_id = $1', [userId]);
+  }
+
+  private async fetchPhotos(
+    whereClause: string,
+    params: unknown[],
+  ): Promise<ChallengePhoto[]> {
+    const supportsModeration = await this.supportsModerationColumns();
+
+    let moderationFilter = '';
+    if (supportsModeration) {
+      params.push(this.visibleModerationStatuses());
+      moderationFilter = `AND p.moderation_status = ANY($${params.length})`;
+    }
+
+    const rows: PhotoRow[] = await this.repo.manager.query(
+      `SELECT p.id, p.image_url, p.caption, p.visibility, p.created_at,
+              ${supportsModeration ? 'p.moderation_status' : 'NULL AS moderation_status'},
+              wl.challenge_id, p.workout_log_id,
+              COALESCE(up.display_name, u.username) AS user_name,
+              cum.joined_at
+       FROM havit.workout_posts p
+       JOIN havit.workout_logs wl ON wl.id = p.workout_log_id
+       JOIN havit.users u ON u.id = p.user_id
+       LEFT JOIN havit.user_profiles up ON up.user_id = p.user_id
+       LEFT JOIN havit.challenge_user_map cum
+              ON cum.challenge_id = wl.challenge_id AND cum.user_id = p.user_id
+       WHERE ${whereClause} ${moderationFilter}
+       ORDER BY p.created_at DESC`,
+      params,
+    );
+
+    if (rows.length === 0) return [];
+
+    const metricsByLog = await this.metricsByWorkoutLog(
+      rows.map((r) => r.workout_log_id),
+    );
+
+    return rows.map((r) => ({
+      id: String(r.id),
+      challengeId: r.challenge_id,
+      userName: r.user_name,
+      imageUrl: r.image_url,
+      day: this.dayFromJoinedAt(r.joined_at, r.created_at),
+      // Post visibility is 'private' | 'followers'; the gallery model uses
+      // 'private' | 'public' (followers-visible reads as public here).
+      visibility: r.visibility === 'private' ? 'private' : 'public',
+      metrics: metricsByLog.get(String(r.workout_log_id)) ?? [],
+      description: r.caption ?? '',
+    }));
+  }
+
+  /** Exercise summary (name + set count) per workout log, for the photo card. */
+  private async metricsByWorkoutLog(
+    workoutLogIds: Array<number | string>,
+  ): Promise<Map<string, Array<{ label: string; value: string }>>> {
+    const map = new Map<string, Array<{ label: string; value: string }>>();
+    const ids = [...new Set(workoutLogIds.map((id) => Number(id)))];
+    if (ids.length === 0) return map;
+
+    const rows: Array<{
+      workout_log_id: number | string;
+      exercise_name: string;
+      set_count: number | string;
+    }> = await this.repo.manager.query(
+      `SELECT wle.workout_log_id, e.name AS exercise_name,
+              COUNT(wles.id) AS set_count
+       FROM havit.workout_log_exercises wle
+       JOIN havit.exercises e ON e.id = wle.exercise_id
+       LEFT JOIN havit.workout_log_exercise_sets wles
+              ON wles.workout_log_exercise_id = wle.id
+       WHERE wle.workout_log_id = ANY($1)
+       GROUP BY wle.workout_log_id, wle.order_index, e.name
+       ORDER BY wle.workout_log_id, wle.order_index`,
+      [ids],
+    );
+
+    for (const row of rows) {
+      const key = String(row.workout_log_id);
+      const list = map.get(key) ?? [];
+      const sets = Number(row.set_count);
+      list.push({
+        label: row.exercise_name,
+        value: sets > 0 ? `${sets} set${sets === 1 ? '' : 's'}` : 'Logged',
+      });
+      map.set(key, list);
+    }
+
+    return map;
+  }
+
+  /** Challenge day (1-indexed, UTC) the photo belongs to, from the poster's
+   * join date. Falls back to day 1 when the join date is unknown. */
+  private dayFromJoinedAt(joinedAt: Date | null, createdAt: Date): number {
+    if (!joinedAt) return 1;
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const joined = new Date(joinedAt);
+    const created = new Date(createdAt);
+    const joinedUtc = Date.UTC(
+      joined.getUTCFullYear(),
+      joined.getUTCMonth(),
+      joined.getUTCDate(),
+    );
+    const createdUtc = Date.UTC(
+      created.getUTCFullYear(),
+      created.getUTCMonth(),
+      created.getUTCDate(),
+    );
+    return Math.max(Math.floor((createdUtc - joinedUtc) / msPerDay) + 1, 1);
   }
 }

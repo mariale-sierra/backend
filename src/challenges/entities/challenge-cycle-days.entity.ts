@@ -14,7 +14,9 @@ import { Routine } from '../../routine/entities/routine.entity';
   name: 'challenge_cycle_days',
 })
 export class ChallengeCycleDay {
-  @PrimaryGeneratedColumn('uuid')
+  // DB column is BIGINT GENERATED ALWAYS AS IDENTITY (see init schema), not a
+  // uuid. Postgres returns bigint as a string to avoid precision loss.
+  @PrimaryGeneratedColumn({ type: 'bigint' })
   id!: string;
 
   @Column('uuid')

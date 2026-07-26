@@ -8,22 +8,26 @@
 -- the challenge-creation pipeline needs real rows to link against instead of dropping
 -- categories/locations/metrics on the floor.
 
-INSERT INTO havit.exercise_categories (name) VALUES
-  ('Strength'),
-  ('Cardio Intense'),
-  ('Cardio Low'),
-  ('Flexibility'),
-  ('Mind-Body'),
-  ('Functional')
-ON CONFLICT (name) DO NOTHING;
+-- exercise_categories/exercise_locations carry a NOT NULL UNIQUE `code` in the
+-- init schema, so we seed (code, name) and conflict on `code`. The app looks
+-- these up by `name` (challenges.service), so the human-readable names are what
+-- matter downstream; the codes are just the catalog's stable keys.
+INSERT INTO havit.exercise_categories (code, name) VALUES
+  ('strength', 'Strength'),
+  ('cardio_intense', 'Cardio Intense'),
+  ('cardio_low', 'Cardio Low'),
+  ('flexibility', 'Flexibility'),
+  ('mind_body', 'Mind-Body'),
+  ('functional', 'Functional')
+ON CONFLICT (code) DO NOTHING;
 
-INSERT INTO havit.exercise_locations (name) VALUES
-  ('Gym'),
-  ('Home'),
-  ('Outdoor'),
-  ('Studio'),
-  ('Anywhere')
-ON CONFLICT (name) DO NOTHING;
+INSERT INTO havit.exercise_locations (code, name) VALUES
+  ('gym', 'Gym'),
+  ('home', 'Home'),
+  ('outdoor', 'Outdoor'),
+  ('studio', 'Studio'),
+  ('anywhere', 'Anywhere')
+ON CONFLICT (code) DO NOTHING;
 
 INSERT INTO havit.metric_types (code, name, value_type, default_unit, description) VALUES
   ('reps', 'Repetitions', 'int', NULL, 'Number of repetitions performed in a set'),

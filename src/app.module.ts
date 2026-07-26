@@ -48,14 +48,20 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
       autoLoadEntities: true,
       schema: 'havit',
       synchronize: false,
-      ssl: {
-        // Azure Postgres requires TLS; cert verification stays off by
-        // default (matches current behavior) until the Azure CA cert is
-        // wired in as an infra follow-up — do NOT flip this to `true`
-        // without that cert, it will break every connection. Set
-        // DB_SSL_REJECT_UNAUTHORIZED=true only once that's in place.
-        rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true',
-      },
+      // Azure Postgres requires TLS (default). A local Postgres container does
+      // not speak SSL, so set DB_SSL=false to disable it for local dev only.
+      ssl:
+        process.env.DB_SSL === 'false'
+          ? false
+          : {
+              // Cert verification stays off by default (matches current
+              // behavior) until the Azure CA cert is wired in as an infra
+              // follow-up — do NOT flip this to `true` without that cert, it
+              // will break every connection. Set
+              // DB_SSL_REJECT_UNAUTHORIZED=true only once that's in place.
+              rejectUnauthorized:
+                process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true',
+            },
     }),
     AuthModule,
     UsersModule,

@@ -260,16 +260,27 @@ export class UsersService {
     const todayByChallenge = new Set(todayWorkouts.map((w) => w.challengeId));
 
     const msPerDay = 1000 * 60 * 60 * 24;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // UTC calendar dates (not local midnight) so the day count matches the UTC
+    // database and cannot drift by a day with the server's timezone. Mirrors
+    // ChallengesService.calculateCurrentDay.
+    const now = new Date();
+    const todayMidnightUtc = Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+    );
 
     for (const relation of activeRelations) {
       const durationDays = relation.challenge?.duration_days ?? 0;
 
-      const joinedAt = new Date(relation.joined_at!);
-      joinedAt.setHours(0, 0, 0, 0);
+      const joined = new Date(relation.joined_at!);
+      const joinedMidnightUtc = Date.UTC(
+        joined.getUTCFullYear(),
+        joined.getUTCMonth(),
+        joined.getUTCDate(),
+      );
       const daysSinceStart = Math.floor(
-        (today.getTime() - joinedAt.getTime()) / msPerDay,
+        (todayMidnightUtc - joinedMidnightUtc) / msPerDay,
       );
       const currentDay = Math.max(daysSinceStart + 1, 1);
 

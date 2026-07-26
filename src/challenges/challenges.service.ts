@@ -960,23 +960,36 @@ export class ChallengesService {
   }
 
   /**
-   * Days elapsed since `joinedAt` (inclusive, 1-indexed) as of "today" at
-   * local midnight. Shared by `getProgress`/`getToday`/`getProgressSummary`,
-   * which previously copy-pasted this exact calculation.
+   * Days elapsed since `joinedAt` (inclusive, 1-indexed) as of "today".
+   * Shared by `getProgress`/`getToday`/`getProgressSummary`, which previously
+   * copy-pasted this exact calculation.
+   *
+   * Computed on UTC calendar dates (not local midnight) so the result is
+   * deterministic regardless of the server's timezone and cannot drift by a
+   * day depending on where the process runs — the database is UTC. Guarded to
+   * never return < 1 (a user cannot have joined in the future).
    */
   private calculateCurrentDay(joinedAt: Date): number {
-    const joinedDate = new Date(joinedAt);
-    joinedDate.setHours(0, 0, 0, 0);
+    const joined = new Date(joinedAt);
+    const joinedMidnightUtc = Date.UTC(
+      joined.getUTCFullYear(),
+      joined.getUTCMonth(),
+      joined.getUTCDate(),
+    );
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const now = new Date();
+    const todayMidnightUtc = Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+    );
 
     const msPerDay = 1000 * 60 * 60 * 24;
     const daysSinceStart = Math.floor(
-      (today.getTime() - joinedDate.getTime()) / msPerDay,
+      (todayMidnightUtc - joinedMidnightUtc) / msPerDay,
     );
 
-    return daysSinceStart + 1;
+    return Math.max(daysSinceStart + 1, 1);
   }
 
   /** Maps an absolute `currentDay` onto a 1-indexed position within the challenge's cycle. */

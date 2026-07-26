@@ -39,7 +39,9 @@ function createClient() {
     user: process.env.DB_USERNAME,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_DATABASE,
-    ssl: { rejectUnauthorized: false },
+    // Azure Postgres requires TLS (default). A local Postgres container does
+    // not speak SSL, so set DB_SSL=false to disable it for local dev only.
+    ssl: process.env.DB_SSL === 'false' ? false : { rejectUnauthorized: false },
     // Fail fast instead of hanging forever when the DB is unreachable —
     // connectWithRetry() turns this into bounded retries.
     connectionTimeoutMillis: 10_000,

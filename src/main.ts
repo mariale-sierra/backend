@@ -1,3 +1,5 @@
+// Must be first: pins the process to UTC before any Date/DB work. See file.
+import './set-timezone';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';

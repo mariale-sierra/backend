@@ -1,11 +1,35 @@
-import { Controller, Get, ParseUUIDPipe, Query } from '@nestjs/common';
-import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { WorkoutPostsService } from './workout-posts.service';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 
 @ApiTags('Workout Posts')
 @Controller('workout-posts')
 export class WorkoutPostsController {
   constructor(private readonly workoutPostsService: WorkoutPostsService) {}
+
+  @Get('mine')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Fotos de progreso del usuario autenticado',
+    description: 'Devuelve todas las fotos de progreso del usuario (perfil).',
+  })
+  getMyPhotos(@CurrentUser() user: AuthenticatedUser) {
+    return this.workoutPostsService.getUserPhotos(user.sub);
+  }
+
+  @Get('challenge/:challengeId')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Fotos de progreso de un challenge',
+    description: 'Devuelve las fotos de progreso de un challenge (galería).',
+  })
+  getChallengePhotos(
+    @Param('challengeId', new ParseUUIDPipe()) challengeId: string,
+  ) {
+    return this.workoutPostsService.getChallengePhotos(challengeId);
+  }
 
   @Get('mosaic')
   @ApiOperation({
