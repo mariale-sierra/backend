@@ -41,9 +41,62 @@ export class ExercisesService {
   }
 
   async findAll() {
-    return this.exerciseRepo.find({
+    const exercises = await this.exerciseRepo.find({
       where: { is_active: true },
     });
+    if (exercises.length === 0) return exercises;
+
+    const exerciseIds = exercises.map((e) => e.id);
+
+    const categoryMaps = await this.categoryMapRepo.find({
+      where: { exerciseId: In(exerciseIds) },
+      relations: { category: true },
+    });
+    const bodyPartMaps = await this.bodyPartMapRepo.find({
+      where: { exerciseId: In(exerciseIds) },
+      relations: { bodyPart: true },
+    });
+    const locationMaps = await this.locationMapRepo.find({
+      where: { exerciseId: In(exerciseIds) },
+      relations: { location: true },
+    });
+
+    const primaryCategoryByExercise = new Map<number, string>();
+    for (const map of categoryMaps) {
+      if (map.isPrimary || !primaryCategoryByExercise.has(map.exerciseId)) {
+        primaryCategoryByExercise.set(map.exerciseId, map.category.name);
+      }
+    }
+    const bodyPartsByExercise = new Map<number, string[]>();
+    for (const map of bodyPartMaps) {
+      const list = bodyPartsByExercise.get(map.exerciseId) ?? [];
+      list.push(map.bodyPart.name);
+      bodyPartsByExercise.set(map.exerciseId, list);
+    }
+    const primaryLocationByExercise = new Map<number, string>();
+    for (const map of locationMaps) {
+      if (map.isPrimary || !primaryLocationByExercise.has(map.exerciseId)) {
+        primaryLocationByExercise.set(map.exerciseId, map.location.name);
+      }
+    }
+
+    return exercises.map((exercise) => ({
+      ...exercise,
+      category: primaryCategoryByExercise.get(exercise.id) ?? null,
+      location: primaryLocationByExercise.get(exercise.id) ?? null,
+      muscle_groups: bodyPartsByExercise.get(exercise.id) ?? [],
+    }));
+  }
+
+  async findAllBodyParts() {
+    return this.bodyPartRepo.find({
+      where: { isActive: true },
+      order: { level: 'ASC', sortOrder: 'ASC' },
+    });
+  }
+
+  async findAllCategories() {
+    return this.categoryRepo.find({ order: { name: 'ASC' } });
   }
 
   async findFullById(id: number) {

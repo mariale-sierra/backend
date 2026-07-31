@@ -6,5 +6,8 @@ export class ExerciseLocation {
   id!: number;
 
   @Column({ unique: true })
+  code!: string;
+
+  @Column()
   name!: string;
 }

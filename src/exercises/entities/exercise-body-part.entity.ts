@@ -1,10 +1,29 @@
-import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 
-@Entity({ schema: 'havit', name: 'exercise_body_parts' })
+@Entity({ schema: 'havit', name: 'body_parts' })
 export class ExerciseBodyPart {
   @PrimaryGeneratedColumn()
   id!: number;
 
+  @Column({ name: 'parent_id', nullable: true })
+  parentId?: number | null;
+
   @Column({ unique: true })
+  code!: string;
+
+  @Column()
   name!: string;
+
+  @Column()
+  level!: number;
+
+  @Column({ name: 'sort_order', nullable: true })
+  sortOrder?: number | null;
+
+  @Column({ name: 'is_active', default: true })
+  isActive!: boolean;
+
+  @ManyToOne(() => ExerciseBodyPart, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'parent_id' })
+  parent?: ExerciseBodyPart;
 }

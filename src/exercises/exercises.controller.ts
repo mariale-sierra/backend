@@ -48,6 +48,28 @@ export class ExercisesController {
   }
 
   @Public()
+  @Get('body-parts')
+  @ApiOperation({
+    summary: 'Obtener catálogo de partes del cuerpo',
+    description: 'Lista todas las partes del cuerpo activas (jerarquía de músculos)',
+  })
+  @ApiResponse({ status: 200, description: 'Lista de partes del cuerpo' })
+  findAllBodyParts() {
+    return this.exercisesService.findAllBodyParts();
+  }
+
+  @Public()
+  @Get('categories')
+  @ApiOperation({
+    summary: 'Obtener catálogo de categorías',
+    description: 'Lista todas las categorías de ejercicio (tipo de actividad)',
+  })
+  @ApiResponse({ status: 200, description: 'Lista de categorías' })
+  findAllCategories() {
+    return this.exercisesService.findAllCategories();
+  }
+
+  @Public()
   @Get(':id/full')
   @ApiOperation({
     summary: 'Obtener ejercicio completo',

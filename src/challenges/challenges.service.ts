@@ -25,6 +25,8 @@ import { ExerciseLocation } from '../exercises/entities/exercise-location.entity
 import { Exercise, TrackingMode } from '../exercises/entities/exercise.entity';
 import { ExerciseCategoryMap } from '../exercises/entities/exercise-category-map.entity';
 import { ExerciseLocationMap } from '../exercises/entities/exercise-location-map.entity';
+import { ExerciseBodyPart } from '../exercises/entities/exercise-body-part.entity';
+import { ExerciseBodyPartMap } from '../exercises/entities/exercise-body-part-map.entity';
 import { ExerciseMetric } from '../exercises/entities/exercise-metric.entity';
 import { MetricType } from '../metrics/entities/metric-type.entity';
 import { RoutineExercise } from '../routine/entities/routine-exercise.entity';
@@ -142,7 +144,10 @@ export class ChallengesService {
     if (existing) return existing.id;
 
     const created = await manager.save(
-      manager.create(ExerciseCategory, { name: trimmed }),
+      manager.create(ExerciseCategory, {
+        name: trimmed,
+        code: this.slugify(trimmed),
+      }),
     );
     return created.id;
   }
@@ -160,7 +165,10 @@ export class ChallengesService {
     if (existing) return existing.id;
 
     const created = await manager.save(
-      manager.create(ExerciseLocation, { name: trimmed }),
+      manager.create(ExerciseLocation, {
+        name: trimmed,
+        code: this.slugify(trimmed),
+      }),
     );
     return created.id;
   }
@@ -262,8 +270,50 @@ export class ChallengesService {
     await this.ensureExerciseCategory(manager, exercise.id, dto.activity_type);
     await this.ensureExerciseLocation(manager, exercise.id, dto.location);
     await this.ensureExerciseMetrics(manager, exercise.id);
+    await this.ensureExerciseBodyParts(manager, exercise.id, dto.muscle_groups);
 
     return exercise;
+  }
+
+  /**
+   * Links an exercise to the body parts (muscle groups) selected on the frontend.
+   * `muscle_groups` carries human-readable names (e.g. "Chest"), matched against
+   * the seeded `body_parts` catalog by name — same lookup-by-name pattern as
+   * ensureExerciseCategory/ensureExerciseLocation. Unknown names are skipped
+   * rather than auto-created, since body_parts is a curated hierarchy (unlike
+   * categories/locations, which are a flat, user-extensible tag list.
+   */
+  private async ensureExerciseBodyParts(
+    manager: EntityManager,
+    exerciseId: number,
+    muscleGroups?: string[],
+  ) {
+    const names = [...new Set((muscleGroups ?? []).map((n) => n.trim()).filter(Boolean))];
+    if (names.length === 0) return;
+
+    const bodyPartRepo = manager.getRepository(ExerciseBodyPart);
+    const mapRepo = manager.getRepository(ExerciseBodyPartMap);
+
+    for (const name of names) {
+      const bodyPart = await bodyPartRepo
+        .createQueryBuilder('bp')
+        .where('LOWER(bp.name) = LOWER(:name)', { name })
+        .getOne();
+      if (!bodyPart) continue;
+
+      const existing = await mapRepo.findOne({
+        where: { exerciseId, bodyPartId: bodyPart.id },
+      });
+      if (existing) continue;
+
+      await manager.save(
+        mapRepo.create({
+          exerciseId,
+          bodyPartId: bodyPart.id,
+          relationType: 'primary',
+        }),
+      );
+    }
   }
 
   private async ensureExerciseCategory(
@@ -572,10 +622,14 @@ export class ChallengesService {
 
     const [enriched] = await this.attachCategoriesAndLocations([challenge]);
     const cycleDays = await this.getCycleDaySummaries(id);
+    const membersJoined = await this.challengeUserMapRepo.count({
+      where: { challenge_id: id, status: 'active' },
+    });
 
     return {
       ...enriched,
       cycle_days: cycleDays,
+      members_joined: membersJoined,
     };
   }
 
