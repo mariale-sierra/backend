@@ -16,6 +16,8 @@ import { ExerciseCategory } from '../exercises/entities/exercise-category.entity
 import { ExerciseLocation } from '../exercises/entities/exercise-location.entity';
 import { ExerciseCategoryMap } from '../exercises/entities/exercise-category-map.entity';
 import { ExerciseLocationMap } from '../exercises/entities/exercise-location-map.entity';
+import { ExerciseBodyPart } from '../exercises/entities/exercise-body-part.entity';
+import { ExerciseBodyPartMap } from '../exercises/entities/exercise-body-part-map.entity';
 import { ExerciseMetric } from '../exercises/entities/exercise-metric.entity';
 import { Exercise } from '../exercises/entities/exercise.entity';
 import { MetricType } from '../metrics/entities/metric-type.entity';
@@ -39,6 +41,8 @@ import { RoutineExerciseSetTarget } from '../routine/entities/routine-exercise-s
       ExerciseLocation,
       ExerciseCategoryMap,
       ExerciseLocationMap,
+      ExerciseBodyPart,
+      ExerciseBodyPartMap,
       ExerciseMetric,
       Exercise,
       MetricType,
