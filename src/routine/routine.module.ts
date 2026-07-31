@@ -16,9 +16,17 @@ import { RoutineExerciseSetTarget } from './entities/routine-exercise-set-target
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Routine, RoutineExercise, RoutineExerciseSet,RoutineExerciseTarget,
-    RoutineExerciseSetTarget,Exercise, Challenge]),
-    ChallengesModule,AuthModule,
+    TypeOrmModule.forFeature([
+      Routine,
+      RoutineExercise,
+      RoutineExerciseSet,
+      RoutineExerciseTarget,
+      RoutineExerciseSetTarget,
+      Exercise,
+      Challenge,
+    ]),
+    ChallengesModule,
+    AuthModule,
   ],
   controllers: [RoutineController],
   providers: [RoutineService],

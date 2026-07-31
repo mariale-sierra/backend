@@ -52,7 +52,7 @@ export class RoutineExerciseSetTarget {
 
   @ManyToOne(
     () => RoutineExerciseSet,
-    routineExerciseSet => routineExerciseSet.targets,
+    (routineExerciseSet) => routineExerciseSet.targets,
     { onDelete: 'CASCADE' },
   )
   @JoinColumn({ name: 'routine_exercise_set_id' })

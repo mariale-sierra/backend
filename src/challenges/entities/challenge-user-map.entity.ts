@@ -1,4 +1,11 @@
-import { Entity, PrimaryColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import {
+  Entity,
+  PrimaryColumn,
+  Column,
+  CreateDateColumn,
+  ManyToOne,
+  JoinColumn,
+} from 'typeorm';
 import { Challenge } from './challenge.entity';
 
 @Entity({ schema: 'havit', name: 'challenge_user_map' })

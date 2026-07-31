@@ -1,10 +1,4 @@
-import {
-  Entity,
-  ManyToOne,
-  JoinColumn,
-  Column,
-  PrimaryColumn,
-} from 'typeorm';
+import { Entity, ManyToOne, JoinColumn, Column, PrimaryColumn } from 'typeorm';
 import { Exercise } from './exercise.entity';
 import { MetricType } from '../../metrics/entities/metric-type.entity';
 
@@ -16,7 +10,9 @@ export class ExerciseMetric {
   @PrimaryColumn({ name: 'metric_type_id' })
   metricTypeId!: number;
 
-  @ManyToOne(() => Exercise, (exercise) => exercise.exercise_metrics, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Exercise, (exercise) => exercise.exercise_metrics, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'exercise_id' })
   exercise!: Exercise;
 

@@ -1,9 +1,4 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  OneToMany,
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
 
 @Entity({ schema: 'havit', name: 'routines' })
 export class Routine {
@@ -22,6 +17,6 @@ export class Routine {
   @Column({ default: true })
   is_active!: boolean;
 
-  @OneToMany('RoutineExercise', 'routine')  
+  @OneToMany('RoutineExercise', 'routine')
   routine_exercises?: any[];
 }

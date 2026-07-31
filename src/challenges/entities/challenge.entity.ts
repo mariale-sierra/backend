@@ -6,7 +6,7 @@ export class Challenge {
   id!: string;
 
   @Column({ type: 'uuid' })
-  created_by_user_id!: string; 
+  created_by_user_id!: string;
 
   @Column()
   name!: string;

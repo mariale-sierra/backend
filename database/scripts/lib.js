@@ -39,8 +39,44 @@ function createClient() {
     user: process.env.DB_USERNAME,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_DATABASE,
-    ssl: { rejectUnauthorized: false },
+    // Azure Postgres requires TLS (default). A local Postgres container does
+    // not speak SSL, so set DB_SSL=false to disable it for local dev only.
+    ssl: process.env.DB_SSL === 'false' ? false : { rejectUnauthorized: false },
+    // Fail fast instead of hanging forever when the DB is unreachable —
+    // connectWithRetry() turns this into bounded retries.
+    connectionTimeoutMillis: 10_000,
   });
+}
+
+/**
+ * Connects with retries so container starts don't race the database:
+ * `db:migrate` runs before the API on every boot (Dockerfile CMD and
+ * raiz/docker-compose.yml command), and the DB — remote Azure Postgres —
+ * may be briefly unreachable (network blip, failover). Retries only
+ * connection-level errors; real migration failures still abort the start.
+ */
+async function connectWithRetry(maxAttempts = 15, delayMs = 2000) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const client = createClient();
+    try {
+      await client.connect();
+      if (attempt > 1) {
+        console.log(`[db] connected after ${attempt} attempt(s)`);
+      }
+      return client;
+    } catch (err) {
+      lastError = err;
+      await client.end().catch(() => {});
+      console.warn(
+        `[db] connection attempt ${attempt}/${maxAttempts} failed: ${err.message}`,
+      );
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  throw lastError;
 }
 
 function listSqlFiles(phase) {
@@ -83,6 +119,7 @@ module.exports = {
   DATABASE_DIR,
   PHASES,
   createClient,
+  connectWithRetry,
   listAllSqlFiles,
   ensureMigrationsTable,
   getAppliedFilenames,

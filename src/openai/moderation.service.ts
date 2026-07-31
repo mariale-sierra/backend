@@ -1,6 +1,4 @@
 import {
-  BadRequestException,
-  HttpException,
   Injectable,
   InternalServerErrorException,
   ServiceUnavailableException,
@@ -19,6 +17,11 @@ type ModerationInputItem =
       };
     };
 
+export interface ModerationResult {
+  flagged: boolean;
+  flaggedCategories: string[];
+}
+
 @Injectable()
 export class ModerationService {
   private getClient() {
@@ -33,7 +36,22 @@ export class ModerationService {
     return new OpenAI({ apiKey });
   }
 
-  async validateWorkoutImage(imageUrl: string, caption?: string) {
+  /**
+   * Returns the moderation verdict for a workout post image/caption.
+   *
+   * Important: a "flagged" (rejected) result is a *successful* moderation
+   * call, not a failure — it is returned normally, never thrown. Only a real
+   * problem talking to the moderation API (network error, missing API key,
+   * rate limiting, etc.) throws. Callers must check `result.flagged` instead
+   * of relying on try/catch to distinguish "content rejected" from "service
+   * unavailable" — conflating the two previously caused legitimately
+   * rejected images to be retried 3 times and then mislabeled as "pending"
+   * instead of "rejected".
+   */
+  async validateWorkoutImage(
+    imageUrl: string,
+    caption?: string,
+  ): Promise<ModerationResult> {
     const openai = this.getClient();
 
     const input: ModerationInputItem[] = [];
@@ -60,25 +78,14 @@ export class ModerationService {
 
       const result = response.results[0];
 
-      if (result.flagged) {
-        const flaggedCategories = Object.entries(result.categories)
-          .filter(([, isFlagged]) => isFlagged)
-          .map(([category]) => category);
+      const flaggedCategories = result.flagged
+        ? Object.entries(result.categories)
+            .filter(([, isFlagged]) => isFlagged)
+            .map(([category]) => category)
+        : [];
 
-        throw new BadRequestException({
-          message:
-            'No se puede publicar este contenido. La imagen o el texto fueron rechazados por moderación.',
-          code: 'CONTENT_REJECTED',
-          categories: flaggedCategories,
-        });
-      }
-
-      return result;
+      return { flagged: result.flagged, flaggedCategories };
     } catch (error) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-
       console.error('MODERATION ERROR:', error);
 
       throw new ServiceUnavailableException(

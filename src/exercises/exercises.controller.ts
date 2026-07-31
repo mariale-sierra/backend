@@ -7,8 +7,16 @@ import {
   Post,
 } from '@nestjs/common';
 import { ExercisesService } from './exercises.service';
-import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { UpdateExerciseRelationsDto } from './dto/update-exercise-relations.dto';
+import { CreateExerciseDto } from './dto/create-exercise.dto';
+import { Public } from '../auth/decorators/public.decorator';
 
 @ApiTags('Exercises')
 @Controller('exercises')
@@ -16,16 +24,19 @@ export class ExercisesController {
   constructor(private readonly exercisesService: ExercisesService) {}
 
   @Post()
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Crear nuevo ejercicio',
     description: 'Crea un nuevo ejercicio en la base de datos',
   })
   @ApiResponse({ status: 201, description: 'Ejercicio creado exitosamente' })
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
-  create(@Body() body) {
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  create(@Body() body: CreateExerciseDto) {
     return this.exercisesService.create(body);
   }
 
+  @Public()
   @Get()
   @ApiOperation({
     summary: 'Obtener todos los ejercicios',
@@ -36,6 +47,29 @@ export class ExercisesController {
     return this.exercisesService.findAll();
   }
 
+  @Public()
+  @Get('body-parts')
+  @ApiOperation({
+    summary: 'Obtener catálogo de partes del cuerpo',
+    description: 'Lista todas las partes del cuerpo activas (jerarquía de músculos)',
+  })
+  @ApiResponse({ status: 200, description: 'Lista de partes del cuerpo' })
+  findAllBodyParts() {
+    return this.exercisesService.findAllBodyParts();
+  }
+
+  @Public()
+  @Get('categories')
+  @ApiOperation({
+    summary: 'Obtener catálogo de categorías',
+    description: 'Lista todas las categorías de ejercicio (tipo de actividad)',
+  })
+  @ApiResponse({ status: 200, description: 'Lista de categorías' })
+  findAllCategories() {
+    return this.exercisesService.findAllCategories();
+  }
+
+  @Public()
   @Get(':id/full')
   @ApiOperation({
     summary: 'Obtener ejercicio completo',
@@ -50,6 +84,7 @@ export class ExercisesController {
   }
 
   @Post(':id/relations')
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Asignar relaciones de ejercicio',
     description:
@@ -61,6 +96,7 @@ export class ExercisesController {
     description: 'Relaciones asignadas exitosamente',
   })
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
   @ApiResponse({ status: 404, description: 'Ejercicio no encontrado' })
   updateRelations(
     @Param('id', ParseIntPipe) id: number,
