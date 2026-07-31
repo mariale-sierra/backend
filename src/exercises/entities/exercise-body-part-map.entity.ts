@@ -15,7 +15,7 @@ export class ExerciseBodyPartMap {
   @Column({ name: 'relation_type', type: 'enum', enum: ['primary', 'secondary', 'supporting'] })
   relationType!: BodyPartRelationType;
 
-  @Column({ name: 'priority_order', nullable: true })
+  @Column({ name: 'priority_order', type: 'int', nullable: true })
   priorityOrder?: number | null;
 
   @ManyToOne(() => Exercise, (exercise) => exercise.body_part_maps, {
