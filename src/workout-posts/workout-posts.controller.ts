@@ -27,8 +27,9 @@ export class WorkoutPostsController {
   })
   getChallengePhotos(
     @Param('challengeId', new ParseUUIDPipe()) challengeId: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.workoutPostsService.getChallengePhotos(challengeId);
+    return this.workoutPostsService.getChallengePhotos(challengeId, user.sub);
   }
 
   @Get('mosaic')

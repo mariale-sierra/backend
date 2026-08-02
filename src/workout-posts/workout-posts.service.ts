@@ -206,19 +206,26 @@ export class WorkoutPostsService {
       : [WorkoutPostModerationStatus.APPROVED];
   }
 
-  /** All progress photos for a challenge, newest first. */
-  async getChallengePhotos(challengeId: string): Promise<ChallengePhoto[]> {
-    return this.fetchPhotos('wl.challenge_id = $1', [challengeId]);
+  /**
+   * All progress photos for a challenge, newest first, visible to `viewerId`:
+   * public/followers posts from anyone, plus the viewer's own private posts.
+   */
+  async getChallengePhotos(
+    challengeId: string,
+    viewerId: string,
+  ): Promise<ChallengePhoto[]> {
+    return this.fetchPhotos('wl.challenge_id = $1', [challengeId], viewerId);
   }
 
   /** Every progress photo the given user has posted, across all challenges. */
   async getUserPhotos(userId: string): Promise<ChallengePhoto[]> {
-    return this.fetchPhotos('p.user_id = $1', [userId]);
+    return this.fetchPhotos('p.user_id = $1', [userId], userId);
   }
 
   private async fetchPhotos(
     whereClause: string,
     params: unknown[],
+    viewerId: string,
   ): Promise<ChallengePhoto[]> {
     const supportsModeration = await this.supportsModerationColumns();
 
@@ -227,6 +234,12 @@ export class WorkoutPostsService {
       params.push(this.visibleModerationStatuses());
       moderationFilter = `AND p.moderation_status = ANY($${params.length})`;
     }
+
+    // Private posts are only visible to the person who posted them — everyone
+    // else only sees public/followers posts, regardless of shared challenge
+    // membership.
+    params.push(viewerId);
+    const visibilityFilter = `AND (p.visibility != 'private' OR p.user_id = $${params.length})`;
 
     const rows: PhotoRow[] = await this.repo.manager.query(
       `SELECT p.id, p.image_url, p.caption, p.visibility, p.created_at,
@@ -240,7 +253,7 @@ export class WorkoutPostsService {
        LEFT JOIN havit.user_profiles up ON up.user_id = p.user_id
        LEFT JOIN havit.challenge_user_map cum
               ON cum.challenge_id = wl.challenge_id AND cum.user_id = p.user_id
-       WHERE ${whereClause} ${moderationFilter}
+       WHERE ${whereClause} ${moderationFilter} ${visibilityFilter}
        ORDER BY p.created_at DESC`,
       params,
     );
