@@ -232,10 +232,26 @@ export class UsersService {
     if (activeRelations.length === 0) return result;
 
     const challengeIds = activeRelations.map((r) => r.challenge_id);
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    const end = new Date();
-    end.setHours(23, 59, 59, 999);
+    // UTC day boundaries (not server-local time) so "today" agrees with the
+    // UTC-based day/streak math below — a server whose local timezone isn't
+    // UTC would otherwise miss/misfire "completed today" near midnight.
+    const nowForRange = new Date();
+    const start = new Date(
+      Date.UTC(
+        nowForRange.getUTCFullYear(),
+        nowForRange.getUTCMonth(),
+        nowForRange.getUTCDate(),
+        0, 0, 0, 0,
+      ),
+    );
+    const end = new Date(
+      Date.UTC(
+        nowForRange.getUTCFullYear(),
+        nowForRange.getUTCMonth(),
+        nowForRange.getUTCDate(),
+        23, 59, 59, 999,
+      ),
+    );
 
     const [todayWorkouts, completedCounts, completedDayRows] =
       await Promise.all([

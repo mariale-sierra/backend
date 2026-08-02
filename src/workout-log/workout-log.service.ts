@@ -72,8 +72,14 @@ export class WorkoutLogService {
         routineId: dto.routineId,
         userId: dto.userId,
         challengeId: dto.challengeId,
-        status: 'in_progress' as WorkoutLog['status'],
+        // createWorkout is a single atomic submission (image + all exercise
+        // data at once) — nothing in the app calls PATCH /workout-logs/:id/finish
+        // afterwards, so leaving this as 'in_progress' meant every log stayed
+        // unfinished forever and progress %/streak (which only count
+        // 'completed' logs) were permanently stuck at 0.
+        status: 'completed' as WorkoutLog['status'],
         started_at: new Date(),
+        ended_at: new Date(),
       });
 
       const createdWorkout = await manager.save(workout);
