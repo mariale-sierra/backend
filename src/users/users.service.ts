@@ -214,6 +214,7 @@ export class UsersService {
         current_day: number;
         today_completed: boolean;
         progress_percent: number;
+        streak: number;
       }
     >
   > {
@@ -224,6 +225,7 @@ export class UsersService {
         current_day: number;
         today_completed: boolean;
         progress_percent: number;
+        streak: number;
       }
     >();
 
@@ -235,29 +237,47 @@ export class UsersService {
     const end = new Date();
     end.setHours(23, 59, 59, 999);
 
-    const [todayWorkouts, completedCounts] = await Promise.all([
-      this.workoutRepo.find({
-        where: {
-          userId: relations[0].user_id,
-          challengeId: In(challengeIds),
-          started_at: Between(start, end),
-        },
-      }),
-      this.workoutRepo
-        .createQueryBuilder('w')
-        .select('w.challengeId', 'challengeId')
-        .addSelect('COUNT(*)', 'count')
-        .where('w.userId = :userId', { userId: relations[0].user_id })
-        .andWhere('w.challengeId IN (:...challengeIds)', { challengeIds })
-        .andWhere('w.status = :status', { status: 'completed' })
-        .groupBy('w.challengeId')
-        .getRawMany<{ challengeId: string; count: string }>(),
-    ]);
+    const [todayWorkouts, completedCounts, completedDayRows] =
+      await Promise.all([
+        this.workoutRepo.find({
+          where: {
+            userId: relations[0].user_id,
+            challengeId: In(challengeIds),
+            started_at: Between(start, end),
+          },
+        }),
+        this.workoutRepo
+          .createQueryBuilder('w')
+          .select('w.challengeId', 'challengeId')
+          .addSelect('COUNT(*)', 'count')
+          .where('w.userId = :userId', { userId: relations[0].user_id })
+          .andWhere('w.challengeId IN (:...challengeIds)', { challengeIds })
+          .andWhere('w.status = :status', { status: 'completed' })
+          .groupBy('w.challengeId')
+          .getRawMany<{ challengeId: string; count: string }>(),
+        this.workoutRepo
+          .createQueryBuilder('w')
+          .select('w.challengeId', 'challengeId')
+          .addSelect('DATE(w.started_at)', 'day')
+          .where('w.userId = :userId', { userId: relations[0].user_id })
+          .andWhere('w.challengeId IN (:...challengeIds)', { challengeIds })
+          .andWhere('w.status = :status', { status: 'completed' })
+          .groupBy('w.challengeId')
+          .addGroupBy('DATE(w.started_at)')
+          .getRawMany<{ challengeId: string; day: string }>(),
+      ]);
 
     const completedByChallenge = new Map(
       completedCounts.map((row) => [row.challengeId, Number(row.count)]),
     );
     const todayByChallenge = new Set(todayWorkouts.map((w) => w.challengeId));
+
+    const completedDaysByChallenge = new Map<string, Set<string>>();
+    for (const row of completedDayRows) {
+      const set = completedDaysByChallenge.get(row.challengeId) ?? new Set<string>();
+      set.add(row.day);
+      completedDaysByChallenge.set(row.challengeId, set);
+    }
 
     const msPerDay = 1000 * 60 * 60 * 24;
     // UTC calendar dates (not local midnight) so the day count matches the UTC
@@ -293,16 +313,48 @@ export class UsersService {
           )
         : 0;
 
+      const completedDaySet =
+        completedDaysByChallenge.get(relation.challenge_id) ?? new Set<string>();
+      const consecutiveDays = this.calculateConsecutiveDays(completedDaySet);
+
       result.set(relation.challenge_id, {
         current_day: durationDays
           ? Math.min(currentDay, durationDays)
           : currentDay,
         today_completed: todayByChallenge.has(relation.challenge_id),
         progress_percent: progressPercent,
+        // A "streak" is awarded every 3 consecutive days of completed
+        // progress, not the raw day count — e.g. 3 days in a row = streak 1,
+        // 6 days in a row = streak 2.
+        streak: Math.floor(consecutiveDays / 3),
       });
     }
 
     return result;
+  }
+
+  /**
+   * Counts consecutive calendar days (UTC, 'YYYY-MM-DD') ending today,
+   * tolerating today itself being not-yet-completed so an in-progress streak
+   * doesn't drop to zero before the day is over.
+   */
+  private calculateConsecutiveDays(completedDays: Set<string>): number {
+    const cursor = new Date();
+    cursor.setUTCHours(0, 0, 0, 0);
+
+    const toKey = (d: Date) => d.toISOString().slice(0, 10);
+
+    if (!completedDays.has(toKey(cursor))) {
+      cursor.setUTCDate(cursor.getUTCDate() - 1);
+    }
+
+    let count = 0;
+    while (completedDays.has(toKey(cursor))) {
+      count++;
+      cursor.setUTCDate(cursor.getUTCDate() - 1);
+    }
+
+    return count;
   }
 
   private async attachCategoriesAndLocations(challengeIds: string[]) {
