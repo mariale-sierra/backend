@@ -229,17 +229,24 @@ export class WorkoutPostsService {
   ): Promise<ChallengePhoto[]> {
     const supportsModeration = await this.supportsModerationColumns();
 
+    // The owner always sees their own posts regardless of moderation status
+    // (moderation runs async, so a just-uploaded photo sits as 'pending' for
+    // a while — hiding it from its own author until OpenAI approves it made
+    // fresh uploads disappear from the profile grid). Everyone else still
+    // only sees posts that cleared moderation.
+    params.push(viewerId);
+    const viewerParamIndex = params.length;
+
     let moderationFilter = '';
     if (supportsModeration) {
       params.push(this.visibleModerationStatuses());
-      moderationFilter = `AND p.moderation_status = ANY($${params.length})`;
+      moderationFilter = `AND (p.moderation_status = ANY($${params.length}) OR p.user_id = $${viewerParamIndex})`;
     }
 
     // Private posts are only visible to the person who posted them — everyone
     // else only sees public/followers posts, regardless of shared challenge
     // membership.
-    params.push(viewerId);
-    const visibilityFilter = `AND (p.visibility != 'private' OR p.user_id = $${params.length})`;
+    const visibilityFilter = `AND (p.visibility != 'private' OR p.user_id = $${viewerParamIndex})`;
 
     const rows: PhotoRow[] = await this.repo.manager.query(
       `SELECT p.id, p.image_url, p.caption, p.visibility, p.created_at,
