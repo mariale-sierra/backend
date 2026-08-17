@@ -7,11 +7,13 @@ import { User } from '../users/entities/user.entity';
 import { WorkoutPostsController } from './workout-posts.controller';
 import { FeedController } from './feed.controller';
 import { OpenAiModule } from '../openai/openai.module';
+import { FollowsModule } from '../follows/follows.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([WorkoutPost, WorkoutLog, User]),
     OpenAiModule,
+    FollowsModule,
   ],
   controllers: [WorkoutPostsController, FeedController],
   providers: [WorkoutPostsService],

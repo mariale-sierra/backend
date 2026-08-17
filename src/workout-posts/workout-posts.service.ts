@@ -8,6 +8,7 @@ import {
 import { ModerationService } from '../openai/moderation.service';
 import { User } from '../users/entities/user.entity';
 import { DecodedCursor, encodeCursor } from './pagination.util';
+import { FollowsService } from '../follows/follows.service';
 
 /** Shape consumed by the frontend (types/challenge.ts ChallengePhoto). */
 export interface ChallengePhoto {
@@ -75,6 +76,7 @@ export class WorkoutPostsService {
     @InjectRepository(User)
     private userRepo: Repository<User>,
     private moderationService: ModerationService,
+    private followsService: FollowsService,
   ) {}
 
   private async supportsModerationColumns() {
@@ -336,10 +338,12 @@ export class WorkoutPostsService {
    * "owner sees everything" escape hatch fetchPhotos() already applies
    * (visibility != 'private' OR moderation approved, unless it's your own
    * post) — true for "viewing my own posts" (userId === viewer), false for
-   * "viewing someone else's posts", which then strictly requires
-   * visibility='public' AND moderation_status='approved' with no exception,
-   * matching the Feed rule (B2 design, since there is no Followers module to
-   * resolve 'followers'-visibility posts for a non-owner viewer).
+   * "viewing someone else's posts". For a non-owner viewer, moderation still
+   * strictly requires 'approved' with no exception (matches the Feed rule),
+   * but visibility additionally opens up to 'followers' posts when
+   * `allowFollowerVisibility` is set (B3: the viewer actively follows the
+   * target) — otherwise only 'public' posts are visible, same as before the
+   * Follows module existed.
    */
   private async fetchPaginatedPhotos(
     baseWhereClause: string,
@@ -349,6 +353,7 @@ export class WorkoutPostsService {
       limit: number;
       cursor?: DecodedCursor;
       bypassForOwner: boolean;
+      allowFollowerVisibility?: boolean;
     },
   ): Promise<{ photos: ChallengePhoto[]; nextCursor?: string }> {
     const supportsModeration = await this.supportsModerationColumns();
@@ -377,7 +382,9 @@ export class WorkoutPostsService {
 
     const visibilityFilter = options.bypassForOwner
       ? `AND (p.visibility != 'private' OR p.user_id = $${viewerParamIndex})`
-      : `AND p.visibility = 'public'`;
+      : options.allowFollowerVisibility
+        ? `AND p.visibility IN ('public', 'followers')`
+        : `AND p.visibility = 'public'`;
 
     let cursorFilter = '';
     if (options.cursor) {
@@ -421,9 +428,11 @@ export class WorkoutPostsService {
   /**
    * Publicaciones de :userId (GET /workout-posts/user/:userId). Self-view
    * (userId === viewerId) mirrors getUserPhotos()/"mine" exactly, now
-   * paginated. Viewing another user only returns their public+approved
-   * posts — no Followers logic, no use of user_profiles.is_private (that
-   * flag only gates the profile bio today, not posts).
+   * paginated. Viewing another user returns their public+approved posts,
+   * plus their 'followers'-visibility posts if the viewer actively follows
+   * them (B3). Still doesn't use user_profiles.is_private — that flag gates
+   * the profile bio (see UsersService.getPublicProfile), not post visibility,
+   * which has its own per-post `visibility` column.
    */
   async getUserPosts(
     targetUserId: string,
@@ -435,6 +444,11 @@ export class WorkoutPostsService {
     });
     if (!user) throw new NotFoundException('User not found');
 
+    const isOwner = targetUserId === viewerId;
+    const isFollower = isOwner
+      ? false
+      : await this.followsService.isActiveFollower(viewerId, targetUserId);
+
     return this.fetchPaginatedPhotos(
       'p.user_id = $1',
       [targetUserId],
@@ -442,7 +456,8 @@ export class WorkoutPostsService {
       {
         limit: options.limit,
         cursor: options.cursor,
-        bypassForOwner: targetUserId === viewerId,
+        bypassForOwner: isOwner,
+        allowFollowerVisibility: isFollower,
       },
     );
   }
@@ -450,9 +465,11 @@ export class WorkoutPostsService {
   /**
    * GET /feed — B2 rule, no exceptions: visibility='public' AND
    * moderation_status='approved', newest first. 'followers'-visibility posts
-   * never appear here (for anyone, including their own author) because there
-   * is no Followers module yet to resolve who may see them; 'private' and
-   * unmoderated ('pending'/'rejected') posts never appear either.
+   * never appear here (for anyone, including their own author) because this
+   * feed has no per-viewer context to resolve a follow relationship against
+   * (it's one shared, unpersonalized public feed) — 'followers'-visibility
+   * posts are only resolved per-viewer in getUserPosts() (B3). 'private' and
+   * unmoderated ('pending'/'rejected') posts never appear here either.
    *
    * The JOIN to `challenges` is intentionally an INNER JOIN, so a post whose
    * workout_log has no challenge_id would silently be excluded here. That's

@@ -5,6 +5,7 @@ import { WorkoutPostsService } from './workout-posts.service';
 import { WorkoutPost } from './entities/workout-post.entity';
 import { User } from '../users/entities/user.entity';
 import { ModerationService } from '../openai/moderation.service';
+import { FollowsService } from '../follows/follows.service';
 import { encodeCursor } from './pagination.util';
 
 const createMockWorkoutPostRepo = () => ({
@@ -27,6 +28,7 @@ describe('WorkoutPostsService', () => {
   let service: WorkoutPostsService;
   let postRepo: ReturnType<typeof createMockWorkoutPostRepo>;
   let userRepo: ReturnType<typeof createMockUserRepo>;
+  let followsService: { isActiveFollower: jest.Mock };
 
   const VIEWER_ID = 'viewer-1';
   const OTHER_USER_ID = 'other-2';
@@ -37,6 +39,9 @@ describe('WorkoutPostsService', () => {
     // Matches the real, applied moderation migration — every test exercises
     // the real (non-degraded) code path unless a test explicitly overrides this.
     postRepo.query.mockResolvedValue([{ count: 3 }]);
+    // Default: viewer does not follow the target — preserves the pre-B3
+    // "strangers only see public posts" behavior unless a test says otherwise.
+    followsService = { isActiveFollower: jest.fn().mockResolvedValue(false) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -47,6 +52,7 @@ describe('WorkoutPostsService', () => {
           provide: ModerationService,
           useValue: { validateWorkoutImage: jest.fn() },
         },
+        { provide: FollowsService, useValue: followsService },
       ],
     }).compile();
 
@@ -279,7 +285,7 @@ describe('WorkoutPostsService', () => {
       expect(sql).toContain("p.visibility != 'private'");
     });
 
-    it("other-view: should require visibility='public' AND moderation_status='approved' unconditionally, with no owner bypass", async () => {
+    it("other-view, not a follower: should require visibility='public' AND moderation_status='approved', with no owner bypass", async () => {
       userRepo.findOne.mockResolvedValue({
         id: OTHER_USER_ID,
         is_active: true,
@@ -288,10 +294,39 @@ describe('WorkoutPostsService', () => {
 
       await service.getUserPosts(OTHER_USER_ID, VIEWER_ID, { limit: 20 });
 
+      expect(followsService.isActiveFollower).toHaveBeenCalledWith(
+        VIEWER_ID,
+        OTHER_USER_ID,
+      );
       const [sql] = postRepo.manager.query.mock.calls[0] as [string, unknown[]];
       expect(sql).toContain("p.visibility = 'public'");
       expect(sql).toContain("p.moderation_status = 'approved'");
       expect(sql).not.toMatch(/OR\s+p\.user_id/i);
+    });
+
+    it('other-view, active follower: should also allow followers-visibility posts (B3)', async () => {
+      userRepo.findOne.mockResolvedValue({
+        id: OTHER_USER_ID,
+        is_active: true,
+      });
+      followsService.isActiveFollower.mockResolvedValue(true);
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getUserPosts(OTHER_USER_ID, VIEWER_ID, { limit: 20 });
+
+      const [sql] = postRepo.manager.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain("p.visibility IN ('public', 'followers')");
+      expect(sql).toContain("p.moderation_status = 'approved'");
+      expect(sql).not.toMatch(/OR\s+p\.user_id/i);
+    });
+
+    it('self-view: never calls isActiveFollower (owner bypass short-circuits it)', async () => {
+      userRepo.findOne.mockResolvedValue({ id: VIEWER_ID, is_active: true });
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getUserPosts(VIEWER_ID, VIEWER_ID, { limit: 20 });
+
+      expect(followsService.isActiveFollower).not.toHaveBeenCalled();
     });
 
     it('other-view: the visibility/moderation predicate is static regardless of cursor/limit input', async () => {

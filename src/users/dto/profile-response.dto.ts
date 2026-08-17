@@ -47,7 +47,8 @@ export class ProfileResponseDto {
 
 /**
  * What OTHER users can see. No email, ever. When the profile is private the
- * bio is withheld too — only username, display name and photo remain.
+ * bio is withheld too — unless the viewer is the profile owner or an active
+ * follower (see `PublicProfileResponseDto.build`'s `viewer` param).
  */
 export class PublicProfileResponseDto {
   @ApiProperty()
@@ -68,16 +69,28 @@ export class PublicProfileResponseDto {
   @ApiProperty()
   is_private!: boolean;
 
+  /**
+   * @param viewer Defaults to "a stranger" (not the owner, not a follower) —
+   * every existing call site that doesn't pass it (e.g. searchUsers, which
+   * lists many users at once) keeps the original, stricter behavior.
+   */
   static build(
     user: User,
     profile: UserProfile | null,
+    viewer: { isOwner: boolean; isFollower: boolean } = {
+      isOwner: false,
+      isFollower: false,
+    },
   ): PublicProfileResponseDto {
     const dto = new PublicProfileResponseDto();
     const isPrivate = profile?.is_private ?? false;
+    // Owner always sees everything; a private profile only additionally
+    // opens up to its active followers — anyone else still gets no bio.
+    const canSeeFullProfile = viewer.isOwner || !isPrivate || viewer.isFollower;
     dto.id = user.id;
     dto.username = user.username;
     dto.display_name = profile?.display_name ?? user.username;
-    dto.bio = isPrivate ? null : (profile?.bio ?? null);
+    dto.bio = canSeeFullProfile ? (profile?.bio ?? null) : null;
     dto.profile_image_url = profile?.profile_image_url ?? null;
     dto.is_private = isPrivate;
     return dto;

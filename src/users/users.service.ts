@@ -13,6 +13,7 @@ import {
   ProfileResponseDto,
   PublicProfileResponseDto,
 } from './dto/profile-response.dto';
+import { FollowsService } from '../follows/follows.service';
 
 @Injectable()
 export class UsersService {
@@ -29,6 +30,7 @@ export class UsersService {
     private challengeCategoryMapRepo: Repository<ChallengeCategoryMap>,
     @InjectRepository(ChallengeLocationMap)
     private challengeLocationMapRepo: Repository<ChallengeLocationMap>,
+    private followsService: FollowsService,
   ) {}
 
   async findById(id: string): Promise<UserResponseDto> {
@@ -145,11 +147,14 @@ export class UsersService {
 
   /**
    * Public view of another user's profile. Respects `is_private`: private
-   * profiles only expose username/display name/photo, never bio. Emails are
-   * never exposed on the public shape regardless of privacy.
+   * profiles only expose username/display name/photo, never bio — unless the
+   * viewer is the profile owner (always full access) or an active follower
+   * (bio opens up too). Emails are never exposed on the public shape
+   * regardless of privacy or follow status.
    */
   async getPublicProfile(
     targetUserId: string,
+    viewerUserId: string,
   ): Promise<PublicProfileResponseDto> {
     const user = await this.userRepo.findOne({
       where: { id: targetUserId, is_active: true },
@@ -160,7 +165,16 @@ export class UsersService {
     const profile = await this.profileRepo.findOne({
       where: { user_id: targetUserId },
     });
-    return PublicProfileResponseDto.build(user, profile ?? null);
+
+    const isOwner = targetUserId === viewerUserId;
+    const isFollower = isOwner
+      ? false
+      : await this.followsService.isActiveFollower(viewerUserId, targetUserId);
+
+    return PublicProfileResponseDto.build(user, profile ?? null, {
+      isOwner,
+      isFollower,
+    });
   }
 
   /**
@@ -241,7 +255,10 @@ export class UsersService {
         nowForRange.getUTCFullYear(),
         nowForRange.getUTCMonth(),
         nowForRange.getUTCDate(),
-        0, 0, 0, 0,
+        0,
+        0,
+        0,
+        0,
       ),
     );
     const end = new Date(
@@ -249,7 +266,10 @@ export class UsersService {
         nowForRange.getUTCFullYear(),
         nowForRange.getUTCMonth(),
         nowForRange.getUTCDate(),
-        23, 59, 59, 999,
+        23,
+        59,
+        59,
+        999,
       ),
     );
 
@@ -290,7 +310,8 @@ export class UsersService {
 
     const completedDaysByChallenge = new Map<string, Set<string>>();
     for (const row of completedDayRows) {
-      const set = completedDaysByChallenge.get(row.challengeId) ?? new Set<string>();
+      const set =
+        completedDaysByChallenge.get(row.challengeId) ?? new Set<string>();
       set.add(row.day);
       completedDaysByChallenge.set(row.challengeId, set);
     }
@@ -330,7 +351,8 @@ export class UsersService {
         : 0;
 
       const completedDaySet =
-        completedDaysByChallenge.get(relation.challenge_id) ?? new Set<string>();
+        completedDaysByChallenge.get(relation.challenge_id) ??
+        new Set<string>();
       const consecutiveDays = this.calculateConsecutiveDays(completedDaySet);
 
       result.set(relation.challenge_id, {

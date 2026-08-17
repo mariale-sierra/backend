@@ -112,4 +112,24 @@ export class FollowsService {
 
     return rows.map((row) => FollowUserSummaryDto.fromFollowed(row));
   }
+
+  /**
+   * Whether `followerUserId` actively follows `followedUserId`. Used by other
+   * modules (UsersService, WorkoutPostsService) to gate private-profile /
+   * followers-only content — kept here so the "what counts as an active
+   * follow" rule (is_active = true) lives in one place.
+   */
+  async isActiveFollower(
+    followerUserId: string,
+    followedUserId: string,
+  ): Promise<boolean> {
+    const relation = await this.followRepo.findOne({
+      where: {
+        follower_user_id: followerUserId,
+        followed_user_id: followedUserId,
+        is_active: true,
+      },
+    });
+    return !!relation;
+  }
 }
