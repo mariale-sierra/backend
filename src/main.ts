@@ -46,6 +46,7 @@ async function bootstrap() {
     .addTag('Metrics', 'Endpoints para gestionar métricas')
     .addTag('Workout Logs', 'Endpoints para registrar entrenamientos')
     .addTag('Feed', 'Feed público de publicaciones')
+    .addTag('Follows', 'Endpoints para seguir/dejar de seguir usuarios')
     .addBearerAuth()
     .build();
 
