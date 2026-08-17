@@ -32,7 +32,7 @@ export class WorkoutPost {
   caption?: string;
 
   @Column()
-  visibility!: 'private' | 'followers';
+  visibility!: 'private' | 'followers' | 'public';
 
   @Column({
     name: 'moderation_status',

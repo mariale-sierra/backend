@@ -34,12 +34,12 @@ export class CreateWorkoutProgressDto {
 
   @ApiPropertyOptional({
     description: 'Visibilidad del post',
-    enum: ['private', 'followers'],
+    enum: ['private', 'followers', 'public'],
     example: 'private',
   })
   @IsOptional()
-  @IsIn(['private', 'followers'])
-  visibility?: 'private' | 'followers';
+  @IsIn(['private', 'followers', 'public'])
+  visibility?: 'private' | 'followers' | 'public';
 
   @ApiPropertyOptional({
     description: 'Indica si es un día de descanso',
