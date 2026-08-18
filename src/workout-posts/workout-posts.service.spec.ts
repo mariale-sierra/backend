@@ -118,6 +118,19 @@ describe('WorkoutPostsService', () => {
       expect(sql).not.toMatch(/OR\s+p\.user_id/i);
     });
 
+    // F8 (docs/testing/PLAN-MAESTRO-PRUEBAS.md): a post from a private
+    // challenge must never surface in the global Feed, even if its own
+    // visibility is 'public' — this is the read-time second layer behind
+    // WorkoutLogService.resolvePostVisibility() (write-time downgrade).
+    it("should exclude posts whose challenge is private, unconditionally (CP-30)", async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getFeed({ limit: 20 });
+
+      const [sql] = postRepo.manager.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain("c.visibility != 'private'");
+    });
+
     it('should never populate activity_type (no unambiguous source exists)', async () => {
       postRepo.manager.query.mockResolvedValue([feedRow()]);
 
@@ -340,7 +353,13 @@ describe('WorkoutPostsService', () => {
       const [sql] = postRepo.manager.query.mock.calls[0] as [string, unknown[]];
       expect(sql).toContain("p.visibility = 'public'");
       expect(sql).toContain("p.moderation_status = 'approved'");
-      expect(sql).not.toMatch(/OR\s+p\.user_id/i);
+      // No moderation/visibility owner-bypass for a non-owner viewer — the
+      // separate challenge-privacy filter (challengePrivacyFilter) does add
+      // its own "OR p.user_id" clause, but that's a different, additive
+      // safety net (F8: never hide a viewer's own post), not a reintroduced
+      // moderation/visibility bypass.
+      expect(sql).not.toContain('moderation_status = ANY');
+      expect(sql).not.toContain("p.visibility != 'private'");
     });
 
     it('other-view, active follower: should also allow followers-visibility posts (B3)', async () => {
@@ -356,7 +375,31 @@ describe('WorkoutPostsService', () => {
       const [sql] = postRepo.manager.query.mock.calls[0] as [string, unknown[]];
       expect(sql).toContain("p.visibility IN ('public', 'followers')");
       expect(sql).toContain("p.moderation_status = 'approved'");
-      expect(sql).not.toMatch(/OR\s+p\.user_id/i);
+      expect(sql).not.toContain('moderation_status = ANY');
+      expect(sql).not.toContain("p.visibility != 'private'");
+    });
+
+    // F8 (docs/testing/PLAN-MAESTRO-PRUEBAS.md): a non-member browsing
+    // someone else's public profile must not discover a post from a private
+    // challenge, even if the post is marked 'public' — but a fellow member
+    // of that same private challenge (or the post's own author) still can.
+    it("other-view: should exclude posts from a private challenge unless the viewer is a member (CP-31)", async () => {
+      userRepo.findOne.mockResolvedValue({
+        id: OTHER_USER_ID,
+        is_active: true,
+      });
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getUserPosts(OTHER_USER_ID, VIEWER_ID, { limit: 20 });
+
+      const [sql, params] = postRepo.manager.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(sql).toContain("c.visibility IS DISTINCT FROM 'private'");
+      expect(sql).toContain('havit.challenge_user_map cum_viewer');
+      expect(sql).toContain('cum_viewer.user_id = $2');
+      expect(params).toContain(VIEWER_ID);
     });
 
     it('self-view: never calls isActiveFollower (owner bypass short-circuits it)', async () => {

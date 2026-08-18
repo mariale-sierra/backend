@@ -244,6 +244,30 @@ export class WorkoutPostsService {
   }
 
   /**
+   * Second layer for F8 (docs/testing/PLAN-MAESTRO-PRUEBAS.md): a post's
+   * `visibility` never overrides its challenge's privacy. Even though
+   * WorkoutLogService.resolvePostVisibility() already downgrades new posts
+   * at write time, this re-checks at read time so posts written before that
+   * change (or a challenge later flipped to private) can't leak either. `c`
+   * must be LEFT JOINed as `havit.challenges c ON c.id = wl.challenge_id` —
+   * some workout logs have no challenge_id, and `c.visibility` is then NULL,
+   * which `IS DISTINCT FROM 'private'` correctly treats as "not private"
+   * rather than excluding the post. The owner and any active member of the
+   * challenge (via challenge_user_map) can still see it; nobody else can.
+   */
+  private challengePrivacyFilter(viewerParamIndex: number): string {
+    return `AND (
+      c.visibility IS DISTINCT FROM 'private'
+      OR p.user_id = $${viewerParamIndex}
+      OR EXISTS (
+        SELECT 1 FROM havit.challenge_user_map cum_viewer
+        WHERE cum_viewer.challenge_id = wl.challenge_id
+          AND cum_viewer.user_id = $${viewerParamIndex}
+      )
+    )`;
+  }
+
+  /**
    * All progress photos for a challenge, newest first, visible to `viewerId`:
    * public posts from anyone, 'followers'-visibility posts only from users
    * `viewerId` actively follows, plus the viewer's own posts regardless of
@@ -299,7 +323,7 @@ export class WorkoutPostsService {
           AND uf.followed_user_id = p.user_id
           AND uf.is_active = true
       )
-    )`;
+    ) ${this.challengePrivacyFilter(viewerParamIndex)}`;
 
     const rows: PhotoRow[] = await this.repo.manager.query(
       `SELECT p.id, p.image_url, p.caption, p.visibility, p.created_at,
@@ -311,6 +335,7 @@ export class WorkoutPostsService {
        JOIN havit.workout_logs wl ON wl.id = p.workout_log_id
        JOIN havit.users u ON u.id = p.user_id
        LEFT JOIN havit.user_profiles up ON up.user_id = p.user_id
+       LEFT JOIN havit.challenges c ON c.id = wl.challenge_id
        LEFT JOIN havit.challenge_user_map cum
               ON cum.challenge_id = wl.challenge_id AND cum.user_id = p.user_id
        WHERE ${whereClause} ${moderationFilter} ${visibilityFilter}
@@ -402,6 +427,8 @@ export class WorkoutPostsService {
         ? `AND p.visibility IN ('public', 'followers')`
         : `AND p.visibility = 'public'`;
 
+    const challengePrivacyFilter = this.challengePrivacyFilter(viewerParamIndex);
+
     let cursorFilter = '';
     if (options.cursor) {
       params.push(options.cursor.createdAt, options.cursor.id);
@@ -421,9 +448,10 @@ export class WorkoutPostsService {
        JOIN havit.workout_logs wl ON wl.id = p.workout_log_id
        JOIN havit.users u ON u.id = p.user_id
        LEFT JOIN havit.user_profiles up ON up.user_id = p.user_id
+       LEFT JOIN havit.challenges c ON c.id = wl.challenge_id
        LEFT JOIN havit.challenge_user_map cum
               ON cum.challenge_id = wl.challenge_id AND cum.user_id = p.user_id
-       WHERE ${baseWhereClause} ${moderationFilter} ${visibilityFilter} ${cursorFilter}
+       WHERE ${baseWhereClause} ${moderationFilter} ${visibilityFilter} ${challengePrivacyFilter} ${cursorFilter}
        ORDER BY p.created_at DESC, p.id DESC
        LIMIT $${limitParamIndex}`,
       params,
@@ -485,7 +513,12 @@ export class WorkoutPostsService {
    * feed has no per-viewer context to resolve a follow relationship against
    * (it's one shared, unpersonalized public feed) — 'followers'-visibility
    * posts are only resolved per-viewer in getUserPosts() (B3). 'private' and
-   * unmoderated ('pending'/'rejected') posts never appear here either.
+   * unmoderated ('pending'/'rejected') posts never appear here either. A post
+   * whose challenge is itself private never appears here either, no
+   * exceptions — same rule as everything else in this method, see F8 in
+   * docs/testing/PLAN-MAESTRO-PRUEBAS.md (a private challenge's posts must
+   * never surface as public content, and Feed has no per-viewer context in
+   * which to make a membership exception).
    *
    * The JOIN to `challenges` is intentionally an INNER JOIN, so a post whose
    * workout_log has no challenge_id would silently be excluded here. That's
@@ -526,6 +559,7 @@ export class WorkoutPostsService {
               ON cum.challenge_id = wl.challenge_id AND cum.user_id = p.user_id
        WHERE p.visibility = 'public'
          AND p.moderation_status = 'approved'
+         AND c.visibility != 'private'
          ${cursorFilter}
        ORDER BY p.created_at DESC, p.id DESC
        LIMIT $${limitParamIndex}`,
