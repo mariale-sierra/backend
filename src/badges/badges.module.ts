@@ -7,11 +7,13 @@ import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.enti
 import { User } from '../users/entities/user.entity';
 import { UserProfile } from '../users/entities/user-profile.entity';
 import { FollowsModule } from '../follows/follows.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([WorkoutLog, ChallengeUserMap, User, UserProfile]),
     FollowsModule,
+    AuthModule,
   ],
   controllers: [BadgesController],
   providers: [BadgesService],
