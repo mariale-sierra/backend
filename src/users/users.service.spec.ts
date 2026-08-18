@@ -22,7 +22,12 @@ describe('UsersService', () => {
   let service: UsersService;
   let userRepo: ReturnType<typeof createMockRepo>;
   let profileRepo: ReturnType<typeof createMockRepo>;
-  let followsService: { isActiveFollower: jest.Mock };
+  let followsService: {
+    isActiveFollower: jest.Mock;
+    getCounts: jest.Mock;
+    getFollowerCountsForUsers: jest.Mock;
+    getFollowingCountsForUsers: jest.Mock;
+  };
 
   const baseUser = () => ({
     id: 'user-1',
@@ -37,7 +42,14 @@ describe('UsersService', () => {
     // Default: viewer does not follow the target — preserves the pre-B3
     // "strangers only see what a private profile allows" behavior unless a
     // test explicitly sets this to true.
-    followsService = { isActiveFollower: jest.fn().mockResolvedValue(false) };
+    followsService = {
+      isActiveFollower: jest.fn().mockResolvedValue(false),
+      getCounts: jest
+        .fn()
+        .mockResolvedValue({ followersCount: 0, followingCount: 0 }),
+      getFollowerCountsForUsers: jest.fn().mockResolvedValue(new Map()),
+      getFollowingCountsForUsers: jest.fn().mockResolvedValue(new Map()),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -127,6 +139,21 @@ describe('UsersService', () => {
       await expect(service.getMyProfile('nope')).rejects.toThrow(
         NotFoundException,
       );
+    });
+
+    it('should include followers_count/following_count from FollowsService', async () => {
+      userRepo.findOne.mockResolvedValue(baseUser());
+      profileRepo.findOne.mockResolvedValue(null);
+      followsService.getCounts.mockResolvedValue({
+        followersCount: 4,
+        followingCount: 9,
+      });
+
+      const result = await service.getMyProfile('user-1');
+
+      expect(followsService.getCounts).toHaveBeenCalledWith('user-1');
+      expect(result.followers_count).toBe(4);
+      expect(result.following_count).toBe(9);
     });
   });
 
@@ -274,9 +301,12 @@ describe('UsersService', () => {
 
       expect(result.bio).toBe('secret bio');
       expect(followsService.isActiveFollower).not.toHaveBeenCalled();
+      // Viewing your own profile through the public endpoint is never
+      // reported as "following yourself".
+      expect(result.is_following).toBe(false);
     });
 
-    it('should reveal the bio of a private profile to an active follower', async () => {
+    it('should reveal the bio of a private profile to an active follower, and report is_following: true', async () => {
       userRepo.findOne.mockResolvedValue({ id: 'user-2', username: 'bob' });
       profileRepo.findOne.mockResolvedValue({
         user_id: 'user-2',
@@ -293,6 +323,7 @@ describe('UsersService', () => {
         'user-1',
         'user-2',
       );
+      expect(result.is_following).toBe(true);
     });
 
     it('should keep the bio hidden from a non-follower even when checked', async () => {
@@ -332,6 +363,25 @@ describe('UsersService', () => {
         NotFoundException,
       );
     });
+
+    it("should include the target user's followers_count/following_count, not the viewer's", async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'user-2', username: 'bob' });
+      profileRepo.findOne.mockResolvedValue({
+        user_id: 'user-2',
+        display_name: 'Bob',
+        is_private: false,
+      });
+      followsService.getCounts.mockResolvedValue({
+        followersCount: 12,
+        followingCount: 3,
+      });
+
+      const result = await service.getPublicProfile('user-2', 'user-1');
+
+      expect(followsService.getCounts).toHaveBeenCalledWith('user-2');
+      expect(result.followers_count).toBe(12);
+      expect(result.following_count).toBe(3);
+    });
   });
 
   describe('searchUsers', () => {
@@ -365,6 +415,38 @@ describe('UsersService', () => {
       expect(userRepo.find).toHaveBeenCalledWith(
         expect.objectContaining({ take: 20 }),
       );
+    });
+
+    it('should attach per-user follower/following counts via a single batched lookup', async () => {
+      userRepo.find.mockResolvedValue([
+        { id: 'user-2', username: 'bob' },
+        { id: 'user-3', username: 'carol' },
+      ]);
+      profileRepo.find.mockResolvedValue([]);
+      followsService.getFollowerCountsForUsers.mockResolvedValue(
+        new Map([
+          ['user-2', 5],
+          ['user-3', 0],
+        ]),
+      );
+      followsService.getFollowingCountsForUsers.mockResolvedValue(
+        new Map([['user-2', 1]]),
+      );
+
+      const result = await service.searchUsers('bo', 'user-1');
+
+      expect(followsService.getFollowerCountsForUsers).toHaveBeenCalledWith([
+        'user-2',
+        'user-3',
+      ]);
+      expect(result.find((u) => u.id === 'user-2')).toMatchObject({
+        followers_count: 5,
+        following_count: 1,
+      });
+      expect(result.find((u) => u.id === 'user-3')).toMatchObject({
+        followers_count: 0,
+        following_count: 0,
+      });
     });
   });
 });

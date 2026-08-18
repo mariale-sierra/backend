@@ -231,6 +231,45 @@ describe('WorkoutPostsService', () => {
   });
 
   // ---------------------------------------------------------------------
+  // GET /workout-posts/challenge/:challengeId (legacy unpaginated gallery)
+  // ---------------------------------------------------------------------
+  describe('getChallengePhotos', () => {
+    it("should require an active follow before exposing a 'followers'-visibility post to a non-owner (same B3 rule as getUserPosts)", async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getChallengePhotos('challenge-1', VIEWER_ID);
+
+      const [sql] = postRepo.manager.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain("p.visibility != 'followers'");
+      expect(sql).toMatch(/EXISTS[\s\S]*havit\.user_follows/);
+      expect(sql).toMatch(/uf\.is_active = true/);
+    });
+
+    it('should still always allow a private post through for its own author', async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getChallengePhotos('challenge-1', VIEWER_ID);
+
+      const [sql] = postRepo.manager.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain("p.visibility != 'private'");
+      expect(sql).toMatch(/p\.user_id = \$\d+/);
+    });
+
+    it('should scope the query to the given challenge', async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getChallengePhotos('challenge-42', VIEWER_ID);
+
+      const [sql, params] = postRepo.manager.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(sql).toContain('wl.challenge_id = $1');
+      expect(params[0]).toBe('challenge-42');
+    });
+  });
+
+  // ---------------------------------------------------------------------
   // GET /workout-posts/user/:userId
   // ---------------------------------------------------------------------
   describe('getUserPosts', () => {

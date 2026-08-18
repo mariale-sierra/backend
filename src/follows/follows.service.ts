@@ -113,6 +113,56 @@ export class FollowsService {
     return rows.map((row) => FollowUserSummaryDto.fromFollowed(row));
   }
 
+  /** Followers/following counts for a single user (profile screens). */
+  async getCounts(
+    userId: string,
+  ): Promise<{ followersCount: number; followingCount: number }> {
+    const [followersCount, followingCount] = await Promise.all([
+      this.followRepo.count({
+        where: { followed_user_id: userId, is_active: true },
+      }),
+      this.followRepo.count({
+        where: { follower_user_id: userId, is_active: true },
+      }),
+    ]);
+    return { followersCount, followingCount };
+  }
+
+  /**
+   * Followers count for many users at once (search results list), one grouped
+   * query instead of one COUNT per user.
+   */
+  async getFollowerCountsForUsers(
+    userIds: string[],
+  ): Promise<Map<string, number>> {
+    if (userIds.length === 0) return new Map();
+    const rows = await this.followRepo
+      .createQueryBuilder('f')
+      .select('f.followed_user_id', 'userId')
+      .addSelect('COUNT(*)', 'count')
+      .where('f.followed_user_id IN (:...userIds)', { userIds })
+      .andWhere('f.is_active = true')
+      .groupBy('f.followed_user_id')
+      .getRawMany<{ userId: string; count: string }>();
+    return new Map(rows.map((r) => [r.userId, Number(r.count)]));
+  }
+
+  /** Same as getFollowerCountsForUsers, but counting who each user follows. */
+  async getFollowingCountsForUsers(
+    userIds: string[],
+  ): Promise<Map<string, number>> {
+    if (userIds.length === 0) return new Map();
+    const rows = await this.followRepo
+      .createQueryBuilder('f')
+      .select('f.follower_user_id', 'userId')
+      .addSelect('COUNT(*)', 'count')
+      .where('f.follower_user_id IN (:...userIds)', { userIds })
+      .andWhere('f.is_active = true')
+      .groupBy('f.follower_user_id')
+      .getRawMany<{ userId: string; count: string }>();
+    return new Map(rows.map((r) => [r.userId, Number(r.count)]));
+  }
+
   /**
    * Whether `followerUserId` actively follows `followedUserId`. Used by other
    * modules (UsersService, WorkoutPostsService) to gate private-profile /
