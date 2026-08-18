@@ -14,6 +14,7 @@ import { AuthModule } from '../auth/auth.module';
 import { WorkoutPost } from 'src/workout-posts/entities/workout-post.entity';
 import { WorkoutPostsModule } from '../workout-posts/workout-posts.module';
 import { OpenAiModule } from '../openai/openai.module';
+import { Challenge } from '../challenges/entities/challenge.entity';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { OpenAiModule } from '../openai/openai.module';
       RoutineExercise,
       Exercise,
       WorkoutPost,
+      Challenge,
     ]),
     AuthModule,
     WorkoutPostsModule,

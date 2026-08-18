@@ -1,6 +1,6 @@
 # Plan Maestro de Pruebas — Havit Backend
 
-> Documento vivo, compartido por todo el equipo. Cada integrante extiende la sección de **Plan de Pruebas** y **Resultados** correspondiente a su módulo. No existía documentación de testing previa en este repositorio — este documento se crea desde cero en el Sprint de B2 (Posts/Feed) y queda en `backend/docs/testing/` como ubicación de referencia para el resto de módulos.
+> Documento vivo, compartido por todo el equipo. Cada integrante extiende la sección de **Plan de Pruebas** y **Resultados** correspondiente a su módulo. No existía documentación de testing previa en este repositorio — este documento se creó desde cero en el Sprint de B2 (Posts/Feed) y queda en `backend/docs/testing/` como ubicación de referencia para el resto de módulos. **Actualizado post-B2**: se cerró el módulo de Followers (con pruebas), se resolvió la decisión de producto pendiente sobre challenges privados (hallazgo F8) y se consolidó en este documento la cobertura real de Badges e Invitaciones, que ya existía en el repo pero nunca se había registrado aquí.
 
 ---
 
@@ -14,8 +14,8 @@ Validar que las funcionalidades entregadas en cada sprint de Havit se comportan 
 
 Este documento cubre el backend (`backend/`, NestJS + PostgreSQL). Cada módulo del backend contribuye su propia sección al Plan de Pruebas (tabla CP). Al momento de escribir esto:
 
-- **Cubierto con pruebas automatizadas reales**: Auth, Challenges (parcial), Workout Log (parcial), Users/Perfil (parcial), **Posts/Feed (B2, completo)**.
-- **Sin pruebas automatizadas todavía**: Followers, Uploads (R2), flujos de sistema end-to-end (CP-16, CP-17).
+- **Cubierto con pruebas automatizadas reales**: Auth, Challenges (parcial), Workout Log (parcial), Users/Perfil (parcial), **Posts/Feed (B2, completo)**, **Followers (completo)**, **Badges (completo)**, **Challenge Invites (completo)**, **Privacidad de posts en challenges privados / F8 (completo)**.
+- **Sin pruebas automatizadas todavía**: Uploads (R2), lectura/consulta de un challenge individual y `getProgress`/`getProgressSummary` (CP-03, CP-08), flujos de sistema end-to-end (CP-16, CP-17).
 - Frontend, infraestructura (Docker/CI) y pruebas manuales de UI quedan fuera de este documento — pertenecen a los repos `frontend/`/`raiz/` y a la guía manual de cada feature.
 
 ### Estrategia
@@ -68,9 +68,9 @@ Los CP de prioridad Media pueden quedar `No ejecutado` para un sprint dado si pe
 | CP-10 | Feed | Funcional | Consultar publicaciones | Usuario autenticado y posts existentes | Se muestran las publicaciones correspondientes | Alta | **Feed (B2)** | ✅ `workout-posts.service.spec.ts` (describe `getFeed`, 10 tests) + `feed.controller.spec.ts` (7 tests) | Ejecutado — Aprobado |
 | CP-11 | Perfil | Funcional | Consultar perfil propio | Usuario autenticado | Se muestran información, estadísticas, progreso y publicaciones | Media | Users | ⚠️ Parcial — `users.service.spec.ts` → describe `getMyProfile` cubre datos de perfil; no cubre "estadísticas/progreso/publicaciones" agregadas en un solo response (ese agregado no existe como endpoint único hoy) | Ejecutado — Aprobado (alcance parcial) |
 | CP-12 | Perfil | Funcional | Consultar perfil de otro usuario | Usuario existente | Se muestra únicamente la información disponible de ese usuario | Media | Users | ✅ `users.service.spec.ts` → describe `getPublicProfile` (3 tests: perfil privado oculta bio, perfil público expone bio, nunca expone email) | Ejecutado — Aprobado |
-| CP-13 | Followers | Integración | Seguir a otro usuario | Dos usuarios diferentes | Se crea correctamente la relación de seguimiento | Media | Followers | ❌ No implementado (ni código ni tests) | Pendiente — módulo no iniciado, fuera de alcance de B2 |
-| CP-14 | Followers | Integración | Dejar de seguir a un usuario | Relación de seguimiento existente | Se elimina correctamente la relación | Media | Followers | ❌ No implementado | Pendiente — fuera de alcance de B2 |
-| CP-15 | Followers | Funcional | Intentar seguirse a sí mismo | Usuario intenta seguir su propio perfil | El sistema rechaza la operación | Media | Followers | ❌ No implementado | Pendiente — fuera de alcance de B2 |
+| CP-13 | Followers | Integración | Seguir a otro usuario | Dos usuarios diferentes | Se crea correctamente la relación de seguimiento; si ya existía una relación inactiva (unfollow previo), se reactiva en vez de duplicar; una carrera de duplicado a nivel DB (23505) se traduce a 409, no a 500 | Media | Followers | ✅ `follows.service.spec.ts` → describe `follow` (6 tests); `follows.controller.spec.ts` → *"should follow a user on behalf of the authenticated caller, never the path param as the follower"* | Ejecutado — Aprobado |
+| CP-14 | Followers | Integración | Dejar de seguir a un usuario | Relación de seguimiento existente | Se marca `is_active = false` (soft-delete, no se borra la fila); `404` si no había relación activa | Media | Followers | ✅ `follows.service.spec.ts` → describe `unfollow` (2 tests); `follows.controller.spec.ts` → *"should unfollow a user on behalf of the authenticated caller"* | Ejecutado — Aprobado |
+| CP-15 | Followers | Funcional | Intentar seguirse a sí mismo | Usuario intenta seguir su propio perfil | El sistema rechaza la operación con `400 BadRequestException`, sin tocar la base de datos | Media | Followers | ✅ `follows.service.spec.ts` → *"should reject following yourself before hitting the database"* (verifica además que `userRepo.findOne` nunca se llama) | Ejecutado — Aprobado |
 | CP-16 | Sistema | Sistema | Validar flujo completo de progreso | Challenge → Workout → Foto → Post | Todo el progreso queda registrado y visible correctamente | Alta | Cruza módulos | ❌ Sin cobertura automatizada — no existe ningún `*.e2e-spec.ts` en el repo (`test/jest-e2e.json` existe pero sin specs) | Pendiente — requiere entorno con DB real; ver guía manual de B2 como verificación parcial del tramo Post→Feed |
 | CP-17 | Sistema | Sistema | Validar flujo social de una publicación | Post → Perfil → Feed | La publicación aparece correctamente en los diferentes módulos | Alta | Cruza módulos (Perfil pendiente) | ❌ Sin cobertura automatizada, y depende parcialmente de Perfil/Followers (no implementados) | Pendiente — bloqueado en parte por Followers/Perfil Social |
 
@@ -97,11 +97,42 @@ Justificación general: CP-09 y CP-10 son los únicos casos base que tocan Posts
 - CP-26 no tiene un test de Jest dedicado en este sprint porque el comportamiento de `@Min`/`@Max`/`@IsInt` del `ValidationPipe` global ya es un patrón probado por el propio framework y usado sin tests dedicados en otros DTOs de este repo; se verifica manualmente en la guía (sección de Errores).
 - Los índices SQL (`idx_workout_posts_public_feed`, `idx_workout_posts_user_timeline`) y las migraciones no tienen prueba automatizada — no es posible probarlos sin una instancia real de Postgres. Quedan validados solo estáticamente (Fase 3).
 
+### Casos agregados — Resolución de F8, privacidad de challenges privados (CP-29 en adelante)
+
+Justificación: la sección **"Caso pendiente de decisión de producto"** (más abajo) documentaba el hallazgo F8 como bloqueado a la espera de una decisión de producto. Esa decisión ya se tomó (ver esa misma sección para el texto completo de la respuesta) y se implementó en dos capas, tal como se pidió: validación en escritura y filtro en lectura como segunda capa de defensa, aplicado de forma consistente a todos los endpoints que exponen posts.
+
+| ID | Funcionalidad | Tipo | Prueba | Condiciones/Entrada | Resultado esperado | Prioridad | Cobertura automatizada | Estado |
+|---|---|---|---|---|---|---|---|---|
+| CP-29 | Posts | Funcional | Un post no puede volverse público global desde un challenge privado (escritura) | `POST /workout-logs/progress` con `visibility: 'public'` sobre un challenge cuyo `visibility = 'private'` | El `WorkoutPost` se guarda con `visibility: 'private'` (downgrade automático y silencioso, no se rechaza el envío completo del progreso); si el challenge es público, se respeta `'public'`; si no se pide `'public'` o el workout no tiene `challengeId`, no se consulta el challenge | Alta | `workout-log.service.spec.ts` → describe *"downgrading visibility for private-challenge posts (CP-29)"* (4 tests) | Ejecutado — Aprobado |
+| CP-30 | Feed | Funcional | Un post de un challenge privado nunca aparece en el Feed global (lectura, sin excepción) | Post `visibility='public'` + `moderation_status='approved'` cuyo challenge es `private` | El post no aparece en `GET /feed`, sin excepción — ni para el propio autor, ni para miembros del challenge (el Feed no tiene contexto de viewer para hacer esa excepción) | Alta | `workout-posts.service.spec.ts` → *"should exclude posts whose challenge is private, unconditionally (CP-30)"* | Ejecutado — Aprobado |
+| CP-31 | Posts por usuario | Funcional | Un post de un challenge privado no se filtra por el perfil de otro usuario, salvo para miembros del challenge | `GET /workout-posts/user/:userId` con `userId` ≠ viewer, post `visibility='public'` cuyo challenge es `private` | El post no aparece para un viewer que no es miembro del challenge (ni siquiera si el post en sí es `'public'`); si el viewer es miembro activo del challenge (`challenge_user_map`), o es el propio autor, sí lo ve | Alta | `workout-posts.service.spec.ts` → *"other-view: should exclude posts from a private challenge unless the viewer is a member (CP-31)"* | Ejecutado — Aprobado |
+
+**Notas de implementación (para que la tabla sea trazable al código):**
+- Escritura: `WorkoutLogService.resolvePostVisibility()` en [workout-log.service.ts](../../src/workout-log/workout-log.service.ts) — se ejecuta dentro de `createWorkout()`, antes de llamar a `WorkoutPostsService.create()`.
+- Lectura: `WorkoutPostsService.challengePrivacyFilter()` en [workout-posts.service.ts](../../src/workout-posts/workout-posts.service.ts) — reutilizado por `getFeed()`, `getUserPosts()` (vía `fetchPaginatedPhotos()`) y `getChallengePhotos()`/`getUserPhotos()` (vía `fetchPhotos()`), para que la regla no dependa de qué endpoint la lea.
+- El filtro de lectura es intencionalmente redundante con el de escritura: cubre posts creados antes de este fix y el caso en que un challenge se vuelve privado después de que ya existían posts públicos asociados.
+- **Gap conocido, fuera de alcance de este cierre**: `WorkoutPostsService.findMosaicByChallenge()` (`GET /workout-posts/mosaic`) no aplica ningún filtro de `visibility` (ni siquiera el básico `'public'`/`'private'` de un post, mucho menos el de challenge) — es un problema preexistente y más amplio que F8, no cubierto aquí. Se recomienda una revisión aparte.
+- **Gap conocido, fuera de alcance de este cierre**: no existe ningún guard de membresía en `GET /challenges/:id` — cualquier usuario autenticado puede leer los metadatos de un challenge privado si conoce su ID, independientemente de este fix (que solo protege *posts*, no el propio challenge). Se recomienda una revisión aparte de autorización en `ChallengesController`.
+
+### Casos agregados — Badges y Challenge Invites (CP-32 en adelante)
+
+Estos dos módulos ya tenían pruebas reales en el repo (`badges.service.spec.ts`, `challenge-invites.service.spec.ts`) pero nunca se habían registrado en este documento porque se escribieron fuera del ciclo de B2. Se consolidan aquí para que la tabla de CP refleje el estado real del repositorio, no solo lo entregado en el sprint de Posts/Feed.
+
+| ID | Funcionalidad | Tipo | Prueba | Condiciones/Entrada | Resultado esperado | Prioridad | Cobertura automatizada | Estado |
+|---|---|---|---|---|---|---|---|---|
+| CP-32 | Badges | Funcional | Cálculo de badges de actividad al vuelo | Historial de workouts/challenges del usuario | Badges de conteo de workouts y de challenges completados marcados correctamente ganados/no ganados según umbral, con progreso capado al objetivo; racha (`streak`) calculada desde días consecutivos completados hasta hoy, tolerando que el día de hoy aún no tenga workout registrado | Media | `badges.service.spec.ts` → describe `getMyBadges` (5 tests) | Ejecutado — Aprobado |
+| CP-33 | Badges | Funcional | Badges de otro usuario respetan privacidad de perfil | `GET` badges de `userId` ajeno, perfil público/privado, viewer seguidor/no seguidor/dueño | Perfil público: lista completa sin chequear seguidores; perfil privado: `[]` si el viewer no sigue activamente, lista completa si sí sigue o si el viewer es el dueño | Media | `badges.service.spec.ts` → describe `getUserBadges` (5 tests) | Ejecutado — Aprobado |
+| CP-34 | Challenge Invites | Integración | Crear invitación a un challenge | Emisor es creador o miembro activo del challenge, destinatario válido y no miembro | Se crea invitación `pending`; se rechaza auto-invitación, challenge inexistente, destinatario inexistente/inactivo, emisor sin permiso, destinatario ya miembro activo, invitación pendiente duplicada; carrera de índice único (23505) se traduce a 409 | Alta | `challenge-invites.service.spec.ts` → describe `create` (8 tests) | Ejecutado — Aprobado |
+| CP-35 | Challenge Invites | Integración | Aceptar/rechazar/cancelar invitación | Invitación `pending` existente | Aceptar agrega la membresía y marca la invitación en una sola transacción (reactivando membresía inactiva si existía); solo el destinatario puede aceptar/rechazar, solo el emisor puede cancelar; se rechaza aceptar una invitación ya procesada, expirada, o inexistente | Alta | `challenge-invites.service.spec.ts` → describe `accept` (6 tests), `decline` (3 tests), `cancel` (3 tests) | Ejecutado — Aprobado |
+| CP-36 | Challenge Invites | Funcional | Listar invitaciones | Usuario con invitaciones enviadas/recibidas | `listPendingReceived`/listados de enviadas y recibidas están correctamente delimitados por `sender`/`recipient`, y el de pendientes solo devuelve `status='pending'` | Media | `challenge-invites.service.spec.ts` → describe `listing` (3 tests) | Ejecutado — Aprobado |
+
 ---
 
-## C. Resultados de pruebas ejecutadas — Sprint B2 (Posts/Feed)
+## C. Resultados de pruebas ejecutadas
 
-Todas las filas de esta sección corresponden a comandos **realmente ejecutados** en esta sesión, contra el checkpoint `dfe47cb` + las pruebas agregadas en Fase 4. Ningún resultado fue inferido por lectura de código.
+La primera tabla corresponde al Sprint B2 (Posts/Feed) original — comandos ejecutados contra el checkpoint `dfe47cb`. La segunda tabla ("Actualización post-B2") corresponde a esta sesión: cierre de Followers, resolución de F8 y consolidación de Badges/Invitaciones. En ambos casos, todas las filas son comandos **realmente ejecutados**; ningún resultado fue inferido por lectura de código.
+
+### C.1 — Sprint B2 (Posts/Feed)
 
 | Caso | Prueba ejecutada | Comando | Resultado obtenido | Estado | Evidencia |
 |---|---|---|---|---|---|
@@ -111,42 +142,53 @@ Todas las filas de esta sección corresponden a comandos **realmente ejecutados*
 | CP-09 | `workout-log.service.spec.ts` → *"generating the WorkoutPost"* | `npx jest src/workout-log/workout-log.service.spec.ts` | 3/3 tests nuevos pasan | Aprobado | `✓ should call workoutPostsService.create with the submitted image, caption and visibility` |
 | CP-10, CP-18, CP-19, CP-27 | `workout-posts.service.spec.ts` (`getFeed`) + `feed.controller.spec.ts` | `npx jest src/workout-posts/` | 10/10 + 7/7 tests pasan | Aprobado | Ver salida completa, sección Verificación |
 | CP-11, CP-12 | Suite de Users/Perfil | `npm run test` | 15/15 tests de `users.service.spec.ts` pasan | Aprobado | Ídem |
-| CP-13, CP-14, CP-15 | — | — | No existe código ni test que ejecutar | No ejecutado | N/A — módulo no implementado |
+| CP-13, CP-14, CP-15 | — | — | No existía código ni test que ejecutar en B2 | No ejecutado (B2) — ver C.2 | Cerrado en la actualización post-B2 |
 | CP-16, CP-17 | — | — | No existe `*.e2e-spec.ts` | No ejecutado | N/A — pendiente de infraestructura de e2e |
 | CP-20, CP-21, CP-22, CP-23 | `workout-posts.service.spec.ts` (`getUserPosts`) + `workout-posts.controller.spec.ts` | `npx jest src/workout-posts/` | 7/7 + 6/6 tests pasan | Aprobado | Ídem |
 | CP-24, CP-25 | `pagination.util.spec.ts` | `npx jest src/workout-posts/pagination.util.spec.ts` | 18/18 tests pasan | Aprobado | Ídem |
 | CP-26 | — | Verificado por diseño (decoradores `class-validator`), no por test dedicado | — | No ejecutado (ver limitación) | — |
 | CP-28 | `workout-log.service.spec.ts` → *"generating the WorkoutPost"* | `npx jest src/workout-log/workout-log.service.spec.ts` | 3/3 (mismos tests que CP-09) | Aprobado | Ídem |
-| Suite completa | Todos los tests del backend | `npm run test` | **15 suites, 145 tests — todos pasan** | Aprobado | Ver salida completa, sección Verificación |
+| Suite completa (checkpoint B2) | Todos los tests del backend | `npm run test` | 15 suites, 145 tests — todos pasan | Aprobado | Ver salida completa, sección Verificación |
+
+### C.2 — Actualización post-B2 (Followers, F8, Badges, Invites)
+
+| Caso | Prueba ejecutada | Comando | Resultado obtenido | Estado | Evidencia |
+|---|---|---|---|---|---|
+| CP-13, CP-14, CP-15 | `follows.service.spec.ts` + `follows.controller.spec.ts` | `npx jest src/follows/` | 14/14 + 4/4 tests pasan | Aprobado | `follow` (6), `unfollow` (2), `listFollowers/listFollowing` (2), `getCounts` (1), `isActiveFollower` (2) + 4 tests de controller |
+| CP-29 | `workout-log.service.spec.ts` → *"downgrading visibility for private-challenge posts (CP-29)"* | `npx jest src/workout-log/workout-log.service.spec.ts` | 4/4 tests nuevos pasan | Aprobado | `✓ should downgrade visibility to 'private' when requesting 'public' on a private challenge`, `✓ should keep 'public' when the challenge is public`, `✓ should not downgrade or query the challenge when the requested visibility is not public`, `✓ should not query the challenge when the workout has no challengeId` |
+| CP-30 | `workout-posts.service.spec.ts` → *"should exclude posts whose challenge is private, unconditionally (CP-30)"* | `npx jest src/workout-posts/workout-posts.service.spec.ts` | 1/1 test nuevo pasa | Aprobado | Verifica que la SQL de `getFeed()` contiene `c.visibility != 'private'` |
+| CP-31 | `workout-posts.service.spec.ts` → *"other-view: should exclude posts from a private challenge unless the viewer is a member (CP-31)"* | `npx jest src/workout-posts/workout-posts.service.spec.ts` | 1/1 test nuevo pasa | Aprobado | Verifica el `EXISTS` contra `challenge_user_map cum_viewer` en la SQL de `getUserPosts()` |
+| CP-32, CP-33 | `badges.service.spec.ts` | `npx jest src/badges/` | 10/10 tests pasan | Aprobado | `getMyBadges` (5), `getUserBadges` (5) |
+| CP-34, CP-35, CP-36 | `challenge-invites.service.spec.ts` | `npx jest src/challenge-invites/` | 23/23 tests pasan | Aprobado | `create` (8), `accept` (6), `decline` (3), `cancel` (3), `listing` (3) |
+| Suite completa (actual) | `npm run build` + Todos los tests del backend | `npm run build && npm run test` | Build sin errores. **18 suites, 190 tests — todos pasan** | Aprobado | Ver salida completa, sección Verificación |
+
+**Nota sobre pruebas modificadas (no solo agregadas):** dos pruebas preexistentes de `workout-posts.service.spec.ts` (`getUserPosts`, casos "no owner bypass") afirmaban que la SQL de un viewer no-dueño nunca contenía el fragmento `OR p.user_id`. El nuevo filtro de CP-31 introduce legítimamente ese fragmento (para que el propio autor nunca se oculte su post a sí mismo), así que esa aserción genérica dejó de ser válida como estaba escrita. Se reemplazó por dos aserciones más específicas (`not.toContain('moderation_status = ANY')` y `not.toContain("p.visibility != 'private'")`) que siguen probando lo que realmente importaba (que no vuelve el bypass de moderación/visibilidad del dueño), sin quedar acopladas a un fragmento de SQL que ahora tiene un motivo legítimo para existir. Ninguna prueba se debilitó ni se eliminó — se corrigió una aserción que había quedado demasiado amplia.
 
 ### Espacio para otros integrantes
 
 > Agregar aquí, en filas nuevas siguiendo el mismo formato, los resultados de:
-> - **Perfil** (CP-11/CP-12 a nivel de endpoint HTTP completo, estadísticas agregadas).
-> - **Followers** (CP-13, CP-14, CP-15) — una vez exista el módulo.
 > - **Integración final** / **Sistema** (CP-16, CP-17) — requiere decidir la estrategia de e2e (DB de prueba real vs. mocks extendidos) antes de poder ejecutarse.
 > - **Uploads/Progreso** (CP-07).
 > - **Challenges** (CP-03, CP-08).
 
 ---
 
-## Caso pendiente de decisión de producto
+## F8 — Challenge privado + `WorkoutPost` con `visibility='public'` (RESUELTO)
 
-**Escenario: Challenge privado + `WorkoutPost` con `visibility='public'`.**
+**Escenario:** la regla de Feed implementada en B2 es exactamente `post.visibility = 'public' AND post.moderation_status = 'approved'`, sin considerar `challenge.visibility`. Un post marcado `public` cuyo `workout_log` pertenece a un challenge `private` (invite-only) aparecía en `/feed` y en `/workout-posts/user/:userId` de otro usuario, revelando el nombre y la existencia de un challenge privado a usuarios que no son miembros. Se identificó en la auditoría de Fase 3 (hallazgo F8) y quedó documentado aquí como decisión de producto pendiente, sin resolverse unilateralmente durante B2.
 
-La regla de Feed implementada en B2 es exactamente:
+**Decisión de producto (respuesta recibida):**
 
-```
-post.visibility = 'public' AND post.moderation_status = 'approved'
-```
+> No haría que `public` signifique "solo miembros del challenge". Son dos conceptos distintos: `challenges.visibility` controla quién puede acceder/unirse al challenge, mientras que `workout_posts.visibility` controla quién puede ver la publicación. Mezclarlos hace ambigua la lógica.
+>
+> Para un challenge privado, sí pondría una restricción: sus publicaciones no deberían poder convertirse en contenido público global. La validación principal debe hacerse al crear/actualizar el post. Si el challenge es privado, backend debe rechazar `visibility = public` o asignar automáticamente una visibilidad restringida. Además, aunque validen en escritura, también recomiendo filtrar en lectura como segunda capa de seguridad. No confiaría únicamente en que el dato se guardó correctamente.
+>
+> La misma regla debe aplicar a cualquier endpoint que exponga publicaciones, incluyendo `GET /workout-posts/user/:userId`. Si una publicación proviene de un challenge privado, alguien sin acceso al challenge no debería descubrirla entrando al perfil del usuario. La autorización debería ser consistente sin importar desde qué pantalla se consulta.
 
-Esta regla **no considera** `challenge.visibility`. En consecuencia, un post marcado `public` cuyo `workout_log` pertenece a un challenge `private` (invite-only) **sí aparece hoy en `/feed`** y en `/workout-posts/user/:userId` de otro usuario — potencialmente revelando el nombre y la existencia de un challenge privado a usuarios que no son miembros.
+**Implementación (ver CP-29/30/31 arriba):**
+1. `challenges.visibility` y `workout_posts.visibility` se mantuvieron como conceptos independientes — no hay ningún "public = solo miembros del challenge" en ningún lado del código.
+2. Capa de escritura: `WorkoutLogService.resolvePostVisibility()` — si el challenge es `private` y se pidió `visibility: 'public'`, se asigna automáticamente `'private'` (opción "auto-asignar visibilidad restringida" de las dos que planteó la decisión; se prefirió sobre rechazar todo el envío de progreso porque este endpoint guarda imagen + ejercicios + post en una sola operación, y una publicación demasiado visible no debería tirar abajo el registro del entrenamiento).
+3. Capa de lectura (segunda capa, independiente de que la escritura haya fallado o el post sea anterior a este fix): `WorkoutPostsService.challengePrivacyFilter()`, aplicado a `getFeed()`, `getUserPosts()` y `getChallengePhotos()`/`getUserPhotos()` por igual, para que la regla no dependa del endpoint.
+4. `GET /workout-posts/user/:userId` queda explícitamente cubierto (CP-31): un viewer que no es miembro del challenge no ve el post aunque sea `'public'`; un miembro activo del challenge (o el propio autor) sí.
 
-Esto no es un bug de implementación: es exactamente lo que el diseño técnico cerrado en la Fase 2/3 especifica ("Feed = `public` + `approved`, sin excepciones"). Se identificó como riesgo en la auditoría de Fase 3 (hallazgo F8) y **no se resolvió unilateralmente**, por instrucción explícita de no modificar la lógica de negocio durante la fase de pruebas.
-
-**Qué debería definirse antes de convertir esto en un caso de aceptación definitivo:**
-1. ¿Un post `public` debe heredar la visibilidad de su challenge (es decir, "público" significa "público entre los miembros del challenge", no "público en toda la app")?
-2. Si la respuesta es sí, ¿el Feed debería hacer `JOIN` contra `challenges.visibility` y excluir los challenges privados, o debería ser el propio usuario quien no pueda elegir `visibility='public'` al postear en un challenge privado (validación en la creación, no en la lectura)?
-3. ¿Esta regla debe aplicar también a `GET /workout-posts/user/:userId` (posts públicos de otro usuario), no solo al Feed global?
-
-No se implementó ninguna de estas opciones — se documenta como decisión de producto pendiente.
+**Gaps identificados pero fuera de alcance de este cierre** (quedan como riesgo documentado, no como bug de F8): `GET /workout-posts/mosaic` no filtra por visibilidad en absoluto (ni la del post ni la del challenge), y no existe ningún guard de membresía en `GET /challenges/:id`. Ver notas de implementación en la sección de CP-29/30/31.

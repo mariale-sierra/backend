@@ -11,6 +11,7 @@ import { WorkoutLog } from './entities/workout-log.entity';
 import { RoutineExercise } from '../routine/entities/routine-exercise.entity';
 import { WorkoutLogExercise } from './entities/workout-log-exercise.entity';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
+import { Challenge } from '../challenges/entities/challenge.entity';
 
 const createMockRepo = () => ({
   find: jest.fn(),
@@ -25,6 +26,7 @@ describe('WorkoutLogService', () => {
   let workoutRepo: ReturnType<typeof createMockRepo>;
   let dataSource: { transaction: jest.Mock };
   let workoutPostsService: { create: jest.Mock };
+  let challengeRepo: ReturnType<typeof createMockRepo>;
 
   const OWNER_ID = 'owner-1';
   const OTHER_USER_ID = 'other-2';
@@ -33,6 +35,7 @@ describe('WorkoutLogService', () => {
     workoutRepo = createMockRepo();
     dataSource = { transaction: jest.fn() };
     workoutPostsService = { create: jest.fn() };
+    challengeRepo = createMockRepo();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -48,6 +51,7 @@ describe('WorkoutLogService', () => {
           provide: getRepositoryToken(WorkoutLogExercise),
           useValue: createMockRepo(),
         },
+        { provide: getRepositoryToken(Challenge), useValue: challengeRepo },
       ],
     }).compile();
 
@@ -153,6 +157,97 @@ describe('WorkoutLogService', () => {
         });
 
         expect(workoutPostsService.create).not.toHaveBeenCalled();
+      });
+    });
+
+    // F8 (docs/testing/PLAN-MAESTRO-PRUEBAS.md): a post can never become
+    // globally public content just because its challenge is private —
+    // challenges.visibility and workout_posts.visibility are independent,
+    // but the private challenge's own privacy must win. Write-side half of
+    // the fix (WorkoutPostsService re-checks it at read time, see CP-29/30
+    // in workout-posts.service.spec.ts).
+    describe('downgrading visibility for private-challenge posts (CP-29)', () => {
+      beforeEach(() => {
+        workoutRepo.findOne
+          .mockResolvedValueOnce(null) // no existing log today
+          .mockResolvedValueOnce({ id: 99, userId: OWNER_ID }); // this.findOne() at the end
+        const createdWorkout = { id: 99, userId: OWNER_ID };
+        dataSource.transaction.mockImplementation(
+          (cb: (manager: unknown) => unknown) =>
+            cb({
+              create: jest.fn().mockReturnValue(createdWorkout),
+              save: jest.fn().mockResolvedValue(createdWorkout),
+              getRepository: jest.fn(),
+            }),
+        );
+      });
+
+      it("should downgrade visibility to 'private' when requesting 'public' on a private challenge", async () => {
+        challengeRepo.findOne.mockResolvedValue({ visibility: 'private' });
+
+        await service.createWorkout({
+          userId: OWNER_ID,
+          challengeId: 'challenge-1',
+          imageUrl: 'https://example.com/day1.jpg',
+          visibility: 'public',
+        });
+
+        expect(challengeRepo.findOne).toHaveBeenCalledWith({
+          where: { id: 'challenge-1' },
+          select: ['visibility'],
+        });
+        expect(workoutPostsService.create).toHaveBeenCalledWith(
+          expect.objectContaining({ visibility: 'private' }),
+        );
+      });
+
+      it("should keep 'public' when the challenge is public", async () => {
+        challengeRepo.findOne.mockResolvedValue({ visibility: 'public' });
+
+        await service.createWorkout({
+          userId: OWNER_ID,
+          challengeId: 'challenge-1',
+          imageUrl: 'https://example.com/day1.jpg',
+          visibility: 'public',
+        });
+
+        expect(workoutPostsService.create).toHaveBeenCalledWith(
+          expect.objectContaining({ visibility: 'public' }),
+        );
+      });
+
+      it('should not downgrade or query the challenge when the requested visibility is not public', async () => {
+        await service.createWorkout({
+          userId: OWNER_ID,
+          challengeId: 'challenge-1',
+          imageUrl: 'https://example.com/day1.jpg',
+          visibility: 'followers',
+        });
+
+        expect(challengeRepo.findOne).not.toHaveBeenCalled();
+        expect(workoutPostsService.create).toHaveBeenCalledWith(
+          expect.objectContaining({ visibility: 'followers' }),
+        );
+      });
+
+      it('should not query the challenge when the workout has no challengeId', async () => {
+        // No challengeId means the daily-duplicate check never runs, so
+        // createWorkout only calls workoutRepo.findOne() once (the final
+        // this.findOne() lookup) — override the beforeEach's two-call queue.
+        workoutRepo.findOne
+          .mockReset()
+          .mockResolvedValueOnce({ id: 99, userId: OWNER_ID });
+
+        await service.createWorkout({
+          userId: OWNER_ID,
+          imageUrl: 'https://example.com/day1.jpg',
+          visibility: 'public',
+        });
+
+        expect(challengeRepo.findOne).not.toHaveBeenCalled();
+        expect(workoutPostsService.create).toHaveBeenCalledWith(
+          expect.objectContaining({ visibility: 'public' }),
+        );
       });
     });
   });

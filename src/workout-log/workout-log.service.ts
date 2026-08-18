@@ -15,6 +15,7 @@ import { WorkoutLogExerciseSet } from './entities/workout-log-exercise-set.entit
 import { WorkoutLogExerciseSetTarget } from './entities/workout-log-exercise-set-target.entity';
 import { Between } from 'typeorm';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
+import { Challenge } from '../challenges/entities/challenge.entity';
 
 @Injectable()
 export class WorkoutLogService {
@@ -30,6 +31,9 @@ export class WorkoutLogService {
 
     @InjectRepository(WorkoutLogExercise)
     private wleRepo: Repository<WorkoutLogExercise>,
+
+    @InjectRepository(Challenge)
+    private challengeRepo: Repository<Challenge>,
   ) {}
 
   async createWorkout(dto: {
@@ -175,11 +179,43 @@ export class WorkoutLogService {
         user_id: dto.userId,
         image_url: dto.imageUrl,
         caption: dto.caption,
-        visibility: dto.visibility || 'private',
+        visibility: await this.resolvePostVisibility(
+          dto.challengeId,
+          dto.visibility,
+        ),
       });
     }
 
     return this.findOne(savedWorkout.id);
+  }
+
+  /**
+   * A post can never become globally public content from a private
+   * challenge — challenges.visibility (who can access/join a challenge) and
+   * workout_posts.visibility (who can see a post) are independent concepts,
+   * but a private challenge's posts must not leak into public surfaces
+   * (Feed, another user's public profile) just because the poster picked
+   * 'public'. Downgraded silently to 'private' rather than rejecting the
+   * whole progress submission over a visibility mismatch (see F8 in
+   * docs/testing/PLAN-MAESTRO-PRUEBAS.md). This is the write-side half of
+   * the rule; getFeed/getUserPosts/getChallengePhotos in
+   * WorkoutPostsService re-check it at read time as a second layer.
+   */
+  private async resolvePostVisibility(
+    challengeId: string | undefined,
+    requestedVisibility: 'private' | 'followers' | 'public' | undefined,
+  ): Promise<'private' | 'followers' | 'public'> {
+    const visibility = requestedVisibility || 'private';
+    if (!challengeId || visibility !== 'public') {
+      return visibility;
+    }
+
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId },
+      select: ['visibility'],
+    });
+
+    return challenge?.visibility === 'private' ? 'private' : visibility;
   }
 
   async finishWorkout(workoutId: number, userId: string) {
