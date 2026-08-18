@@ -16,8 +16,8 @@ export enum WorkoutPostModerationStatus {
 
 @Entity({ schema: 'havit', name: 'workout_posts' })
 export class WorkoutPost {
-  @PrimaryGeneratedColumn()
-  id!: number;
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
 
   @Column()
   workout_log_id!: number;

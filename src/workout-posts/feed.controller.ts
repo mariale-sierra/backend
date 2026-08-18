@@ -33,7 +33,7 @@ export class FeedController {
   @ApiOperation({
     summary: 'Feed público de publicaciones',
     description:
-      "Publicaciones con visibility='public' AND moderation_status='approved', ordenadas por created_at DESC, id DESC. Sin excepción para el propio autor: 'private', 'followers', 'pending' y 'rejected' nunca aparecen aquí. 'followers' no se resuelve porque el módulo de seguidores no existe todavía. Requiere autenticación (guard global).",
+      "Publicaciones con visibility='public' AND moderation_status='approved', ordenadas por created_at DESC, id DESC. Sin excepción para el propio autor: 'private', 'followers', 'pending' y 'rejected' nunca aparecen aquí. 'followers' no se resuelve en este feed público porque no hay contexto de viewer por publicación (es un único feed compartido); esa visibilidad sí se resuelve en GET /workout-posts/user/:userId usando el módulo de seguidores. Requiere autenticación (guard global).",
   })
   @ApiHeader({
     name: 'X-Next-Cursor',

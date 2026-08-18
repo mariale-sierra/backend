@@ -126,7 +126,7 @@ export class WorkoutPostsService {
   }
 
   private async reviewPostModeration(
-    postId: number,
+    postId: string,
     imageUrl: string,
     caption?: string,
   ) {
@@ -245,7 +245,10 @@ export class WorkoutPostsService {
 
   /**
    * All progress photos for a challenge, newest first, visible to `viewerId`:
-   * public/followers posts from anyone, plus the viewer's own private posts.
+   * public posts from anyone, 'followers'-visibility posts only from users
+   * `viewerId` actively follows, plus the viewer's own posts regardless of
+   * visibility. Mirrors the B3 follower rule fetchPaginatedPhotos() applies
+   * per-target-user, generalized here to a multi-author result set.
    */
   async getChallengePhotos(
     challengeId: string,
@@ -280,10 +283,23 @@ export class WorkoutPostsService {
       moderationFilter = `AND (p.moderation_status = ANY($${params.length}) OR p.user_id = $${viewerParamIndex})`;
     }
 
-    // Private posts are only visible to the person who posted them — everyone
-    // else only sees public/followers posts, regardless of shared challenge
-    // membership.
-    const visibilityFilter = `AND (p.visibility != 'private' OR p.user_id = $${viewerParamIndex})`;
+    // Private posts are only visible to the person who posted them. Posts
+    // marked 'followers' are only visible to the poster and to viewers who
+    // actively follow them — same rule fetchPaginatedPhotos() applies for
+    // GET /workout-posts/user/:userId (B3), so a post's visibility doesn't
+    // depend on which endpoint happens to read it.
+    const visibilityFilter = `AND (
+      p.visibility != 'private' OR p.user_id = $${viewerParamIndex}
+    ) AND (
+      p.visibility != 'followers'
+      OR p.user_id = $${viewerParamIndex}
+      OR EXISTS (
+        SELECT 1 FROM havit.user_follows uf
+        WHERE uf.follower_user_id = $${viewerParamIndex}
+          AND uf.followed_user_id = p.user_id
+          AND uf.is_active = true
+      )
+    )`;
 
     const rows: PhotoRow[] = await this.repo.manager.query(
       `SELECT p.id, p.image_url, p.caption, p.visibility, p.created_at,

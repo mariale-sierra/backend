@@ -61,10 +61,14 @@ export class UsersService {
     });
     if (!user) throw new NotFoundException('User not found');
 
-    const profile = await this.profileRepo.findOne({
-      where: { user_id: userId },
+    const [profile, counts] = await Promise.all([
+      this.profileRepo.findOne({ where: { user_id: userId } }),
+      this.followsService.getCounts(userId),
+    ]);
+    return ProfileResponseDto.build(user, profile ?? null, {
+      followersCount: counts.followersCount,
+      followingCount: counts.followingCount,
     });
-    return ProfileResponseDto.build(user, profile ?? null);
   }
 
   /**
@@ -110,7 +114,8 @@ export class UsersService {
     }
 
     await this.profileRepo.save(profile);
-    return ProfileResponseDto.build(user, profile);
+    const counts = await this.followsService.getCounts(userId);
+    return ProfileResponseDto.build(user, profile, counts);
   }
 
   /**
@@ -142,7 +147,8 @@ export class UsersService {
 
     profile.profile_image_url = profileImageUrl;
     await this.profileRepo.save(profile);
-    return ProfileResponseDto.build(user, profile);
+    const counts = await this.followsService.getCounts(userId);
+    return ProfileResponseDto.build(user, profile, counts);
   }
 
   /**
@@ -167,14 +173,19 @@ export class UsersService {
     });
 
     const isOwner = targetUserId === viewerUserId;
-    const isFollower = isOwner
-      ? false
-      : await this.followsService.isActiveFollower(viewerUserId, targetUserId);
+    const [isFollower, counts] = await Promise.all([
+      isOwner
+        ? Promise.resolve(false)
+        : this.followsService.isActiveFollower(viewerUserId, targetUserId),
+      this.followsService.getCounts(targetUserId),
+    ]);
 
-    return PublicProfileResponseDto.build(user, profile ?? null, {
-      isOwner,
-      isFollower,
-    });
+    return PublicProfileResponseDto.build(
+      user,
+      profile ?? null,
+      { isOwner, isFollower },
+      counts,
+    );
   }
 
   /**
@@ -201,13 +212,24 @@ export class UsersService {
     });
     if (users.length === 0) return [];
 
-    const profiles = await this.profileRepo.find({
-      where: { user_id: In(users.map((u) => u.id)) },
-    });
+    const userIds = users.map((u) => u.id);
+    const [profiles, followerCounts, followingCounts] = await Promise.all([
+      this.profileRepo.find({ where: { user_id: In(userIds) } }),
+      this.followsService.getFollowerCountsForUsers(userIds),
+      this.followsService.getFollowingCountsForUsers(userIds),
+    ]);
     const profileByUser = new Map(profiles.map((p) => [p.user_id, p]));
 
     return users.map((u) =>
-      PublicProfileResponseDto.build(u, profileByUser.get(u.id) ?? null),
+      PublicProfileResponseDto.build(
+        u,
+        profileByUser.get(u.id) ?? null,
+        undefined,
+        {
+          followersCount: followerCounts.get(u.id) ?? 0,
+          followingCount: followingCounts.get(u.id) ?? 0,
+        },
+      ),
     );
   }
 

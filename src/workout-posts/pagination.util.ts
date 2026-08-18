@@ -5,10 +5,8 @@ export const MAX_PAGE_LIMIT = 50;
 
 export interface DecodedCursor {
   createdAt: string;
-  /** Always an opaque string. workout_posts.id's real column type (UUID vs
-   * integer) hasn't been confirmed against the live DB — never parsed or
-   * compared as a number here, only carried through as text and left for
-   * Postgres to type-infer from the column it's compared against. */
+  /** Always an opaque string. workout_posts.id is a UUID column — never
+   * parsed or compared as a number here, only carried through as text. */
   id: string;
 }
 
