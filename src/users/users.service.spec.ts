@@ -301,9 +301,12 @@ describe('UsersService', () => {
 
       expect(result.bio).toBe('secret bio');
       expect(followsService.isActiveFollower).not.toHaveBeenCalled();
+      // Viewing your own profile through the public endpoint is never
+      // reported as "following yourself".
+      expect(result.is_following).toBe(false);
     });
 
-    it('should reveal the bio of a private profile to an active follower', async () => {
+    it('should reveal the bio of a private profile to an active follower, and report is_following: true', async () => {
       userRepo.findOne.mockResolvedValue({ id: 'user-2', username: 'bob' });
       profileRepo.findOne.mockResolvedValue({
         user_id: 'user-2',
@@ -320,6 +323,7 @@ describe('UsersService', () => {
         'user-1',
         'user-2',
       );
+      expect(result.is_following).toBe(true);
     });
 
     it('should keep the bio hidden from a non-follower even when checked', async () => {

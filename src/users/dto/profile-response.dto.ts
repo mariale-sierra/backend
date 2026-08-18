@@ -90,6 +90,12 @@ export class PublicProfileResponseDto {
   @ApiProperty()
   following_count!: number;
 
+  @ApiProperty({
+    description:
+      'Whether the requesting (authenticated) user actively follows this profile. Always false when viewing your own profile.',
+  })
+  is_following!: boolean;
+
   /**
    * @param viewer Defaults to "a stranger" (not the owner, not a follower) —
    * every existing call site that doesn't pass it (e.g. searchUsers, which
@@ -123,6 +129,7 @@ export class PublicProfileResponseDto {
     dto.is_private = isPrivate;
     dto.followers_count = counts.followersCount;
     dto.following_count = counts.followingCount;
+    dto.is_following = viewer.isFollower;
     return dto;
   }
 }
