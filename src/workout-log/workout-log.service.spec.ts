@@ -95,6 +95,66 @@ describe('WorkoutLogService', () => {
 
       expect(dataSource.transaction).toHaveBeenCalled();
     });
+
+    // Neither test above asserts what actually reaches WorkoutPostsService —
+    // the piece B2 (Posts/Feed) consumes. Covers CP-09 (post generado desde
+    // el progreso) and CP-28 (visibility='public' se propaga end to end).
+    describe('generating the WorkoutPost (CP-09 / CP-28)', () => {
+      beforeEach(() => {
+        workoutRepo.findOne
+          .mockResolvedValueOnce(null) // no existing log today
+          .mockResolvedValueOnce({ id: 99, userId: OWNER_ID }); // this.findOne() at the end
+        const createdWorkout = { id: 99, userId: OWNER_ID };
+        dataSource.transaction.mockImplementation(
+          (cb: (manager: unknown) => unknown) =>
+            cb({
+              create: jest.fn().mockReturnValue(createdWorkout),
+              save: jest.fn().mockResolvedValue(createdWorkout),
+              getRepository: jest.fn(),
+            }),
+        );
+      });
+
+      it('should call workoutPostsService.create with the submitted image, caption and visibility', async () => {
+        await service.createWorkout({
+          userId: OWNER_ID,
+          challengeId: 'challenge-1',
+          imageUrl: 'https://example.com/day1.jpg',
+          caption: 'Día 1 completado',
+          visibility: 'public',
+        });
+
+        expect(workoutPostsService.create).toHaveBeenCalledWith({
+          workout_log_id: 99,
+          user_id: OWNER_ID,
+          image_url: 'https://example.com/day1.jpg',
+          caption: 'Día 1 completado',
+          visibility: 'public',
+        });
+      });
+
+      it('should default visibility to private when the caller omits it', async () => {
+        await service.createWorkout({
+          userId: OWNER_ID,
+          challengeId: 'challenge-1',
+          imageUrl: 'https://example.com/day1.jpg',
+        });
+
+        expect(workoutPostsService.create).toHaveBeenCalledWith(
+          expect.objectContaining({ visibility: 'private' }),
+        );
+      });
+
+      it('should not generate a post on a rest day', async () => {
+        await service.createWorkout({
+          userId: OWNER_ID,
+          challengeId: 'challenge-1',
+          isRestDay: true,
+        });
+
+        expect(workoutPostsService.create).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('finishWorkout', () => {

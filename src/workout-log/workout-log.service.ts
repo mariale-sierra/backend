@@ -38,7 +38,7 @@ export class WorkoutLogService {
     challengeId?: string;
     imageUrl?: string;
     caption?: string;
-    visibility?: 'private' | 'followers';
+    visibility?: 'private' | 'followers' | 'public';
     isRestDay?: boolean;
   }) {
     if (!dto.isRestDay && !dto.imageUrl) {

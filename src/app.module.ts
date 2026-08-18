@@ -12,6 +12,8 @@ import { RoutineModule } from './routine/routine.module';
 import { WorkoutLogModule } from './workout-log/workout-log.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { WorkoutPostsModule } from './workout-posts/workout-posts.module';
+import { FollowsModule } from './follows/follows.module';
+import { BadgesModule } from './badges/badges.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { OpenAiModule } from './openai/openai.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
@@ -72,6 +74,8 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
     WorkoutLogModule,
     MetricsModule,
     WorkoutPostsModule,
+    FollowsModule,
+    BadgesModule,
     UploadsModule,
     OpenAiModule,
   ],

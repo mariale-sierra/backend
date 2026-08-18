@@ -10,6 +10,7 @@ import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.enti
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengeCategoryMap } from '../challenges/entities/challenge-category-map.entity';
 import { ChallengeLocationMap } from '../challenges/entities/challenge-location-map.entity';
+import { FollowsModule } from '../follows/follows.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { ChallengeLocationMap } from '../challenges/entities/challenge-location-
       ChallengeLocationMap,
     ]),
     forwardRef(() => AuthModule),
+    FollowsModule,
   ],
   controllers: [UsersController],
   providers: [UsersService],

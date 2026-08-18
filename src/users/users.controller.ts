@@ -150,7 +150,7 @@ export class UsersController {
   @ApiOperation({
     summary: 'Perfil público de otro usuario',
     description:
-      'Vista pública que respeta la privacidad configurada: los perfiles privados no exponen bio. Nunca expone email.',
+      'Vista pública que respeta la privacidad configurada: los perfiles privados no exponen bio, salvo al propio dueño o a un seguidor activo. Nunca expone email.',
   })
   @ApiParam({ name: 'id', description: 'ID (UUID) del usuario' })
   @ApiOkResponse({ type: PublicProfileResponseDto })
@@ -158,7 +158,8 @@ export class UsersController {
   @ApiResponse({ status: 401, description: 'No autorizado' })
   getPublicProfile(
     @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<PublicProfileResponseDto> {
-    return this.usersService.getPublicProfile(id);
+    return this.usersService.getPublicProfile(id, user.sub);
   }
 }

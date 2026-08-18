@@ -24,6 +24,12 @@ async function bootstrap() {
     origin: corsOrigins && corsOrigins.length > 0 ? corsOrigins : true,
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'PUT', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    // Without this, a browser-based caller (Swagger UI, a future web client)
+    // can't read X-Next-Cursor via the fetch/XHR Headers API even though the
+    // header is on the wire — CORS hides non-"simple" response headers from
+    // JS by default. The mobile client is unaffected either way (not
+    // subject to CORS).
+    exposedHeaders: ['X-Next-Cursor'],
   });
   const config = new DocumentBuilder()
     .setTitle('Havit - Fitness API')
@@ -39,6 +45,9 @@ async function bootstrap() {
     .addTag('Routine', 'Endpoints para gestionar rutinas')
     .addTag('Metrics', 'Endpoints para gestionar métricas')
     .addTag('Workout Logs', 'Endpoints para registrar entrenamientos')
+    .addTag('Feed', 'Feed público de publicaciones')
+    .addTag('Follows', 'Endpoints para seguir/dejar de seguir usuarios')
+    .addTag('Badges', 'Badges de actividad calculados al vuelo')
     .addBearerAuth()
     .build();
 

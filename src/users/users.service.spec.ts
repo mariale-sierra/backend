@@ -8,6 +8,7 @@ import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.enti
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengeCategoryMap } from '../challenges/entities/challenge-category-map.entity';
 import { ChallengeLocationMap } from '../challenges/entities/challenge-location-map.entity';
+import { FollowsService } from '../follows/follows.service';
 
 const createMockRepo = () => ({
   find: jest.fn(),
@@ -21,6 +22,12 @@ describe('UsersService', () => {
   let service: UsersService;
   let userRepo: ReturnType<typeof createMockRepo>;
   let profileRepo: ReturnType<typeof createMockRepo>;
+  let followsService: {
+    isActiveFollower: jest.Mock;
+    getCounts: jest.Mock;
+    getFollowerCountsForUsers: jest.Mock;
+    getFollowingCountsForUsers: jest.Mock;
+  };
 
   const baseUser = () => ({
     id: 'user-1',
@@ -32,6 +39,17 @@ describe('UsersService', () => {
   beforeEach(async () => {
     userRepo = createMockRepo();
     profileRepo = createMockRepo();
+    // Default: viewer does not follow the target — preserves the pre-B3
+    // "strangers only see what a private profile allows" behavior unless a
+    // test explicitly sets this to true.
+    followsService = {
+      isActiveFollower: jest.fn().mockResolvedValue(false),
+      getCounts: jest
+        .fn()
+        .mockResolvedValue({ followersCount: 0, followingCount: 0 }),
+      getFollowerCountsForUsers: jest.fn().mockResolvedValue(new Map()),
+      getFollowingCountsForUsers: jest.fn().mockResolvedValue(new Map()),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -51,6 +69,7 @@ describe('UsersService', () => {
           provide: getRepositoryToken(ChallengeLocationMap),
           useValue: createMockRepo(),
         },
+        { provide: FollowsService, useValue: followsService },
       ],
     }).compile();
 
@@ -120,6 +139,21 @@ describe('UsersService', () => {
       await expect(service.getMyProfile('nope')).rejects.toThrow(
         NotFoundException,
       );
+    });
+
+    it('should include followers_count/following_count from FollowsService', async () => {
+      userRepo.findOne.mockResolvedValue(baseUser());
+      profileRepo.findOne.mockResolvedValue(null);
+      followsService.getCounts.mockResolvedValue({
+        followersCount: 4,
+        followingCount: 9,
+      });
+
+      const result = await service.getMyProfile('user-1');
+
+      expect(followsService.getCounts).toHaveBeenCalledWith('user-1');
+      expect(result.followers_count).toBe(4);
+      expect(result.following_count).toBe(9);
     });
   });
 
@@ -233,7 +267,7 @@ describe('UsersService', () => {
   });
 
   describe('getPublicProfile', () => {
-    it('should hide the bio and never expose the email for a private profile', async () => {
+    it('should hide the bio and never expose the email for a private profile, for a viewer who is a stranger', async () => {
       userRepo.findOne.mockResolvedValue({ id: 'user-2', username: 'bob' });
       profileRepo.findOne.mockResolvedValue({
         user_id: 'user-2',
@@ -244,7 +278,7 @@ describe('UsersService', () => {
         is_private: true,
       });
 
-      const result = await service.getPublicProfile('user-2');
+      const result = await service.getPublicProfile('user-2', 'user-1');
 
       expect(result.bio).toBeNull();
       expect(result.is_private).toBe(true);
@@ -252,6 +286,59 @@ describe('UsersService', () => {
       // Photo and display name stay visible even on private profiles.
       expect(result.display_name).toBe('Bob');
       expect(result.profile_image_url).toBe('https://cdn.example.com/b.jpg');
+    });
+
+    it('should reveal the bio of a private profile to the owner viewing it through the public endpoint', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'user-2', username: 'bob' });
+      profileRepo.findOne.mockResolvedValue({
+        user_id: 'user-2',
+        display_name: 'Bob',
+        bio: 'secret bio',
+        is_private: true,
+      });
+
+      const result = await service.getPublicProfile('user-2', 'user-2');
+
+      expect(result.bio).toBe('secret bio');
+      expect(followsService.isActiveFollower).not.toHaveBeenCalled();
+      // Viewing your own profile through the public endpoint is never
+      // reported as "following yourself".
+      expect(result.is_following).toBe(false);
+    });
+
+    it('should reveal the bio of a private profile to an active follower, and report is_following: true', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'user-2', username: 'bob' });
+      profileRepo.findOne.mockResolvedValue({
+        user_id: 'user-2',
+        display_name: 'Bob',
+        bio: 'secret bio',
+        is_private: true,
+      });
+      followsService.isActiveFollower.mockResolvedValue(true);
+
+      const result = await service.getPublicProfile('user-2', 'user-1');
+
+      expect(result.bio).toBe('secret bio');
+      expect(followsService.isActiveFollower).toHaveBeenCalledWith(
+        'user-1',
+        'user-2',
+      );
+      expect(result.is_following).toBe(true);
+    });
+
+    it('should keep the bio hidden from a non-follower even when checked', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'user-2', username: 'bob' });
+      profileRepo.findOne.mockResolvedValue({
+        user_id: 'user-2',
+        display_name: 'Bob',
+        bio: 'secret bio',
+        is_private: true,
+      });
+      followsService.isActiveFollower.mockResolvedValue(false);
+
+      const result = await service.getPublicProfile('user-2', 'user-1');
+
+      expect(result.bio).toBeNull();
     });
 
     it('should expose the bio for a public profile but still no email', async () => {
@@ -263,7 +350,7 @@ describe('UsersService', () => {
         is_private: false,
       });
 
-      const result = await service.getPublicProfile('user-2');
+      const result = await service.getPublicProfile('user-2', 'user-1');
 
       expect(result.bio).toBe('public bio');
       expect(result).not.toHaveProperty('email');
@@ -272,9 +359,28 @@ describe('UsersService', () => {
     it('should throw NotFoundException for inactive or unknown users', async () => {
       userRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.getPublicProfile('ghost')).rejects.toThrow(
+      await expect(service.getPublicProfile('ghost', 'user-1')).rejects.toThrow(
         NotFoundException,
       );
+    });
+
+    it("should include the target user's followers_count/following_count, not the viewer's", async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'user-2', username: 'bob' });
+      profileRepo.findOne.mockResolvedValue({
+        user_id: 'user-2',
+        display_name: 'Bob',
+        is_private: false,
+      });
+      followsService.getCounts.mockResolvedValue({
+        followersCount: 12,
+        followingCount: 3,
+      });
+
+      const result = await service.getPublicProfile('user-2', 'user-1');
+
+      expect(followsService.getCounts).toHaveBeenCalledWith('user-2');
+      expect(result.followers_count).toBe(12);
+      expect(result.following_count).toBe(3);
     });
   });
 
@@ -309,6 +415,38 @@ describe('UsersService', () => {
       expect(userRepo.find).toHaveBeenCalledWith(
         expect.objectContaining({ take: 20 }),
       );
+    });
+
+    it('should attach per-user follower/following counts via a single batched lookup', async () => {
+      userRepo.find.mockResolvedValue([
+        { id: 'user-2', username: 'bob' },
+        { id: 'user-3', username: 'carol' },
+      ]);
+      profileRepo.find.mockResolvedValue([]);
+      followsService.getFollowerCountsForUsers.mockResolvedValue(
+        new Map([
+          ['user-2', 5],
+          ['user-3', 0],
+        ]),
+      );
+      followsService.getFollowingCountsForUsers.mockResolvedValue(
+        new Map([['user-2', 1]]),
+      );
+
+      const result = await service.searchUsers('bo', 'user-1');
+
+      expect(followsService.getFollowerCountsForUsers).toHaveBeenCalledWith([
+        'user-2',
+        'user-3',
+      ]);
+      expect(result.find((u) => u.id === 'user-2')).toMatchObject({
+        followers_count: 5,
+        following_count: 1,
+      });
+      expect(result.find((u) => u.id === 'user-3')).toMatchObject({
+        followers_count: 0,
+        following_count: 0,
+      });
     });
   });
 });
