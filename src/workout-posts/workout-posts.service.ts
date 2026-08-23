@@ -281,6 +281,22 @@ export class WorkoutPostsService {
     return this.fetchPhotos('wl.challenge_id = $1', [challengeId], viewerId);
   }
 
+  /**
+   * Most recent progress photo for a challenge, visible to `viewerId` — same
+   * filtering rules as getChallengePhotos() (it's already ORDER BY
+   * p.created_at DESC), just capped to the first result. Reuses
+   * getChallengePhotos() rather than duplicating the query so the two never
+   * drift; the extra rows fetched are negligible for a single challenge
+   * gallery. Returns null when the challenge has no visible photo yet.
+   */
+  async getLatestChallengePhoto(
+    challengeId: string,
+    viewerId: string,
+  ): Promise<ChallengePhoto | null> {
+    const photos = await this.getChallengePhotos(challengeId, viewerId);
+    return photos[0] ?? null;
+  }
+
   /** Every progress photo the given user has posted, across all challenges. */
   async getUserPhotos(userId: string): Promise<ChallengePhoto[]> {
     return this.fetchPhotos('p.user_id = $1', [userId], userId);

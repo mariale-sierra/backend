@@ -283,6 +283,51 @@ describe('WorkoutPostsService', () => {
   });
 
   // ---------------------------------------------------------------------
+  // GET /workout-posts/challenge/:challengeId/latest
+  // ---------------------------------------------------------------------
+  describe('getLatestChallengePhoto', () => {
+    it('should reuse the same filtered query as getChallengePhotos, scoped to the challenge', async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getLatestChallengePhoto('challenge-42', VIEWER_ID);
+
+      const [sql, params] = postRepo.manager.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(sql).toContain('wl.challenge_id = $1');
+      expect(sql).toContain("p.visibility != 'private'");
+      expect(params[0]).toBe('challenge-42');
+    });
+
+    it('should return only the first (most recent) photo', async () => {
+      const rows = [
+        photoRow({ id: '2', created_at: new Date('2026-08-17T10:00:00.000Z') }),
+        photoRow({ id: '1', created_at: new Date('2026-08-16T10:00:00.000Z') }),
+      ];
+      postRepo.manager.query.mockResolvedValue(rows);
+
+      const result = await service.getLatestChallengePhoto(
+        'challenge-1',
+        VIEWER_ID,
+      );
+
+      expect(result?.id).toBe('2');
+    });
+
+    it('should return null, not an empty array or undefined, when the challenge has no visible photo', async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      const result = await service.getLatestChallengePhoto(
+        'challenge-1',
+        VIEWER_ID,
+      );
+
+      expect(result).toBeNull();
+    });
+  });
+
+  // ---------------------------------------------------------------------
   // GET /workout-posts/user/:userId
   // ---------------------------------------------------------------------
   describe('getUserPosts', () => {

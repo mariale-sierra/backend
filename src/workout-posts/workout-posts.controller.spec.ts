@@ -6,9 +6,10 @@ import { CursorPaginationQueryDto } from './dto/cursor-pagination-query.dto';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { DEFAULT_PAGE_LIMIT, encodeCursor } from './pagination.util';
 
-// Only the new B2 endpoint (GET /workout-posts/user/:userId) is covered
-// here — the pre-existing mine/challenge/mosaic handlers are untouched by
-// B2 and already exercised indirectly via the service.
+// Only the new B2 endpoint (GET /workout-posts/user/:userId) and the
+// challenge/:challengeId/latest endpoint are covered here — the
+// pre-existing mine/challenge/mosaic handlers are untouched by either and
+// already exercised indirectly via the service.
 describe('WorkoutPostsController.getUserPosts', () => {
   let controller: WorkoutPostsController;
   let service: { getUserPosts: jest.Mock };
@@ -123,5 +124,57 @@ describe('WorkoutPostsController.getUserPosts', () => {
     );
 
     expect(result).toBe(photos);
+  });
+});
+
+describe('WorkoutPostsController.getLatestChallengePhoto', () => {
+  let controller: WorkoutPostsController;
+  let service: { getLatestChallengePhoto: jest.Mock };
+
+  const viewer: AuthenticatedUser = {
+    sub: 'viewer-1',
+    email: 'v@v.com',
+    username: 'viewer',
+  };
+
+  beforeEach(() => {
+    service = { getLatestChallengePhoto: jest.fn() };
+    controller = new WorkoutPostsController(
+      service as unknown as WorkoutPostsService,
+    );
+  });
+
+  it('should delegate to the service with the challengeId and the JWT-derived viewer id', async () => {
+    service.getLatestChallengePhoto.mockResolvedValue(null);
+
+    await controller.getLatestChallengePhoto('challenge-1', viewer);
+
+    expect(service.getLatestChallengePhoto).toHaveBeenCalledWith(
+      'challenge-1',
+      'viewer-1',
+    );
+  });
+
+  it('should return null as-is when the challenge has no visible photo yet', async () => {
+    service.getLatestChallengePhoto.mockResolvedValue(null);
+
+    const result = await controller.getLatestChallengePhoto(
+      'challenge-1',
+      viewer,
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it('should return the photo the service resolves', async () => {
+    const photo = { id: '1' };
+    service.getLatestChallengePhoto.mockResolvedValue(photo);
+
+    const result = await controller.getLatestChallengePhoto(
+      'challenge-1',
+      viewer,
+    );
+
+    expect(result).toBe(photo);
   });
 });

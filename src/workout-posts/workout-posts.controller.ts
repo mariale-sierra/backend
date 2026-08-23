@@ -50,6 +50,28 @@ export class WorkoutPostsController {
     return this.workoutPostsService.getChallengePhotos(challengeId, user.sub);
   }
 
+  @Get('challenge/:challengeId/latest')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Foto de progreso más reciente de un challenge',
+    description:
+      'Devuelve la última foto de progreso visible del challenge (mismas reglas que GET /workout-posts/challenge/:challengeId), o null si todavía no hay ninguna.',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'La foto más reciente, o null si el challenge no tiene ninguna visible',
+  })
+  getLatestChallengePhoto(
+    @Param('challengeId', new ParseUUIDPipe()) challengeId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.workoutPostsService.getLatestChallengePhoto(
+      challengeId,
+      user.sub,
+    );
+  }
+
   @Get('user/:userId')
   @ApiBearerAuth()
   @ApiParam({ name: 'userId', description: 'ID UUID del usuario' })
