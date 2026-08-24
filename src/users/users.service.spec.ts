@@ -8,6 +8,7 @@ import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.enti
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengeCategoryMap } from '../challenges/entities/challenge-category-map.entity';
 import { ChallengeLocationMap } from '../challenges/entities/challenge-location-map.entity';
+import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
 import { FollowsService } from '../follows/follows.service';
 
 const createMockRepo = () => ({
@@ -18,10 +19,65 @@ const createMockRepo = () => ({
   createQueryBuilder: jest.fn(),
 });
 
+/** Mocks the two workoutRepo.createQueryBuilder() calls attachProgress makes
+ * (completedCounts, then completedDayRows), in that order — plus the plain
+ * workoutRepo.find() call for todayWorkouts. */
+function mockWorkoutQueries(
+  workoutRepo: ReturnType<typeof createMockRepo>,
+  options: {
+    todayWorkouts?: unknown[];
+    completedCounts?: Array<{ challengeId: string; count: string }>;
+    completedDayRows?: Array<{ challengeId: string; day: string }>;
+  },
+) {
+  workoutRepo.find.mockResolvedValue(options.todayWorkouts ?? []);
+
+  const completedCountsBuilder = {
+    select: jest.fn().mockReturnThis(),
+    addSelect: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    groupBy: jest.fn().mockReturnThis(),
+    getRawMany: jest.fn().mockResolvedValue(options.completedCounts ?? []),
+  };
+  const completedDayRowsBuilder = {
+    select: jest.fn().mockReturnThis(),
+    addSelect: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    groupBy: jest.fn().mockReturnThis(),
+    addGroupBy: jest.fn().mockReturnThis(),
+    getRawMany: jest.fn().mockResolvedValue(options.completedDayRows ?? []),
+  };
+
+  workoutRepo.createQueryBuilder
+    .mockReturnValueOnce(completedCountsBuilder)
+    .mockReturnValueOnce(completedDayRowsBuilder);
+}
+
+/** Mocks challengeUserRepo.createQueryBuilder() as used by getUserChallenges
+ * (leftJoinAndSelect/where/orderBy/getMany). */
+function mockChallengeUserQueryBuilder(
+  challengeUserRepo: ReturnType<typeof createMockRepo>,
+  relations: unknown[],
+) {
+  challengeUserRepo.createQueryBuilder.mockReturnValue({
+    leftJoinAndSelect: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
+    getMany: jest.fn().mockResolvedValue(relations),
+  });
+}
+
 describe('UsersService', () => {
   let service: UsersService;
   let userRepo: ReturnType<typeof createMockRepo>;
   let profileRepo: ReturnType<typeof createMockRepo>;
+  let challengeUserRepo: ReturnType<typeof createMockRepo>;
+  let workoutRepo: ReturnType<typeof createMockRepo>;
+  let challengeCategoryMapRepo: ReturnType<typeof createMockRepo>;
+  let challengeLocationMapRepo: ReturnType<typeof createMockRepo>;
+  let challengeCycleDayRepo: ReturnType<typeof createMockRepo>;
   let followsService: {
     isActiveFollower: jest.Mock;
     getCounts: jest.Mock;
@@ -39,6 +95,16 @@ describe('UsersService', () => {
   beforeEach(async () => {
     userRepo = createMockRepo();
     profileRepo = createMockRepo();
+    challengeUserRepo = createMockRepo();
+    workoutRepo = createMockRepo();
+    challengeCategoryMapRepo = createMockRepo();
+    challengeLocationMapRepo = createMockRepo();
+    challengeCycleDayRepo = createMockRepo();
+    // attachCategoriesAndLocations always runs in getUserChallenges — default
+    // to no categories/locations unless a test cares about them.
+    challengeCategoryMapRepo.find.mockResolvedValue([]);
+    challengeLocationMapRepo.find.mockResolvedValue([]);
+    challengeCycleDayRepo.find.mockResolvedValue([]);
     // Default: viewer does not follow the target — preserves the pre-B3
     // "strangers only see what a private profile allows" behavior unless a
     // test explicitly sets this to true.
@@ -58,16 +124,20 @@ describe('UsersService', () => {
         { provide: getRepositoryToken(UserProfile), useValue: profileRepo },
         {
           provide: getRepositoryToken(ChallengeUserMap),
-          useValue: createMockRepo(),
+          useValue: challengeUserRepo,
         },
-        { provide: getRepositoryToken(WorkoutLog), useValue: createMockRepo() },
+        { provide: getRepositoryToken(WorkoutLog), useValue: workoutRepo },
         {
           provide: getRepositoryToken(ChallengeCategoryMap),
-          useValue: createMockRepo(),
+          useValue: challengeCategoryMapRepo,
         },
         {
           provide: getRepositoryToken(ChallengeLocationMap),
-          useValue: createMockRepo(),
+          useValue: challengeLocationMapRepo,
+        },
+        {
+          provide: getRepositoryToken(ChallengeCycleDay),
+          useValue: challengeCycleDayRepo,
         },
         { provide: FollowsService, useValue: followsService },
       ],
@@ -446,6 +516,154 @@ describe('UsersService', () => {
       expect(result.find((u) => u.id === 'user-3')).toMatchObject({
         followers_count: 0,
         following_count: 0,
+      });
+    });
+  });
+
+  describe('getUserChallenges (attachProgress / is_rest_day)', () => {
+    // getUserChallenges' grouped-array return type is untyped (`any[]`) —
+    // this local shape lets the assertions below stay type-safe instead of
+    // triggering @typescript-eslint/no-unsafe-member-access. Note: the
+    // formatted object spreads `c.challenge` (the Challenge entity, whose PK
+    // is `id`), not the ChallengeUserMap relation itself — so `id` here is
+    // the challenge id, same as `activeRelation`'s `challenge.id` below.
+    interface FormattedActiveChallenge {
+      id: string;
+      current_day: number;
+      today_completed: boolean;
+      progress_percent: number;
+      streak: number;
+      is_rest_day: boolean;
+    }
+
+    function activeChallenges(result: {
+      active: unknown[];
+    }): FormattedActiveChallenge[] {
+      return result.active as FormattedActiveChallenge[];
+    }
+
+    // joined "today" (UTC) so current_day is always 1 regardless of when the
+    // test runs, which puts current_day_in_cycle at 1 too — deterministic,
+    // same style as workout-log-streak.util.spec.ts's dayKey() helper.
+    function activeRelation(
+      challengeId: string,
+      overrides: Partial<{ cycle_length_days: number | null }> = {},
+    ) {
+      return {
+        challenge_id: challengeId,
+        user_id: 'user-1',
+        status: 'active',
+        joined_at: new Date(),
+        challenge: {
+          id: challengeId,
+          duration_days: 30,
+          cycle_length_days: 3,
+          ...overrides,
+        },
+      };
+    }
+
+    it('should mark is_rest_day: true when current_day_in_cycle lands on a rest cycle day', async () => {
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        activeRelation('challenge-1'),
+      ]);
+      mockWorkoutQueries(workoutRepo, {});
+      challengeCycleDayRepo.find.mockResolvedValue([
+        { challenge_id: 'challenge-1', day_in_cycle: 1, day_type: 'rest' },
+      ]);
+
+      const result = await service.getUserChallenges('user-1');
+
+      expect(result.active).toHaveLength(1);
+      expect(activeChallenges(result)[0].is_rest_day).toBe(true);
+    });
+
+    it('should mark is_rest_day: false when current_day_in_cycle lands on a workout cycle day', async () => {
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        activeRelation('challenge-1'),
+      ]);
+      mockWorkoutQueries(workoutRepo, {});
+      challengeCycleDayRepo.find.mockResolvedValue([
+        { challenge_id: 'challenge-1', day_in_cycle: 1, day_type: 'workout' },
+      ]);
+
+      const result = await service.getUserChallenges('user-1');
+
+      expect(activeChallenges(result)[0].is_rest_day).toBe(false);
+    });
+
+    it('should default is_rest_day: false when the challenge has no cycle_length_days configured', async () => {
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        activeRelation('challenge-1', { cycle_length_days: null }),
+      ]);
+      mockWorkoutQueries(workoutRepo, {});
+      // Even if a stray cycle-day row exists, the guard must skip the lookup
+      // entirely without a configured cycle length.
+      challengeCycleDayRepo.find.mockResolvedValue([
+        { challenge_id: 'challenge-1', day_in_cycle: 1, day_type: 'rest' },
+      ]);
+
+      const result = await service.getUserChallenges('user-1');
+
+      expect(activeChallenges(result)[0].is_rest_day).toBe(false);
+    });
+
+    it('should batch the cycle-day lookup in a single query for every active challenge', async () => {
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        activeRelation('challenge-1'),
+        activeRelation('challenge-2'),
+      ]);
+      mockWorkoutQueries(workoutRepo, {});
+      challengeCycleDayRepo.find.mockResolvedValue([]);
+
+      await service.getUserChallenges('user-1');
+
+      expect(challengeCycleDayRepo.find).toHaveBeenCalledTimes(1);
+      const [options] = challengeCycleDayRepo.find.mock.calls[0] as [
+        { where: { challenge_id: { value: string[] } } },
+      ];
+      expect([...options.where.challenge_id.value].sort()).toEqual([
+        'challenge-1',
+        'challenge-2',
+      ]);
+    });
+
+    it('should not mix up rest days between two challenges sharing the same cycle position', async () => {
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        activeRelation('challenge-1'),
+        activeRelation('challenge-2'),
+      ]);
+      mockWorkoutQueries(workoutRepo, {});
+      challengeCycleDayRepo.find.mockResolvedValue([
+        { challenge_id: 'challenge-1', day_in_cycle: 1, day_type: 'rest' },
+        { challenge_id: 'challenge-2', day_in_cycle: 1, day_type: 'workout' },
+      ]);
+
+      const result = await service.getUserChallenges('user-1');
+
+      const byId = new Map(activeChallenges(result).map((c) => [c.id, c]));
+      expect(byId.get('challenge-1')?.is_rest_day).toBe(true);
+      expect(byId.get('challenge-2')?.is_rest_day).toBe(false);
+    });
+
+    it('should leave current_day/today_completed/progress_percent/streak unaffected', async () => {
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        activeRelation('challenge-1'),
+      ]);
+      mockWorkoutQueries(workoutRepo, {
+        todayWorkouts: [{ challengeId: 'challenge-1' }],
+        completedCounts: [{ challengeId: 'challenge-1', count: '3' }],
+      });
+      challengeCycleDayRepo.find.mockResolvedValue([]);
+
+      const result = await service.getUserChallenges('user-1');
+
+      expect(result.active[0]).toMatchObject({
+        current_day: 1,
+        today_completed: true,
+        progress_percent: 10, // 3 / 30 duration_days
+        streak: 0,
+        is_rest_day: false,
       });
     });
   });

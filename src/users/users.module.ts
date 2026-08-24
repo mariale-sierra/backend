@@ -10,6 +10,7 @@ import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.enti
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengeCategoryMap } from '../challenges/entities/challenge-category-map.entity';
 import { ChallengeLocationMap } from '../challenges/entities/challenge-location-map.entity';
+import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
 import { FollowsModule } from '../follows/follows.module';
 
 @Module({
@@ -22,6 +23,7 @@ import { FollowsModule } from '../follows/follows.module';
       WorkoutLog,
       ChallengeCategoryMap,
       ChallengeLocationMap,
+      ChallengeCycleDay,
     ]),
     forwardRef(() => AuthModule),
     FollowsModule,

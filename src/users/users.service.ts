@@ -7,6 +7,7 @@ import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.enti
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengeCategoryMap } from '../challenges/entities/challenge-category-map.entity';
 import { ChallengeLocationMap } from '../challenges/entities/challenge-location-map.entity';
+import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UpdateUserProfileDto } from './dto/update-user-profile.dto';
 import {
@@ -30,6 +31,8 @@ export class UsersService {
     private challengeCategoryMapRepo: Repository<ChallengeCategoryMap>,
     @InjectRepository(ChallengeLocationMap)
     private challengeLocationMapRepo: Repository<ChallengeLocationMap>,
+    @InjectRepository(ChallengeCycleDay)
+    private challengeCycleDayRepo: Repository<ChallengeCycleDay>,
     private followsService: FollowsService,
   ) {}
 
@@ -251,6 +254,7 @@ export class UsersService {
         today_completed: boolean;
         progress_percent: number;
         streak: number;
+        is_rest_day: boolean;
       }
     >
   > {
@@ -262,6 +266,7 @@ export class UsersService {
         today_completed: boolean;
         progress_percent: number;
         streak: number;
+        is_rest_day: boolean;
       }
     >();
 
@@ -295,7 +300,7 @@ export class UsersService {
       ),
     );
 
-    const [todayWorkouts, completedCounts, completedDayRows] =
+    const [todayWorkouts, completedCounts, completedDayRows, cycleDayRows] =
       await Promise.all([
         this.workoutRepo.find({
           where: {
@@ -323,6 +328,10 @@ export class UsersService {
           .groupBy('w.challengeId')
           .addGroupBy('DATE(w.started_at)')
           .getRawMany<{ challengeId: string; day: string }>(),
+        this.challengeCycleDayRepo.find({
+          where: { challenge_id: In(challengeIds) },
+          select: ['challenge_id', 'day_in_cycle', 'day_type'],
+        }),
       ]);
 
     const completedByChallenge = new Map(
@@ -336,6 +345,17 @@ export class UsersService {
         completedDaysByChallenge.get(row.challengeId) ?? new Set<string>();
       set.add(row.day);
       completedDaysByChallenge.set(row.challengeId, set);
+    }
+
+    // Keyed `${challenge_id}:${day_in_cycle}` -> day_type, so a rest day for
+    // one challenge's cycle position never collides with the same position
+    // in a different challenge's cycle.
+    const dayTypeByChallengeAndCyclePosition = new Map<string, string>();
+    for (const row of cycleDayRows) {
+      dayTypeByChallengeAndCyclePosition.set(
+        `${row.challenge_id}:${row.day_in_cycle}`,
+        row.day_type,
+      );
     }
 
     const msPerDay = 1000 * 60 * 60 * 24;
@@ -377,16 +397,32 @@ export class UsersService {
         new Set<string>();
       const consecutiveDays = this.calculateConsecutiveDays(completedDaySet);
 
+      const cappedCurrentDay = durationDays
+        ? Math.min(currentDay, durationDays)
+        : currentDay;
+
+      // Same cycle-position formula as ChallengesService.calculateCurrentDayInCycle
+      // — duplicated inline rather than imported, same precedent as
+      // calculateCurrentDay above, to avoid a cross-service dependency.
+      const cycleLengthDays = relation.challenge?.cycle_length_days;
+      const currentDayInCycle = cycleLengthDays
+        ? ((cappedCurrentDay - 1) % cycleLengthDays) + 1
+        : null;
+      const dayType = currentDayInCycle
+        ? dayTypeByChallengeAndCyclePosition.get(
+            `${relation.challenge_id}:${currentDayInCycle}`,
+          )
+        : undefined;
+
       result.set(relation.challenge_id, {
-        current_day: durationDays
-          ? Math.min(currentDay, durationDays)
-          : currentDay,
+        current_day: cappedCurrentDay,
         today_completed: todayByChallenge.has(relation.challenge_id),
         progress_percent: progressPercent,
         // A "streak" is awarded every 3 consecutive days of completed
         // progress, not the raw day count — e.g. 3 days in a row = streak 1,
         // 6 days in a row = streak 2.
         streak: Math.floor(consecutiveDays / 3),
+        is_rest_day: dayType === 'rest',
       });
     }
 
