@@ -9,6 +9,7 @@ describe('FollowsController', () => {
     unfollow: jest.Mock;
     listFollowers: jest.Mock;
     listFollowing: jest.Mock;
+    getFriendStreaks: jest.Mock;
   };
 
   const currentUser: AuthenticatedUser = {
@@ -25,6 +26,7 @@ describe('FollowsController', () => {
         .mockResolvedValue({ message: 'Unfollowed user successfully' }),
       listFollowers: jest.fn().mockResolvedValue([]),
       listFollowing: jest.fn().mockResolvedValue([]),
+      getFriendStreaks: jest.fn().mockResolvedValue([]),
     };
 
     controller = new FollowsController(service as unknown as FollowsService);
@@ -52,5 +54,11 @@ describe('FollowsController', () => {
     await controller.getFollowing(currentUser);
 
     expect(service.listFollowing).toHaveBeenCalledWith('user-1');
+  });
+
+  it('should get friend streaks scoped to the authenticated caller, not a path param', async () => {
+    await controller.getFollowingStreaks(currentUser);
+
+    expect(service.getFriendStreaks).toHaveBeenCalledWith('user-1');
   });
 });

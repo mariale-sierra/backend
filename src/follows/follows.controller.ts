@@ -22,6 +22,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { FollowUserSummaryDto } from './dto/follow-user-summary.dto';
+import { FriendStreakDto } from './dto/friend-streak.dto';
 
 @ApiTags('Follows')
 @ApiBearerAuth()
@@ -87,5 +88,16 @@ export class FollowsController {
   @ApiOkResponse({ type: FollowUserSummaryDto, isArray: true })
   getFollowing(@CurrentUser() user: AuthenticatedUser) {
     return this.followsService.listFollowing(user.sub);
+  }
+
+  @Get('following/streaks')
+  @ApiOperation({
+    summary: 'Rachas de los usuarios que sigo',
+    description:
+      'Para cada usuario que el usuario autenticado sigue activamente, devuelve su racha actual (mismo cálculo/divisor que en todo el resto de la app) y si ya registró progreso hoy — para la fila de rachas de amigos en Home.',
+  })
+  @ApiOkResponse({ type: FriendStreakDto, isArray: true })
+  getFollowingStreaks(@CurrentUser() user: AuthenticatedUser) {
+    return this.followsService.getFriendStreaks(user.sub);
   }
 }

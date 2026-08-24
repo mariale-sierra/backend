@@ -10,6 +10,7 @@ import { User } from '../users/entities/user.entity';
 import { UserProfile } from '../users/entities/user-profile.entity';
 import { FollowsService } from '../follows/follows.service';
 import { BadgeDto } from './dto/badge.dto';
+import { getCurrentStreakDays } from '../workout-log/workout-log-streak.util';
 
 type BadgeMetric = 'workouts' | 'streak' | 'challenges';
 
@@ -132,7 +133,7 @@ export class BadgesService {
     const [totalWorkouts, completedChallenges, streakDays] = await Promise.all([
       this.countCompletedWorkouts(userId),
       this.countCompletedChallenges(userId),
-      this.currentStreakDays(userId),
+      getCurrentStreakDays(this.workoutRepo, userId),
     ]);
 
     const metricValues: Record<BadgeMetric, number> = {
@@ -164,41 +165,5 @@ export class BadgesService {
     return this.challengeUserRepo.count({
       where: { user_id: userId, status: 'completed' },
     });
-  }
-
-  /**
-   * Consecutive calendar days (UTC) with at least one completed workout,
-   * ending today (tolerates today itself not being done yet, same as an
-   * in-progress streak). Same algorithm/approach as
-   * UsersService.calculateConsecutiveDays, but applied across ALL of the
-   * user's workouts regardless of challenge — that helper computes a streak
-   * scoped to a single challenge's completed days, which isn't what a
-   * global "activity streak" badge means.
-   */
-  private async currentStreakDays(userId: string): Promise<number> {
-    const rows: Array<{ day: string }> = await this.workoutRepo
-      .createQueryBuilder('w')
-      .select('DISTINCT DATE(w.started_at)', 'day')
-      .where('w.userId = :userId', { userId })
-      .andWhere('w.status = :status', { status: WorkoutStatus.COMPLETED })
-      .getRawMany();
-
-    const completedDays = new Set(rows.map((r) => String(r.day)));
-
-    const cursor = new Date();
-    cursor.setUTCHours(0, 0, 0, 0);
-    const toKey = (d: Date) => d.toISOString().slice(0, 10);
-
-    if (!completedDays.has(toKey(cursor))) {
-      cursor.setUTCDate(cursor.getUTCDate() - 1);
-    }
-
-    let count = 0;
-    while (completedDays.has(toKey(cursor))) {
-      count++;
-      cursor.setUTCDate(cursor.getUTCDate() - 1);
-    }
-
-    return count;
   }
 }

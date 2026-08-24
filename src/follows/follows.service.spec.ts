@@ -8,6 +8,26 @@ import {
 import { FollowsService } from './follows.service';
 import { UserFollow } from './entities/user-follow.entity';
 import { User } from '../users/entities/user.entity';
+import { UserProfile } from '../users/entities/user-profile.entity';
+import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
+import {
+  getCurrentStreakDaysForUsers,
+  getLoggedTodayUserIds,
+} from '../workout-log/workout-log-streak.util';
+
+// getFriendStreaks' own batching (one grouped query per data source, not one
+// per followed user) is workout-log-streak.util's job and is covered by
+// workout-log-streak.util.spec.ts — mocked here so this file only exercises
+// FollowsService's own wiring (which users, whose streak/profile goes with
+// whom). toStreakPoints is left as the real implementation since it's pure
+// and its divisor is exactly what getFriendStreaks must get right.
+jest.mock('../workout-log/workout-log-streak.util', () => ({
+  ...jest.requireActual<
+    typeof import('../workout-log/workout-log-streak.util')
+  >('../workout-log/workout-log-streak.util'),
+  getCurrentStreakDaysForUsers: jest.fn(),
+  getLoggedTodayUserIds: jest.fn(),
+}));
 
 const createMockFollowRepo = () => ({
   findOne: jest.fn(),
@@ -22,20 +42,39 @@ const createMockUserRepo = () => ({
   findOne: jest.fn(),
 });
 
+const createMockProfileRepo = () => ({
+  find: jest.fn(),
+});
+
+const createMockWorkoutRepo = () => ({
+  createQueryBuilder: jest.fn(),
+});
+
 describe('FollowsService', () => {
   let service: FollowsService;
   let followRepo: ReturnType<typeof createMockFollowRepo>;
   let userRepo: ReturnType<typeof createMockUserRepo>;
+  let profileRepo: ReturnType<typeof createMockProfileRepo>;
+  let workoutRepo: ReturnType<typeof createMockWorkoutRepo>;
+  const mockGetCurrentStreakDaysForUsers =
+    getCurrentStreakDaysForUsers as jest.Mock;
+  const mockGetLoggedTodayUserIds = getLoggedTodayUserIds as jest.Mock;
 
   beforeEach(async () => {
     followRepo = createMockFollowRepo();
     userRepo = createMockUserRepo();
+    profileRepo = createMockProfileRepo();
+    workoutRepo = createMockWorkoutRepo();
+    mockGetCurrentStreakDaysForUsers.mockReset().mockResolvedValue(new Map());
+    mockGetLoggedTodayUserIds.mockReset().mockResolvedValue(new Set());
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FollowsService,
         { provide: getRepositoryToken(UserFollow), useValue: followRepo },
         { provide: getRepositoryToken(User), useValue: userRepo },
+        { provide: getRepositoryToken(UserProfile), useValue: profileRepo },
+        { provide: getRepositoryToken(WorkoutLog), useValue: workoutRepo },
       ],
     }).compile();
 
@@ -199,6 +238,102 @@ describe('FollowsService', () => {
         }),
       );
       expect(result[0]).toMatchObject({ id: 'user-4', username: 'dave' });
+    });
+  });
+
+  describe('getFriendStreaks', () => {
+    it('should return [] without querying profiles/streaks when following nobody', async () => {
+      followRepo.find.mockResolvedValue([]);
+
+      const result = await service.getFriendStreaks('user-1');
+
+      expect(result).toEqual([]);
+      expect(profileRepo.find).not.toHaveBeenCalled();
+      expect(mockGetCurrentStreakDaysForUsers).not.toHaveBeenCalled();
+      expect(mockGetLoggedTodayUserIds).not.toHaveBeenCalled();
+    });
+
+    it('should batch profile/streak/today lookups once for all followed users, not once per user', async () => {
+      followRepo.find.mockResolvedValue([
+        { followed: { id: 'user-2', username: 'alice' } },
+        { followed: { id: 'user-3', username: 'bob' } },
+      ]);
+      profileRepo.find.mockResolvedValue([]);
+
+      await service.getFriendStreaks('user-1');
+
+      expect(profileRepo.find).toHaveBeenCalledTimes(1);
+      expect(mockGetCurrentStreakDaysForUsers).toHaveBeenCalledTimes(1);
+      expect(mockGetCurrentStreakDaysForUsers).toHaveBeenCalledWith(
+        workoutRepo,
+        ['user-2', 'user-3'],
+      );
+      expect(mockGetLoggedTodayUserIds).toHaveBeenCalledTimes(1);
+      expect(mockGetLoggedTodayUserIds).toHaveBeenCalledWith(workoutRepo, [
+        'user-2',
+        'user-3',
+      ]);
+    });
+
+    it('should map each followed user to their own avatar/streak/loggedToday, applying the /3 streak-points divisor', async () => {
+      followRepo.find.mockResolvedValue([
+        { followed: { id: 'user-2', username: 'alice' } },
+        { followed: { id: 'user-3', username: 'bob' } },
+      ]);
+      profileRepo.find.mockResolvedValue([
+        {
+          user_id: 'user-2',
+          profile_image_url: 'https://cdn.example.com/a.jpg',
+        },
+      ]);
+      mockGetCurrentStreakDaysForUsers.mockResolvedValue(
+        new Map([
+          ['user-2', 7], // 7 consecutive days -> floor(7/3) = 2 streak points
+          ['user-3', 2], // 2 consecutive days -> floor(2/3) = 0 streak points
+        ]),
+      );
+      mockGetLoggedTodayUserIds.mockResolvedValue(new Set(['user-2']));
+
+      const result = await service.getFriendStreaks('user-1');
+
+      expect(result).toEqual([
+        {
+          userId: 'user-2',
+          username: 'alice',
+          avatarUrl: 'https://cdn.example.com/a.jpg',
+          streakDays: 2,
+          loggedToday: true,
+        },
+        {
+          userId: 'user-3',
+          username: 'bob',
+          avatarUrl: null,
+          streakDays: 0,
+          loggedToday: false,
+        },
+      ]);
+    });
+
+    it('should default to 0 streak points and no avatar for a followed user with no workout/profile rows at all', async () => {
+      followRepo.find.mockResolvedValue([
+        { followed: { id: 'user-2', username: 'alice' } },
+      ]);
+      profileRepo.find.mockResolvedValue([]);
+      // Absent from the map/set entirely, not present with a 0/false value.
+      mockGetCurrentStreakDaysForUsers.mockResolvedValue(new Map());
+      mockGetLoggedTodayUserIds.mockResolvedValue(new Set());
+
+      const result = await service.getFriendStreaks('user-1');
+
+      expect(result).toEqual([
+        {
+          userId: 'user-2',
+          username: 'alice',
+          avatarUrl: null,
+          streakDays: 0,
+          loggedToday: false,
+        },
+      ]);
     });
   });
 

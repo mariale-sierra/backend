@@ -5,10 +5,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { UserFollow } from './entities/user-follow.entity';
 import { User } from '../users/entities/user.entity';
+import { UserProfile } from '../users/entities/user-profile.entity';
+import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { FollowUserSummaryDto } from './dto/follow-user-summary.dto';
+import { FriendStreakDto } from './dto/friend-streak.dto';
+import {
+  getCurrentStreakDaysForUsers,
+  getLoggedTodayUserIds,
+  toStreakPoints,
+} from '../workout-log/workout-log-streak.util';
 
 @Injectable()
 export class FollowsService {
@@ -17,6 +25,10 @@ export class FollowsService {
     private followRepo: Repository<UserFollow>,
     @InjectRepository(User)
     private userRepo: Repository<User>,
+    @InjectRepository(UserProfile)
+    private profileRepo: Repository<UserProfile>,
+    @InjectRepository(WorkoutLog)
+    private workoutRepo: Repository<WorkoutLog>,
   ) {}
 
   /**
@@ -111,6 +123,46 @@ export class FollowsService {
     });
 
     return rows.map((row) => FollowUserSummaryDto.fromFollowed(row));
+  }
+
+  /**
+   * Actively-followed users with their current activity streak and whether
+   * they've logged a workout today — backs the Home screen's "friends'
+   * streaks" row. Batches the profile + workout_log lookups across all
+   * followed users (one grouped query each) instead of one query per
+   * followed user, same batching pattern as getFollowerCountsForUsers.
+   */
+  async getFriendStreaks(userId: string): Promise<FriendStreakDto[]> {
+    const rows = await this.followRepo.find({
+      where: { follower_user_id: userId, is_active: true },
+      relations: { followed: true },
+      order: { created_at: 'DESC' },
+    });
+
+    const followedUsers = rows
+      .map((row) => row.followed)
+      .filter((user): user is User => Boolean(user));
+
+    if (followedUsers.length === 0) return [];
+
+    const followedIds = followedUsers.map((user) => user.id);
+
+    const [profiles, streakDaysByUser, loggedTodayIds] = await Promise.all([
+      this.profileRepo.find({ where: { user_id: In(followedIds) } }),
+      getCurrentStreakDaysForUsers(this.workoutRepo, followedIds),
+      getLoggedTodayUserIds(this.workoutRepo, followedIds),
+    ]);
+
+    const profileByUserId = new Map(profiles.map((p) => [p.user_id, p]));
+
+    return followedUsers.map((user) =>
+      FriendStreakDto.build(
+        user,
+        profileByUserId.get(user.id) ?? null,
+        toStreakPoints(streakDaysByUser.get(user.id) ?? 0),
+        loggedTodayIds.has(user.id),
+      ),
+    );
   }
 
   /** Followers/following counts for a single user (profile screens). */
