@@ -610,9 +610,40 @@ export class ChallengesService {
   async findAll() {
     const challenges = await this.challengeRepo.find();
     const enriched = await this.attachCategoriesAndLocations(challenges);
+
+    // Batched equivalent of the per-challenge challengeUserMapRepo.count()
+    // findOne() does below — same challenge_id IN (...) + groupBy pattern as
+    // UsersService.attachProgress()'s completedCounts/completedDayRows,
+    // instead of one COUNT query per challenge.
+    const memberCountByChallenge = new Map<string, number>();
+    if (challenges.length > 0) {
+      const memberCounts = await this.challengeUserMapRepo
+        .createQueryBuilder('cum')
+        .select('cum.challenge_id', 'challengeId')
+        .addSelect('COUNT(*)', 'count')
+        .where('cum.challenge_id IN (:...ids)', {
+          ids: challenges.map((c) => c.id),
+        })
+        .andWhere('cum.status = :status', { status: 'active' })
+        .groupBy('cum.challenge_id')
+        .getRawMany<{ challengeId: string; count: string }>();
+
+      for (const row of memberCounts) {
+        memberCountByChallenge.set(row.challengeId, Number(row.count));
+      }
+    }
+
+    // Same field name findOne() already returns (members_joined) so the
+    // frontend's existing pickMembersCount picker picks it up with zero
+    // frontend changes.
+    const withMembers = enriched.map((c) => ({
+      ...c,
+      members_joined: memberCountByChallenge.get(c.id) ?? 0,
+    }));
+
     return {
       message: 'Challenges retrieved successfully',
-      data: enriched,
+      data: withMembers,
     };
   }
 

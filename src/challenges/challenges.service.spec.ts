@@ -38,6 +38,8 @@ describe('ChallengesService', () => {
   let challengeCycleDaysRepo: MockRepo;
   let userRepo: MockRepo;
   let challengeUserMapRepo: MockRepo;
+  let challengeCategoryMapRepo: MockRepo;
+  let challengeLocationMapRepo: MockRepo;
 
   const OWNER_ID = 'owner-1';
   const OTHER_USER_ID = 'other-2';
@@ -56,6 +58,12 @@ describe('ChallengesService', () => {
     challengeCycleDaysRepo = createMockRepo();
     userRepo = createMockRepo();
     challengeUserMapRepo = createMockRepo();
+    challengeCategoryMapRepo = createMockRepo();
+    challengeLocationMapRepo = createMockRepo();
+    // attachCategoriesAndLocations runs on every findAll()/findOne() call —
+    // default to none unless a test cares about them.
+    challengeCategoryMapRepo.find.mockResolvedValue([]);
+    challengeLocationMapRepo.find.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -74,11 +82,11 @@ describe('ChallengesService', () => {
         { provide: getRepositoryToken(Routine), useValue: createMockRepo() },
         {
           provide: getRepositoryToken(ChallengeCategoryMap),
-          useValue: createMockRepo(),
+          useValue: challengeCategoryMapRepo,
         },
         {
           provide: getRepositoryToken(ChallengeLocationMap),
-          useValue: createMockRepo(),
+          useValue: challengeLocationMapRepo,
         },
         {
           provide: getRepositoryToken(ExerciseCategory),
@@ -258,6 +266,110 @@ describe('ChallengesService', () => {
       await expect(
         service.joinChallenge(OTHER_USER_ID, CHALLENGE_ID),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('findAll', () => {
+    /** Mocks challengeUserMapRepo.createQueryBuilder() as findAll()'s
+     * batched member-count query uses it (select/addSelect/where/andWhere/
+     * groupBy/getRawMany). */
+    function mockMemberCountQuery(
+      rows: Array<{ challengeId: string; count: string }>,
+    ) {
+      const builder = {
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue(rows),
+      };
+      challengeUserMapRepo.createQueryBuilder.mockReturnValue(builder);
+      return builder;
+    }
+
+    it('should return an empty list without querying member counts when there are no challenges', async () => {
+      challengeRepo.find.mockResolvedValue([]);
+
+      const result = await service.findAll();
+
+      expect(result.data).toEqual([]);
+      expect(challengeUserMapRepo.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('should attach members_joined to every challenge, matching what findOne() returns for the same challenge', async () => {
+      challengeRepo.find.mockResolvedValue([
+        { id: 'challenge-1', name: 'A' },
+        { id: 'challenge-2', name: 'B' },
+      ]);
+      mockMemberCountQuery([
+        { challengeId: 'challenge-1', count: '5' },
+        { challengeId: 'challenge-2', count: '2' },
+      ]);
+
+      const result = await service.findAll();
+
+      const byId = new Map(
+        result.data.map((c: { id: string; members_joined: number }) => [
+          c.id,
+          c.members_joined,
+        ]),
+      );
+      expect(byId.get('challenge-1')).toBe(5);
+      expect(byId.get('challenge-2')).toBe(2);
+    });
+
+    it('should not mix up counts between challenges', async () => {
+      challengeRepo.find.mockResolvedValue([
+        { id: 'challenge-1', name: 'A' },
+        { id: 'challenge-2', name: 'B' },
+      ]);
+      // Rows deliberately out of order vs. the challenges array, to catch
+      // any accidental reliance on array index instead of the id map.
+      mockMemberCountQuery([
+        { challengeId: 'challenge-2', count: '9' },
+        { challengeId: 'challenge-1', count: '1' },
+      ]);
+
+      const result = await service.findAll();
+
+      const byId = new Map(
+        result.data.map((c: { id: string; members_joined: number }) => [
+          c.id,
+          c.members_joined,
+        ]),
+      );
+      expect(byId.get('challenge-1')).toBe(1);
+      expect(byId.get('challenge-2')).toBe(9);
+    });
+
+    it('should default members_joined to 0, not undefined, for a challenge with no active members', async () => {
+      challengeRepo.find.mockResolvedValue([{ id: 'challenge-1', name: 'A' }]);
+      mockMemberCountQuery([]); // no rows at all for this challenge
+
+      const result = await service.findAll();
+
+      expect(result.data[0].members_joined).toBe(0);
+    });
+
+    it('should run a single batched query for the member counts, not one per challenge', async () => {
+      challengeRepo.find.mockResolvedValue([
+        { id: 'challenge-1', name: 'A' },
+        { id: 'challenge-2', name: 'B' },
+        { id: 'challenge-3', name: 'C' },
+      ]);
+      const builder = mockMemberCountQuery([]);
+
+      await service.findAll();
+
+      expect(challengeUserMapRepo.createQueryBuilder).toHaveBeenCalledTimes(1);
+      expect(builder.where).toHaveBeenCalledWith(
+        'cum.challenge_id IN (:...ids)',
+        { ids: ['challenge-1', 'challenge-2', 'challenge-3'] },
+      );
+      expect(builder.andWhere).toHaveBeenCalledWith('cum.status = :status', {
+        status: 'active',
+      });
     });
   });
 });
