@@ -33,6 +33,7 @@ import { RoutineExercise } from '../routine/entities/routine-exercise.entity';
 import { RoutineExerciseSet } from '../routine/entities/routine-exercise-set.entity';
 import { RoutineExerciseTarget } from '../routine/entities/routine-exercise-target.entity';
 import { RoutineExerciseSetTarget } from '../routine/entities/routine-exercise-set-target.entity';
+import { getDominantActivityCategories } from './dominant-activity-category.util';
 import {
   activityTypeToCategoryName,
   categoryNameToActivityType,
@@ -181,10 +182,14 @@ export class ChallengesService {
     const uniqueNames = [
       ...new Set(categories.map((c) => c.trim()).filter(Boolean)),
     ];
-    for (const name of uniqueNames) {
+    for (const [orderIndex, name] of uniqueNames.entries()) {
       const categoryId = await this.findOrCreateCategoryId(manager, name);
       await manager.save(
-        manager.create(ChallengeCategoryMap, { challengeId, categoryId }),
+        manager.create(ChallengeCategoryMap, {
+          challengeId,
+          categoryId,
+          orderIndex,
+        }),
       );
     }
   }
@@ -610,28 +615,13 @@ export class ChallengesService {
   async findAll() {
     const challenges = await this.challengeRepo.find();
     const enriched = await this.attachCategoriesAndLocations(challenges);
+    const ids = challenges.map((c) => c.id);
 
-    // Batched equivalent of the per-challenge challengeUserMapRepo.count()
-    // findOne() does below — same challenge_id IN (...) + groupBy pattern as
-    // UsersService.attachProgress()'s completedCounts/completedDayRows,
-    // instead of one COUNT query per challenge.
-    const memberCountByChallenge = new Map<string, number>();
-    if (challenges.length > 0) {
-      const memberCounts = await this.challengeUserMapRepo
-        .createQueryBuilder('cum')
-        .select('cum.challenge_id', 'challengeId')
-        .addSelect('COUNT(*)', 'count')
-        .where('cum.challenge_id IN (:...ids)', {
-          ids: challenges.map((c) => c.id),
-        })
-        .andWhere('cum.status = :status', { status: 'active' })
-        .groupBy('cum.challenge_id')
-        .getRawMany<{ challengeId: string; count: string }>();
-
-      for (const row of memberCounts) {
-        memberCountByChallenge.set(row.challengeId, Number(row.count));
-      }
-    }
+    const [memberCountByChallenge, dominantActivityByChallenge] =
+      await Promise.all([
+        this.getMemberCountsByChallenge(ids),
+        getDominantActivityCategories(this.challengeCycleDaysRepo.manager, ids),
+      ]);
 
     // Same field name findOne() already returns (members_joined) so the
     // frontend's existing pickMembersCount picker picks it up with zero
@@ -639,6 +629,7 @@ export class ChallengesService {
     const withMembers = enriched.map((c) => ({
       ...c,
       members_joined: memberCountByChallenge.get(c.id) ?? 0,
+      dominant_activity_category: dominantActivityByChallenge.get(c.id) ?? null,
     }));
 
     return {
@@ -647,20 +638,49 @@ export class ChallengesService {
     };
   }
 
+  /** Batched equivalent of the per-challenge challengeUserMapRepo.count()
+   * findOne() does — same challenge_id IN (...) + groupBy pattern as
+   * UsersService.attachProgress()'s completedCounts/completedDayRows,
+   * instead of one COUNT query per challenge. */
+  private async getMemberCountsByChallenge(
+    ids: string[],
+  ): Promise<Map<string, number>> {
+    const memberCountByChallenge = new Map<string, number>();
+    if (ids.length === 0) return memberCountByChallenge;
+
+    const memberCounts = await this.challengeUserMapRepo
+      .createQueryBuilder('cum')
+      .select('cum.challenge_id', 'challengeId')
+      .addSelect('COUNT(*)', 'count')
+      .where('cum.challenge_id IN (:...ids)', { ids })
+      .andWhere('cum.status = :status', { status: 'active' })
+      .groupBy('cum.challenge_id')
+      .getRawMany<{ challengeId: string; count: string }>();
+
+    for (const row of memberCounts) {
+      memberCountByChallenge.set(row.challengeId, Number(row.count));
+    }
+    return memberCountByChallenge;
+  }
+
   async findOne(id: string) {
     const challenge = await this.challengeRepo.findOne({ where: { id } });
     if (!challenge) throw new NotFoundException('Challenge not found');
 
     const [enriched] = await this.attachCategoriesAndLocations([challenge]);
     const cycleDays = await this.getCycleDaySummaries(id);
-    const membersJoined = await this.challengeUserMapRepo.count({
-      where: { challenge_id: id, status: 'active' },
-    });
+    const [membersJoined, dominantActivityByChallenge] = await Promise.all([
+      this.challengeUserMapRepo.count({
+        where: { challenge_id: id, status: 'active' },
+      }),
+      getDominantActivityCategories(this.challengeCycleDaysRepo.manager, [id]),
+    ]);
 
     return {
       ...enriched,
       cycle_days: cycleDays,
       members_joined: membersJoined,
+      dominant_activity_category: dominantActivityByChallenge.get(id) ?? null,
     };
   }
 

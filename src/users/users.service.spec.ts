@@ -10,6 +10,19 @@ import { ChallengeCategoryMap } from '../challenges/entities/challenge-category-
 import { ChallengeLocationMap } from '../challenges/entities/challenge-location-map.entity';
 import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
 import { FollowsService } from '../follows/follows.service';
+import { getDominantActivityCategories } from '../challenges/dominant-activity-category.util';
+
+// attachProgress() delegates the dominant-category computation entirely to
+// this util — its own SQL/tie-break logic is covered by
+// dominant-activity-category.util.spec.ts, so this file only exercises how
+// UsersService calls it and merges the result (same jest.mock split used for
+// it in challenges.service.spec.ts, and for workout-log-streak.util in
+// follows.service.spec.ts).
+jest.mock('../challenges/dominant-activity-category.util', () => ({
+  getDominantActivityCategories: jest.fn(),
+}));
+const mockGetDominantActivityCategories =
+  getDominantActivityCategories as jest.Mock;
 
 const createMockRepo = () => ({
   find: jest.fn(),
@@ -17,6 +30,7 @@ const createMockRepo = () => ({
   save: jest.fn(),
   create: jest.fn(),
   createQueryBuilder: jest.fn(),
+  manager: {},
 });
 
 /** Mocks the two workoutRepo.createQueryBuilder() calls attachProgress makes
@@ -105,6 +119,7 @@ describe('UsersService', () => {
     challengeCategoryMapRepo.find.mockResolvedValue([]);
     challengeLocationMapRepo.find.mockResolvedValue([]);
     challengeCycleDayRepo.find.mockResolvedValue([]);
+    mockGetDominantActivityCategories.mockReset().mockResolvedValue(new Map());
     // Default: viewer does not follow the target — preserves the pre-B3
     // "strangers only see what a private profile allows" behavior unless a
     // test explicitly sets this to true.
@@ -534,6 +549,7 @@ describe('UsersService', () => {
       progress_percent: number;
       streak: number;
       is_rest_day: boolean;
+      dominant_activity_category: string | null;
     }
 
     function activeChallenges(result: {
@@ -665,6 +681,56 @@ describe('UsersService', () => {
         streak: 0,
         is_rest_day: false,
       });
+    });
+
+    it('should attach dominant_activity_category from the batched util, keyed correctly per challenge', async () => {
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        activeRelation('challenge-1'),
+        activeRelation('challenge-2'),
+      ]);
+      mockWorkoutQueries(workoutRepo, {});
+      mockGetDominantActivityCategories.mockResolvedValue(
+        new Map([
+          ['challenge-1', 'strength'],
+          ['challenge-2', null],
+        ]),
+      );
+
+      const result = await service.getUserChallenges('user-1');
+
+      const byId = new Map(activeChallenges(result).map((c) => [c.id, c]));
+      expect(byId.get('challenge-1')?.dominant_activity_category).toBe(
+        'strength',
+      );
+      expect(byId.get('challenge-2')?.dominant_activity_category).toBeNull();
+    });
+
+    it('should call the dominant-category util once with every active challenge id and the cycle-day repo manager', async () => {
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        activeRelation('challenge-1'),
+        activeRelation('challenge-2'),
+      ]);
+      mockWorkoutQueries(workoutRepo, {});
+
+      await service.getUserChallenges('user-1');
+
+      expect(mockGetDominantActivityCategories).toHaveBeenCalledTimes(1);
+      expect(mockGetDominantActivityCategories).toHaveBeenCalledWith(
+        challengeCycleDayRepo.manager,
+        ['challenge-1', 'challenge-2'],
+      );
+    });
+
+    it('should default dominant_activity_category to null, not undefined, when the util has no entry for a challenge', async () => {
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        activeRelation('challenge-1'),
+      ]);
+      mockWorkoutQueries(workoutRepo, {});
+      mockGetDominantActivityCategories.mockResolvedValue(new Map());
+
+      const result = await service.getUserChallenges('user-1');
+
+      expect(activeChallenges(result)[0].dominant_activity_category).toBeNull();
     });
   });
 });

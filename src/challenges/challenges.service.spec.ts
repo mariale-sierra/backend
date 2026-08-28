@@ -13,6 +13,18 @@ import { ChallengeCategoryMap } from './entities/challenge-category-map.entity';
 import { ChallengeLocationMap } from './entities/challenge-location-map.entity';
 import { ExerciseCategory } from '../exercises/entities/exercise-category.entity';
 import { ExerciseLocation } from '../exercises/entities/exercise-location.entity';
+import { getDominantActivityCategories } from './dominant-activity-category.util';
+
+// findAll()/findOne() delegate the dominant-category computation entirely to
+// this util — its own SQL/tie-break logic is covered by
+// dominant-activity-category.util.spec.ts, so this file only exercises how
+// ChallengesService calls it and merges the result (matches the same
+// jest.mock split used for workout-log-streak.util in follows.service.spec.ts).
+jest.mock('./dominant-activity-category.util', () => ({
+  getDominantActivityCategories: jest.fn(),
+}));
+const mockGetDominantActivityCategories =
+  getDominantActivityCategories as jest.Mock;
 
 type MockRepo = {
   find: jest.Mock;
@@ -21,6 +33,8 @@ type MockRepo = {
   remove: jest.Mock;
   create: jest.Mock;
   createQueryBuilder: jest.Mock;
+  count: jest.Mock;
+  manager: unknown;
 };
 
 const createMockRepo = (): MockRepo => ({
@@ -30,6 +44,8 @@ const createMockRepo = (): MockRepo => ({
   remove: jest.fn(),
   create: jest.fn(),
   createQueryBuilder: jest.fn(),
+  count: jest.fn(),
+  manager: {},
 });
 
 describe('ChallengesService', () => {
@@ -40,6 +56,7 @@ describe('ChallengesService', () => {
   let challengeUserMapRepo: MockRepo;
   let challengeCategoryMapRepo: MockRepo;
   let challengeLocationMapRepo: MockRepo;
+  let dataSource: { transaction: jest.Mock };
 
   const OWNER_ID = 'owner-1';
   const OTHER_USER_ID = 'other-2';
@@ -64,6 +81,8 @@ describe('ChallengesService', () => {
     // default to none unless a test cares about them.
     challengeCategoryMapRepo.find.mockResolvedValue([]);
     challengeLocationMapRepo.find.mockResolvedValue([]);
+    mockGetDominantActivityCategories.mockReset().mockResolvedValue(new Map());
+    dataSource = { transaction: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -96,7 +115,7 @@ describe('ChallengesService', () => {
           provide: getRepositoryToken(ExerciseLocation),
           useValue: createMockRepo(),
         },
-        { provide: DataSource, useValue: { transaction: jest.fn() } },
+        { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
 
@@ -370,6 +389,203 @@ describe('ChallengesService', () => {
       expect(builder.andWhere).toHaveBeenCalledWith('cum.status = :status', {
         status: 'active',
       });
+    });
+
+    it('should attach dominant_activity_category from the batched util, keyed correctly per challenge', async () => {
+      challengeRepo.find.mockResolvedValue([
+        { id: 'challenge-1', name: 'A' },
+        { id: 'challenge-2', name: 'B' },
+      ]);
+      mockMemberCountQuery([]);
+      mockGetDominantActivityCategories.mockResolvedValue(
+        new Map([
+          ['challenge-1', 'cardioIntense'],
+          ['challenge-2', null],
+        ]),
+      );
+
+      const result = await service.findAll();
+
+      const byId = new Map(
+        result.data.map(
+          (c: { id: string; dominant_activity_category: string | null }) => [
+            c.id,
+            c.dominant_activity_category,
+          ],
+        ),
+      );
+      expect(byId.get('challenge-1')).toBe('cardioIntense');
+      expect(byId.get('challenge-2')).toBeNull();
+    });
+
+    it('should call the dominant-category util once with every challenge id and the cycle-days repo manager', async () => {
+      challengeRepo.find.mockResolvedValue([
+        { id: 'challenge-1', name: 'A' },
+        { id: 'challenge-2', name: 'B' },
+      ]);
+      mockMemberCountQuery([]);
+
+      await service.findAll();
+
+      expect(mockGetDominantActivityCategories).toHaveBeenCalledTimes(1);
+      expect(mockGetDominantActivityCategories).toHaveBeenCalledWith(
+        challengeCycleDaysRepo.manager,
+        ['challenge-1', 'challenge-2'],
+      );
+    });
+
+    it('should default dominant_activity_category to null, not undefined, when the util has no entry for a challenge', async () => {
+      challengeRepo.find.mockResolvedValue([{ id: 'challenge-1', name: 'A' }]);
+      mockMemberCountQuery([]);
+      mockGetDominantActivityCategories.mockResolvedValue(new Map());
+
+      const result = await service.findAll();
+
+      expect(result.data[0].dominant_activity_category).toBeNull();
+    });
+  });
+
+  describe('findOne', () => {
+    it('should include members_joined and dominant_activity_category alongside the existing enriched fields', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      challengeCycleDaysRepo.createQueryBuilder.mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      });
+      challengeUserMapRepo.count.mockResolvedValue(7);
+      mockGetDominantActivityCategories.mockResolvedValue(
+        new Map([[CHALLENGE_ID, 'flexibility']]),
+      );
+
+      const result = await service.findOne(CHALLENGE_ID);
+
+      expect(result.members_joined).toBe(7);
+      expect(result.dominant_activity_category).toBe('flexibility');
+    });
+
+    it('should default dominant_activity_category to null when the util returns nothing for this challenge', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      challengeCycleDaysRepo.createQueryBuilder.mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      });
+      challengeUserMapRepo.count.mockResolvedValue(0);
+      mockGetDominantActivityCategories.mockResolvedValue(new Map());
+
+      const result = await service.findOne(CHALLENGE_ID);
+
+      expect(result.dominant_activity_category).toBeNull();
+    });
+
+    it('should call the dominant-category util scoped to just this one challenge id', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      challengeCycleDaysRepo.createQueryBuilder.mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      });
+      challengeUserMapRepo.count.mockResolvedValue(0);
+
+      await service.findOne(CHALLENGE_ID);
+
+      expect(mockGetDominantActivityCategories).toHaveBeenCalledWith(
+        challengeCycleDaysRepo.manager,
+        [CHALLENGE_ID],
+      );
+    });
+
+    it('should throw NotFoundException for a missing challenge without calling the dominant-category util', async () => {
+      challengeRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.findOne('missing-id')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(mockGetDominantActivityCategories).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('create (linkChallengeCategories order_index)', () => {
+    /** Fakes dataSource.transaction()'s manager just enough for create() to
+     * run: manager.create()/save() for Challenge, ChallengeUserMap, and
+     * (via linkChallengeCategories -> findOrCreateCategoryId)
+     * ExerciseCategory + ChallengeCategoryMap rows. Every category name is
+     * treated as new (getOne() -> null) so findOrCreateCategoryId always
+     * takes the "create" path — the id assigned doesn't matter for this
+     * test, only the order_index persisted on each ChallengeCategoryMap row. */
+    function createFakeTransactionManager() {
+      const savedCategoryMapRows: Array<{
+        challengeId: string;
+        categoryId: number;
+        orderIndex: number;
+      }> = [];
+      let nextCategoryId = 1;
+
+      const categoryQueryBuilder = {
+        where: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      };
+
+      type FakeRow = { __entity: unknown; id?: unknown } & Record<
+        string,
+        unknown
+      >;
+
+      const manager = {
+        create: jest.fn(
+          (Entity: unknown, data: object): FakeRow => ({
+            __entity: Entity,
+            ...data,
+          }),
+        ),
+        save: jest.fn((entity: FakeRow) => {
+          if (entity.__entity === ChallengeCategoryMap) {
+            savedCategoryMapRows.push(
+              entity as unknown as {
+                challengeId: string;
+                categoryId: number;
+                orderIndex: number;
+              },
+            );
+          } else if (entity.__entity === ExerciseCategory) {
+            entity.id = nextCategoryId++;
+          } else if (entity.__entity === Challenge) {
+            entity.id = CHALLENGE_ID;
+          }
+          return Promise.resolve(entity);
+        }),
+        getRepository: jest.fn(() => ({
+          createQueryBuilder: jest.fn(() => categoryQueryBuilder),
+        })),
+      };
+
+      return { manager, savedCategoryMapRows };
+    }
+
+    it('should persist orderIndex matching the position each category was given in the request, after dedup', async () => {
+      userRepo.findOne.mockResolvedValue({ id: OWNER_ID });
+      const { manager, savedCategoryMapRows } = createFakeTransactionManager();
+      dataSource.transaction.mockImplementation((cb: (m: unknown) => unknown) =>
+        cb(manager),
+      );
+
+      await service.create(
+        {
+          name: 'Test Challenge',
+          visibility: 'public',
+          duration_days: 30,
+          cycle_length_days: 7,
+          categories: ['Cardio Intense', 'Strength', 'Cardio Intense'], // dup
+        } as any,
+        OWNER_ID,
+      );
+
+      expect(savedCategoryMapRows).toHaveLength(2); // the repeat was deduped
+      expect(savedCategoryMapRows.map((r) => r.orderIndex)).toEqual([0, 1]);
     });
   });
 });

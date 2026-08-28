@@ -8,6 +8,7 @@ import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengeCategoryMap } from '../challenges/entities/challenge-category-map.entity';
 import { ChallengeLocationMap } from '../challenges/entities/challenge-location-map.entity';
 import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
+import { getDominantActivityCategories } from '../challenges/dominant-activity-category.util';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UpdateUserProfileDto } from './dto/update-user-profile.dto';
 import {
@@ -255,6 +256,7 @@ export class UsersService {
         progress_percent: number;
         streak: number;
         is_rest_day: boolean;
+        dominant_activity_category: string | null;
       }
     >
   > {
@@ -267,6 +269,7 @@ export class UsersService {
         progress_percent: number;
         streak: number;
         is_rest_day: boolean;
+        dominant_activity_category: string | null;
       }
     >();
 
@@ -300,39 +303,48 @@ export class UsersService {
       ),
     );
 
-    const [todayWorkouts, completedCounts, completedDayRows, cycleDayRows] =
-      await Promise.all([
-        this.workoutRepo.find({
-          where: {
-            userId: relations[0].user_id,
-            challengeId: In(challengeIds),
-            started_at: Between(start, end),
-          },
-        }),
-        this.workoutRepo
-          .createQueryBuilder('w')
-          .select('w.challengeId', 'challengeId')
-          .addSelect('COUNT(*)', 'count')
-          .where('w.userId = :userId', { userId: relations[0].user_id })
-          .andWhere('w.challengeId IN (:...challengeIds)', { challengeIds })
-          .andWhere('w.status = :status', { status: 'completed' })
-          .groupBy('w.challengeId')
-          .getRawMany<{ challengeId: string; count: string }>(),
-        this.workoutRepo
-          .createQueryBuilder('w')
-          .select('w.challengeId', 'challengeId')
-          .addSelect('DATE(w.started_at)', 'day')
-          .where('w.userId = :userId', { userId: relations[0].user_id })
-          .andWhere('w.challengeId IN (:...challengeIds)', { challengeIds })
-          .andWhere('w.status = :status', { status: 'completed' })
-          .groupBy('w.challengeId')
-          .addGroupBy('DATE(w.started_at)')
-          .getRawMany<{ challengeId: string; day: string }>(),
-        this.challengeCycleDayRepo.find({
-          where: { challenge_id: In(challengeIds) },
-          select: ['challenge_id', 'day_in_cycle', 'day_type'],
-        }),
-      ]);
+    const [
+      todayWorkouts,
+      completedCounts,
+      completedDayRows,
+      cycleDayRows,
+      dominantActivityByChallenge,
+    ] = await Promise.all([
+      this.workoutRepo.find({
+        where: {
+          userId: relations[0].user_id,
+          challengeId: In(challengeIds),
+          started_at: Between(start, end),
+        },
+      }),
+      this.workoutRepo
+        .createQueryBuilder('w')
+        .select('w.challengeId', 'challengeId')
+        .addSelect('COUNT(*)', 'count')
+        .where('w.userId = :userId', { userId: relations[0].user_id })
+        .andWhere('w.challengeId IN (:...challengeIds)', { challengeIds })
+        .andWhere('w.status = :status', { status: 'completed' })
+        .groupBy('w.challengeId')
+        .getRawMany<{ challengeId: string; count: string }>(),
+      this.workoutRepo
+        .createQueryBuilder('w')
+        .select('w.challengeId', 'challengeId')
+        .addSelect('DATE(w.started_at)', 'day')
+        .where('w.userId = :userId', { userId: relations[0].user_id })
+        .andWhere('w.challengeId IN (:...challengeIds)', { challengeIds })
+        .andWhere('w.status = :status', { status: 'completed' })
+        .groupBy('w.challengeId')
+        .addGroupBy('DATE(w.started_at)')
+        .getRawMany<{ challengeId: string; day: string }>(),
+      this.challengeCycleDayRepo.find({
+        where: { challenge_id: In(challengeIds) },
+        select: ['challenge_id', 'day_in_cycle', 'day_type'],
+      }),
+      getDominantActivityCategories(
+        this.challengeCycleDayRepo.manager,
+        challengeIds,
+      ),
+    ]);
 
     const completedByChallenge = new Map(
       completedCounts.map((row) => [row.challengeId, Number(row.count)]),
@@ -423,6 +435,8 @@ export class UsersService {
         // 6 days in a row = streak 2.
         streak: Math.floor(consecutiveDays / 3),
         is_rest_day: dayType === 'rest',
+        dominant_activity_category:
+          dominantActivityByChallenge.get(relation.challenge_id) ?? null,
       });
     }
 
