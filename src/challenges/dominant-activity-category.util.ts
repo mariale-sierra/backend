@@ -59,7 +59,14 @@ export async function getDominantActivityCategories(
     `WITH challenge_cycle_day_routines AS (
        SELECT challenge_id, routine_id
        FROM havit.challenge_cycle_days
-       WHERE challenge_id = ANY($1) AND routine_id IS NOT NULL
+       -- Explicit ::uuid[] cast — node-pg has no type hint for a plain JS
+       -- string[] parameter here, so Postgres defaults it to text[]; without
+       -- the cast, "uuid = ANY(text[])" fails with
+       -- "operator does not exist: uuid = text" (challenge_id is uuid).
+       -- This is the only raw = ANY($n) comparison against a uuid column in
+       -- the codebase — every other multi-id lookup goes through TypeORM's
+       -- In(...)/IN (:...ids), which handles this correctly on its own.
+       WHERE challenge_id = ANY($1::uuid[]) AND routine_id IS NOT NULL
      ),
      exercise_categories_per_challenge AS (
        SELECT cr.challenge_id, ecm.category_id

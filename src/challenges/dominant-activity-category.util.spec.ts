@@ -34,6 +34,17 @@ describe('getDominantActivityCategories', () => {
     expect(params).toEqual([['challenge-1', 'challenge-2']]);
   });
 
+  it('should cast the challengeIds parameter to uuid[] (node-pg otherwise defaults an untyped string[] param to text[], and "uuid = ANY(text[])" has no operator)', async () => {
+    manager.query.mockResolvedValue([]);
+
+    await getDominantActivityCategories(manager as unknown as EntityManager, [
+      'challenge-1',
+    ]);
+
+    const [sql] = manager.query.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('challenge_id = ANY($1::uuid[])');
+  });
+
   it('should count each cycle-day slot a routine occupies, not dedupe by routine_id (a routine repeated across slots counts proportionally more)', async () => {
     manager.query.mockResolvedValue([]);
 
