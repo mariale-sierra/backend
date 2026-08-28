@@ -16,16 +16,19 @@ interface DominantCategoryRow {
  * list size — same batching discipline as ChallengesService.findAll()'s
  * member counts and UsersService.attachProgress()'s is_rest_day lookup.
  *
- * Per challenge: every distinct routine referenced by its
- * challenge_cycle_days (routine_id, nulls skipped — a null routine_id is a
- * rest day), deduped by routine_id so a routine repeated across several
- * cycle days (e.g. a repeating 4-day cycle) counts its exercises once, not
- * once per day it's assigned to. NOTE: this dedup is an assumption, not
- * confirmed against a real repeating-routine challenge — flag it back if
- * per-cycle-day counting (i.e. NOT deduped) turns out to be the intended
- * reading. For each of those routines' exercises, only the PRIMARY category
- * counts (exercise_category_map.is_primary — an exercise can be tagged with
- * more than one category; summing across all of them would let a
+ * Per challenge: every cycle-day slot in its challenge_cycle_days that has a
+ * routine assigned (routine_id, nulls skipped — a null routine_id is a rest
+ * day), counted per slot rather than deduped by routine_id — a routine
+ * occupying 2 of a challenge's 4 cycle-day slots is proportionally half the
+ * challenge, so its exercises are counted twice, once per slot. This is
+ * intentionally NOT an expansion over the full duration_days: each row in
+ * challenge_cycle_days already represents one position in the repeating
+ * cycle (e.g. exactly 4 rows for a 4-day cycle, not one row per calendar day
+ * across the challenge's whole run), so counting each slot once already
+ * captures relative in-cycle frequency correctly with no extra expansion
+ * logic needed. For each of those routines' exercises, only the PRIMARY
+ * category counts (exercise_category_map.is_primary — an exercise can be
+ * tagged with more than one category; summing across all of them would let a
  * multi-tagged exercise skew the result). COUNT(*) GROUP BY category,
  * highest count wins.
  *
@@ -53,14 +56,14 @@ export async function getDominantActivityCategories(
   if (challengeIds.length === 0) return result;
 
   const rows: DominantCategoryRow[] = await manager.query(
-    `WITH challenge_routines AS (
-       SELECT DISTINCT challenge_id, routine_id
+    `WITH challenge_cycle_day_routines AS (
+       SELECT challenge_id, routine_id
        FROM havit.challenge_cycle_days
        WHERE challenge_id = ANY($1) AND routine_id IS NOT NULL
      ),
      exercise_categories_per_challenge AS (
        SELECT cr.challenge_id, ecm.category_id
-       FROM challenge_routines cr
+       FROM challenge_cycle_day_routines cr
        JOIN havit.routine_exercises re ON re.routine_id = cr.routine_id
        JOIN havit.exercise_category_map ecm
          ON ecm.exercise_id = re.exercise_id AND ecm.is_primary = true
