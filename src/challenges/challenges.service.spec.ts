@@ -14,6 +14,7 @@ import { ChallengeLocationMap } from './entities/challenge-location-map.entity';
 import { ExerciseCategory } from '../exercises/entities/exercise-category.entity';
 import { ExerciseLocation } from '../exercises/entities/exercise-location.entity';
 import { getDominantActivityCategories } from './dominant-activity-category.util';
+import { CreateChallengeDto } from './dto/create-challenge.dto';
 
 // findAll()/findOne() delegate the dominant-category computation entirely to
 // this util — its own SQL/tie-break logic is covered by
@@ -586,6 +587,176 @@ describe('ChallengesService', () => {
 
       expect(savedCategoryMapRows).toHaveLength(2); // the repeat was deduped
       expect(savedCategoryMapRows.map((r) => r.orderIndex)).toEqual([0, 1]);
+    });
+  });
+
+  describe('create → resolveExercise (exercise_metrics pollution fix)', () => {
+    /** Fakes dataSource.transaction()'s manager for the create() -> cycle_days
+     * -> createCycleDay() -> resolveExercise() chain. Every "does X already
+     * exist" lookup (category/location/map rows) defaults to "no" so each
+     * helper takes its create-new path without erroring — the one exception
+     * is the Exercise lookup itself, which is configurable per test via
+     * `existingExercises`, since that's the one branch this fix changes. */
+    function createFakeManager(
+      existingExercises: Array<{ id: number; name: string }> = [],
+    ) {
+      const savedRows: Array<{ __entity: string } & Record<string, unknown>> =
+        [];
+      let nextId = 1;
+      const existingByLowerName = new Map(
+        existingExercises.map((e) => [e.name.toLowerCase(), e]),
+      );
+
+      interface FakeQueryBuilder {
+        where: jest.Mock;
+        getOne: jest.Mock;
+      }
+
+      function exerciseQueryBuilder(): FakeQueryBuilder {
+        let searchedName = '';
+        const qb: FakeQueryBuilder = {
+          where: jest.fn((_sql: string, params: { name: string }) => {
+            searchedName = params.name.toLowerCase();
+            return qb;
+          }),
+          getOne: jest.fn(() =>
+            Promise.resolve(existingByLowerName.get(searchedName) ?? null),
+          ),
+        };
+        return qb;
+      }
+
+      function noopFindOneQueryBuilder(): FakeQueryBuilder {
+        const qb: FakeQueryBuilder = {
+          where: jest.fn().mockReturnThis(),
+          getOne: jest.fn(() => Promise.resolve(null)),
+        };
+        return qb;
+      }
+
+      const manager = {
+        create: jest.fn((Entity: { name: string }, data: object) => ({
+          __entity: Entity.name,
+          ...data,
+        })),
+        save: jest.fn(
+          (
+            row: { __entity: string; id?: unknown } & Record<string, unknown>,
+          ) => {
+            if (row.id === undefined) row.id = nextId++;
+            savedRows.push(row);
+            return Promise.resolve(row);
+          },
+        ),
+        getRepository: jest.fn((Entity: { name: string }) => {
+          // Every fake repo gets the same .create() TypeORM's per-repository
+          // create() provides (some helpers call manager.getRepository(X).create(),
+          // not manager.create(X, ...) directly — e.g. resolveExercise's
+          // exerciseRepo.create(), ensureExerciseCategory's mapRepo.create()).
+          const create = jest.fn((data: object) => ({
+            __entity: Entity.name,
+            ...data,
+          }));
+
+          switch (Entity.name) {
+            case 'Exercise':
+              return {
+                create,
+                createQueryBuilder: jest.fn(() => exerciseQueryBuilder()),
+                findOne: jest.fn(() => Promise.resolve(null)), // slug never collides
+              };
+            case 'MetricType':
+              return {
+                create,
+                findOne: jest.fn(({ where }: { where: { code: string } }) =>
+                  Promise.resolve(
+                    where.code === 'reps'
+                      ? { id: 1, code: 'reps' }
+                      : where.code === 'weight'
+                        ? { id: 2, code: 'weight' }
+                        : null,
+                  ),
+                ),
+              };
+            case 'ExerciseCategoryMap':
+            case 'ExerciseLocationMap':
+            case 'ExerciseMetric':
+              return { create, findOne: jest.fn(() => Promise.resolve(null)) };
+            default:
+              // ExerciseCategory/ExerciseLocation's findOrCreateCategoryId/
+              // findOrCreateLocationId lookups — "not found" so each just
+              // creates a fresh row.
+              return {
+                create,
+                createQueryBuilder: jest.fn(() => noopFindOneQueryBuilder()),
+                findOne: jest.fn(() => Promise.resolve(null)),
+              };
+          }
+        }),
+      };
+
+      return { manager, savedRows };
+    }
+
+    function baseChallengeDto(exerciseName: string): CreateChallengeDto {
+      return {
+        name: 'Test Challenge',
+        visibility: 'public',
+        duration_days: 30,
+        cycle_length_days: 7,
+        cycle_days: [
+          {
+            day_number: 1,
+            is_rest_day: false,
+            exercises: [
+              {
+                name: exerciseName,
+                location: 'Anywhere',
+                metric_type: 'schema',
+                activity_type: 'cardioLow',
+                metrics: { kind: 'schema', values: {} },
+              },
+            ],
+          },
+        ],
+      } as unknown as CreateChallengeDto;
+    }
+
+    it("should register 'reps'/'weight' exercise_metrics for a genuinely NEW exercise", async () => {
+      userRepo.findOne.mockResolvedValue({ id: OWNER_ID });
+      const { manager, savedRows } = createFakeManager([]); // catalog empty — exercise is new
+      dataSource.transaction.mockImplementation((cb: (m: unknown) => unknown) =>
+        cb(manager),
+      );
+
+      await service.create(baseChallengeDto('Brand New Exercise'), OWNER_ID);
+
+      const metricRows = savedRows.filter(
+        (r) => r.__entity === 'ExerciseMetric',
+      );
+      expect(metricRows.map((r) => r.metricTypeId).sort()).toEqual([1, 2]);
+    });
+
+    it("should NOT register 'reps'/'weight' exercise_metrics when reusing an existing exercise by name (the bug)", async () => {
+      userRepo.findOne.mockResolvedValue({ id: OWNER_ID });
+      const { manager, savedRows } = createFakeManager([
+        { id: 55, name: 'Brisk Walk' }, // already in the catalog
+      ]);
+      dataSource.transaction.mockImplementation((cb: (m: unknown) => unknown) =>
+        cb(manager),
+      );
+
+      // Matched case-insensitively, same as resolveExercise's own lookup.
+      await service.create(baseChallengeDto('brisk walk'), OWNER_ID);
+
+      const metricRows = savedRows.filter(
+        (r) => r.__entity === 'ExerciseMetric',
+      );
+      expect(metricRows).toHaveLength(0);
+
+      // And no second Exercise row got created — it was genuinely reused.
+      const exerciseRows = savedRows.filter((r) => r.__entity === 'Exercise');
+      expect(exerciseRows).toHaveLength(0);
     });
   });
 });

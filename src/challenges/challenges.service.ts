@@ -239,8 +239,9 @@ export class ChallengesService {
   /**
    * Reuses an existing Exercise by case-insensitive name match (project decision:
    * reuse over duplicate). Creates a new catalog row otherwise, and ensures the
-   * exercise is linked to its category/location and has 'reps'/'weight' metrics
-   * enabled so the metrics-entry screen (useMetricsScreen.ts) can record against it.
+   * exercise is linked to its category/location. A brand-new exercise also gets
+   * 'reps'/'weight' metrics enabled so the metrics-entry screen
+   * (useMetricsScreen.ts) can record against it.
    */
   private async resolveExercise(
     manager: EntityManager,
@@ -271,11 +272,22 @@ export class ChallengesService {
           is_active: true,
         }),
       );
+
+      // Only for a genuinely NEW exercise — fixed 2026-08-29, real bug found
+      // via live GET /exercises/:id/full: this used to run unconditionally,
+      // so EVERY reuse of an existing catalog exercise (e.g. "Brisk Walk",
+      // "Guided Breathwork") silently added 'reps'+'weight' as additional
+      // allowed metrics on top of its real seeded ones, regardless of the
+      // exercise's actual category. Confirmed live: Brisk Walk (Cardio Low)
+      // and Guided Breathwork (Mind-Body) both had 'reps'+'weight' polluted
+      // onto their otherwise-correct metrics, which is exactly why the
+      // frontend's Routine Builder started showing nonsensical
+      // reps/weight fields for them.
+      await this.ensureExerciseMetrics(manager, exercise.id);
     }
 
     await this.ensureExerciseCategory(manager, exercise.id, dto.activity_type);
     await this.ensureExerciseLocation(manager, exercise.id, dto.location);
-    await this.ensureExerciseMetrics(manager, exercise.id);
     await this.ensureExerciseBodyParts(manager, exercise.id, dto.muscle_groups);
 
     return exercise;
