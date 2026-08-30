@@ -453,6 +453,7 @@ describe('ChallengesService', () => {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([]),
       });
       challengeUserMapRepo.count.mockResolvedValue(7);
@@ -472,6 +473,7 @@ describe('ChallengesService', () => {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([]),
       });
       challengeUserMapRepo.count.mockResolvedValue(0);
@@ -488,6 +490,7 @@ describe('ChallengesService', () => {
         leftJoinAndSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([]),
       });
       challengeUserMapRepo.count.mockResolvedValue(0);
@@ -757,6 +760,201 @@ describe('ChallengesService', () => {
       // And no second Exercise row got created — it was genuinely reused.
       const exerciseRows = savedRows.filter((r) => r.__entity === 'Exercise');
       expect(exerciseRows).toHaveLength(0);
+    });
+  });
+
+  describe('getCycleDaySummaries', () => {
+    /** Mocks challengeCycleDaysRepo.createQueryBuilder() — the fluent chain
+     * getCycleDaySummaries() builds (leftJoinAndSelect x N, where, orderBy,
+     * addOrderBy, getMany). */
+    function mockCycleDaysQuery(rows: unknown[]) {
+      const qb = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(rows),
+      };
+      challengeCycleDaysRepo.createQueryBuilder.mockReturnValue(qb);
+      return qb;
+    }
+
+    it('should join sets/targets the same way RoutineService.getTodayRoutine() does, alongside the existing category joins', async () => {
+      const qb = mockCycleDaysQuery([]);
+
+      await service.getCycleDaySummaries(CHALLENGE_ID);
+
+      const joinedRelations = (
+        qb.leftJoinAndSelect.mock.calls as unknown[][]
+      ).map((call) => call[0] as string);
+      expect(joinedRelations).toEqual(
+        expect.arrayContaining([
+          'routineExercise.sets',
+          'sets.targets',
+          'setTargets.metricType',
+          'routineExercise.targets',
+          'targets.metricType',
+        ]),
+      );
+      expect(qb.addOrderBy).toHaveBeenCalledWith('sets.set_number', 'ASC');
+    });
+
+    it('should return an empty exercises array for a rest day with no routine', async () => {
+      mockCycleDaysQuery([
+        { day_in_cycle: 1, day_type: 'rest', routine: null },
+      ]);
+
+      const result = await service.getCycleDaySummaries(CHALLENGE_ID);
+
+      expect(result).toEqual([
+        {
+          day_number: 1,
+          is_rest_day: true,
+          routine_name: undefined,
+          routine_description: undefined,
+          exercises: [],
+        },
+      ]);
+    });
+
+    it('should include real per-set data (id, set_number, rest_seconds_after, targets) instead of the old name/activity_type-only shape', async () => {
+      mockCycleDaysQuery([
+        {
+          day_in_cycle: 1,
+          day_type: 'workout',
+          routine: {
+            name: 'Leg Day',
+            description: 'Lower body focus',
+            routine_exercises: [
+              {
+                exercise: {
+                  name: 'Squat',
+                  category_maps: [
+                    { isPrimary: true, category: { name: 'Strength' } },
+                  ],
+                },
+                sets: [
+                  {
+                    id: 'set-1',
+                    set_number: 1,
+                    rest_seconds_after: 60,
+                    targets: [
+                      {
+                        metric_type_id: 1,
+                        metricType: { code: 'reps' },
+                        target_value_int: 10,
+                        target_value_decimal: null,
+                        target_value_seconds: null,
+                      },
+                    ],
+                  },
+                ],
+                targets: [],
+              },
+            ],
+          },
+        },
+      ]);
+
+      const result = await service.getCycleDaySummaries(CHALLENGE_ID);
+
+      expect(result[0].exercises[0]).toEqual({
+        name: 'Squat',
+        activity_type: 'strength',
+        sets: [
+          {
+            id: 'set-1',
+            set_number: 1,
+            rest_seconds_after: 60,
+            targets: [
+              {
+                metric_type_id: 1,
+                metricType: { code: 'reps' },
+                target_value_int: 10,
+                target_value_decimal: null,
+                target_value_seconds: null,
+              },
+            ],
+          },
+        ],
+        targets: [],
+      });
+    });
+
+    it('should fall back to exercise-level targets when the exercise has no per-set rows (matches getTodayRoutine’s two-tier shape)', async () => {
+      mockCycleDaysQuery([
+        {
+          day_in_cycle: 1,
+          day_type: 'workout',
+          routine: {
+            name: 'Cardio Day',
+            description: null,
+            routine_exercises: [
+              {
+                exercise: {
+                  name: 'Brisk Walk',
+                  category_maps: [
+                    { isPrimary: true, category: { name: 'Cardio Low' } },
+                  ],
+                },
+                sets: [],
+                targets: [
+                  {
+                    metric_type_id: 5,
+                    metricType: { code: 'time' },
+                    target_value_int: null,
+                    target_value_decimal: null,
+                    target_value_seconds: 1200,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ]);
+
+      const result = await service.getCycleDaySummaries(CHALLENGE_ID);
+
+      expect(result[0].exercises[0].activity_type).toBe('cardioLow');
+      expect(result[0].exercises[0].sets).toEqual([]);
+      expect(result[0].exercises[0].targets).toEqual([
+        {
+          metric_type_id: 5,
+          metricType: { code: 'time' },
+          target_value_int: null,
+          target_value_decimal: null,
+          target_value_seconds: 1200,
+        },
+      ]);
+    });
+
+    it('should default a target’s metricType to null rather than crash when the relation is missing', async () => {
+      mockCycleDaysQuery([
+        {
+          day_in_cycle: 1,
+          day_type: 'workout',
+          routine: {
+            name: 'Day',
+            description: null,
+            routine_exercises: [
+              {
+                exercise: { name: 'Mystery Exercise', category_maps: [] },
+                sets: [],
+                targets: [
+                  { metric_type_id: 99, metricType: null, target_value_int: 1 },
+                ],
+              },
+            ],
+          },
+        },
+      ]);
+
+      const result = await service.getCycleDaySummaries(CHALLENGE_ID);
+
+      expect(result[0].exercises[0].targets[0]).toMatchObject({
+        metric_type_id: 99,
+        metricType: null,
+      });
     });
   });
 });

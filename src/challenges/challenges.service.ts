@@ -306,7 +306,9 @@ export class ChallengesService {
     exerciseId: number,
     muscleGroups?: string[],
   ) {
-    const names = [...new Set((muscleGroups ?? []).map((n) => n.trim()).filter(Boolean))];
+    const names = [
+      ...new Set((muscleGroups ?? []).map((n) => n.trim()).filter(Boolean)),
+    ];
     if (names.length === 0) return;
 
     const bodyPartRepo = manager.getRepository(ExerciseBodyPart);
@@ -569,7 +571,18 @@ export class ChallengesService {
   }
 
   /** Cycle-day + routine + exercise summary shaped for
-   * frontend/services/adapters/challengeDetailAdapter.ts's mapCycleDays(). */
+   * frontend/services/adapters/challengeDetailAdapter.ts's mapCycleDays().
+   *
+   * sets/targets joins mirror RoutineService.getTodayRoutine()'s exact
+   * two-tier shape (per-set targets, with exercise-level targets as the
+   * fallback for an exercise with no per-set rows) — same tables, same
+   * relations, so the Routine-Detail screen's real set/rep/rest data can
+   * come from here instead of always falling back to a "3 × 10"/"45s"
+   * placeholder (see the frontend's RoutineDayDetail screen). Deliberately
+   * NOT pre-formatted into a "3 × 12" label here — the frontend already has
+   * extraction logic for this exact shape (metricsAdapter.ts's
+   * extractTargetValue/targetsToFieldMap, built against getTodayRoutine's
+   * response), so formatting stays frontend-side rather than duplicated. */
   async getCycleDaySummaries(challengeId: string) {
     const cycleDays = await this.challengeCycleDaysRepo
       .createQueryBuilder('cycleDay')
@@ -578,8 +591,14 @@ export class ChallengesService {
       .leftJoinAndSelect('routineExercise.exercise', 'exercise')
       .leftJoinAndSelect('exercise.category_maps', 'categoryMap')
       .leftJoinAndSelect('categoryMap.category', 'category')
+      .leftJoinAndSelect('routineExercise.sets', 'sets')
+      .leftJoinAndSelect('sets.targets', 'setTargets')
+      .leftJoinAndSelect('setTargets.metricType', 'setMetricType')
+      .leftJoinAndSelect('routineExercise.targets', 'targets')
+      .leftJoinAndSelect('targets.metricType', 'targetMetricType')
       .where('cycleDay.challenge_id = :challengeId', { challengeId })
       .orderBy('cycleDay.day_in_cycle', 'ASC')
+      .addOrderBy('sets.set_number', 'ASC')
       .getMany();
 
     return cycleDays.map((cycleDay) => ({
@@ -587,18 +606,51 @@ export class ChallengesService {
       is_rest_day: cycleDay.day_type === 'rest',
       routine_name: cycleDay.routine?.name,
       routine_description: cycleDay.routine?.description,
-      exercises: (cycleDay.routine?.routine_exercises ?? []).map((re: any) => {
-        const primaryCategory =
-          re.exercise?.category_maps?.find((m: any) => m.isPrimary)?.category ??
-          re.exercise?.category_maps?.[0]?.category;
+      exercises: (cycleDay.routine?.routine_exercises ?? []).map(
+        (re: RoutineExercise) => {
+          const primaryCategory =
+            re.exercise?.category_maps?.find((m) => m.isPrimary)?.category ??
+            re.exercise?.category_maps?.[0]?.category;
 
-        return {
-          name: re.exercise?.name,
-          activity_type: primaryCategory
-            ? categoryNameToActivityType(primaryCategory.name)
-            : null,
-        };
-      }),
+          return {
+            name: re.exercise?.name,
+            activity_type: primaryCategory
+              ? categoryNameToActivityType(primaryCategory.name)
+              : null,
+            sets: (re.sets ?? []).map((set) => ({
+              id: set.id,
+              set_number: set.set_number,
+              rest_seconds_after: set.rest_seconds_after,
+              targets: this.mapRoutineTargets(set.targets),
+            })),
+            targets: this.mapRoutineTargets(re.targets),
+          };
+        },
+      ),
+    }));
+  }
+
+  /** Shared shape for both RoutineExerciseSetTarget[] and
+   * RoutineExerciseTarget[] — same fields getTodayRoutine's raw entities
+   * already expose, picked explicitly (not a raw entity passthrough) so
+   * internal FK columns (routine_exercise_id/routine_exercise_set_id,
+   * unit, target_value_text/target_value_boolean) don't leak into this
+   * response for fields the frontend's extractTargetValue never reads. */
+  private mapRoutineTargets(
+    targets: Array<{
+      metric_type_id: number;
+      metricType?: { code?: string } | null;
+      target_value_int?: number | null;
+      target_value_decimal?: number | null;
+      target_value_seconds?: number | null;
+    }> = [],
+  ) {
+    return (targets ?? []).map((target) => ({
+      metric_type_id: target.metric_type_id,
+      metricType: target.metricType ? { code: target.metricType.code } : null,
+      target_value_int: target.target_value_int,
+      target_value_decimal: target.target_value_decimal,
+      target_value_seconds: target.target_value_seconds,
     }));
   }
 
