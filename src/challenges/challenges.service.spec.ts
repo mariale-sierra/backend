@@ -829,6 +829,7 @@ describe('ChallengesService', () => {
               {
                 exercise: {
                   name: 'Squat',
+                  description: 'Compound lower body lift.',
                   category_maps: [
                     { isPrimary: true, category: { name: 'Strength' } },
                   ],
@@ -860,6 +861,7 @@ describe('ChallengesService', () => {
 
       expect(result[0].exercises[0]).toEqual({
         name: 'Squat',
+        description: 'Compound lower body lift.',
         activity_type: 'strength',
         sets: [
           {
@@ -879,6 +881,34 @@ describe('ChallengesService', () => {
         ],
         targets: [],
       });
+    });
+
+    it('should default description to null when the exercise has none, rather than undefined', async () => {
+      mockCycleDaysQuery([
+        {
+          day_in_cycle: 1,
+          day_type: 'workout',
+          routine: {
+            name: 'Day',
+            description: null,
+            routine_exercises: [
+              {
+                exercise: {
+                  name: 'No-Description Exercise',
+                  description: undefined,
+                  category_maps: [],
+                },
+                sets: [],
+                targets: [],
+              },
+            ],
+          },
+        },
+      ]);
+
+      const result = await service.getCycleDaySummaries(CHALLENGE_ID);
+
+      expect(result[0].exercises[0].description).toBeNull();
     });
 
     it('should fall back to exercise-level targets when the exercise has no per-set rows (matches getTodayRoutine’s two-tier shape)', async () => {

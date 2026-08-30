@@ -614,6 +614,7 @@ export class ChallengesService {
 
           return {
             name: re.exercise?.name,
+            description: re.exercise?.description ?? null,
             activity_type: primaryCategory
               ? categoryNameToActivityType(primaryCategory.name)
               : null,
