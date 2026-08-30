@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { Between, DataSource } from 'typeorm';
 import { ChallengesService } from './challenges.service';
 import { Challenge } from './entities/challenge.entity';
 import { User } from '../users/entities/user.entity';
@@ -57,6 +57,7 @@ describe('ChallengesService', () => {
   let challengeUserMapRepo: MockRepo;
   let challengeCategoryMapRepo: MockRepo;
   let challengeLocationMapRepo: MockRepo;
+  let workoutRepo: MockRepo;
   let dataSource: { transaction: jest.Mock };
 
   const OWNER_ID = 'owner-1';
@@ -78,6 +79,7 @@ describe('ChallengesService', () => {
     challengeUserMapRepo = createMockRepo();
     challengeCategoryMapRepo = createMockRepo();
     challengeLocationMapRepo = createMockRepo();
+    workoutRepo = createMockRepo();
     // attachCategoriesAndLocations runs on every findAll()/findOne() call —
     // default to none unless a test cares about them.
     challengeCategoryMapRepo.find.mockResolvedValue([]);
@@ -94,7 +96,7 @@ describe('ChallengesService', () => {
           provide: getRepositoryToken(ChallengeUserMap),
           useValue: challengeUserMapRepo,
         },
-        { provide: getRepositoryToken(WorkoutLog), useValue: createMockRepo() },
+        { provide: getRepositoryToken(WorkoutLog), useValue: workoutRepo },
         {
           provide: getRepositoryToken(ChallengeCycleDay),
           useValue: challengeCycleDaysRepo,
@@ -985,6 +987,146 @@ describe('ChallengesService', () => {
         metric_type_id: 99,
         metricType: null,
       });
+    });
+  });
+
+  describe('timezone-aware current day (getProgress / getToday / getProgressSummary)', () => {
+    const JOINED_AT = new Date('2026-08-27T12:00:00.000Z');
+
+    beforeEach(() => {
+      challengeUserMapRepo.findOne.mockResolvedValue({
+        user_id: OWNER_ID,
+        challenge_id: CHALLENGE_ID,
+        status: 'active',
+        joined_at: JOINED_AT,
+      });
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      workoutRepo.findOne.mockResolvedValue(null);
+      workoutRepo.count.mockResolvedValue(0);
+      challengeCycleDaysRepo.createQueryBuilder.mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      });
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    // The bug: a user behind UTC saw the challenge day (and "completed
+    // today") roll over as soon as the SERVER's UTC day ticked, even while it
+    // was still "yesterday" on their own device — e.g. a photo uploaded late
+    // in the evening, local time, still showed as belonging to a day that had
+    // already "ended" per the old UTC-only calculation.
+    it('does not roll currentDay over just because UTC crossed midnight, for a user behind UTC', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-08-28T04:00:00.000Z'));
+
+      const utcResult = await service.getProgress(
+        OWNER_ID,
+        CHALLENGE_ID,
+        'UTC',
+      );
+      const laResult = await service.getProgress(
+        OWNER_ID,
+        CHALLENGE_ID,
+        'America/Los_Angeles',
+      );
+
+      expect(utcResult!.currentDay).toBe(2); // UTC already rolled over
+      expect(laResult!.currentDay).toBe(1); // still "yesterday" locally
+    });
+
+    // Reverse direction: a user ahead of UTC must see the day roll over as
+    // soon as THEIR local midnight passes, without waiting for UTC's.
+    it('rolls currentDay over as soon as local midnight passes, even before UTC midnight, for a user ahead of UTC', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-08-27T16:00:00.000Z'));
+
+      const utcResult = await service.getProgress(
+        OWNER_ID,
+        CHALLENGE_ID,
+        'UTC',
+      );
+      const tokyoResult = await service.getProgress(
+        OWNER_ID,
+        CHALLENGE_ID,
+        'Asia/Tokyo',
+      );
+
+      expect(utcResult!.currentDay).toBe(1); // UTC hasn't rolled over yet
+      expect(tokyoResult!.currentDay).toBe(2); // already "today" locally
+    });
+
+    it('falls back to UTC when no timezone is provided, matching the pre-fix behavior', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-08-28T04:00:00.000Z'));
+
+      const result = await service.getProgress(OWNER_ID, CHALLENGE_ID);
+
+      expect(result!.currentDay).toBe(2);
+    });
+
+    it('never throws for an unrecognized timezone string, degrading to UTC', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-08-28T04:00:00.000Z'));
+
+      await expect(
+        service.getProgress(OWNER_ID, CHALLENGE_ID, 'Not/AZone'),
+      ).resolves.toMatchObject({ currentDay: 2 });
+    });
+
+    it('threads the timezone through getToday()', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-08-28T04:00:00.000Z'));
+
+      const result = await service.getToday(
+        CHALLENGE_ID,
+        OWNER_ID,
+        'America/Los_Angeles',
+      );
+
+      expect(result.currentDay).toBe(1);
+    });
+
+    it('threads the timezone through getProgressSummary()', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-08-28T04:00:00.000Z'));
+
+      const result = await service.getProgressSummary(
+        CHALLENGE_ID,
+        OWNER_ID,
+        'America/Los_Angeles',
+      );
+
+      expect(result.currentDay).toBe(1);
+    });
+
+    it('bounds "completed today" by the local calendar day, not UTC, and reports hoursLeftToday against the local end-of-day', async () => {
+      jest.useFakeTimers();
+      // 2026-08-28T04:00:00Z is 2026-08-27T21:00:00 local in LA — 3 hours
+      // before local midnight, i.e. before the local day ends.
+      jest.setSystemTime(new Date('2026-08-28T04:00:00.000Z'));
+
+      const result = await service.getProgress(
+        OWNER_ID,
+        CHALLENGE_ID,
+        'America/Los_Angeles',
+      );
+
+      expect(workoutRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            started_at: Between(
+              new Date('2026-08-27T07:00:00.000Z'),
+              new Date('2026-08-28T06:59:59.999Z'),
+            ),
+          }),
+        }),
+      );
+      expect(result!.hoursLeftToday).toBe(3);
     });
   });
 });

@@ -31,6 +31,7 @@ import { UpdateChallengeCycleDayDto } from './dto/update-challenge-cycle-day.dto
 import { Public } from '../auth/decorators/public.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
+import { resolveRequestTimezone } from '../common/timezone.util';
 
 @ApiTags('Challenges')
 @Controller('challenges')
@@ -183,6 +184,7 @@ export class ChallengesController {
     return this.challengesService.getProgress(
       req.user.sub,
       req.query.challengeId,
+      resolveRequestTimezone(req),
     );
   }
 
@@ -301,7 +303,11 @@ export class ChallengesController {
     description: 'Challenge no encontrado',
   })
   getToday(@Param('id', ParseUUIDPipe) challengeId: string, @Req() req) {
-    return this.challengesService.getToday(challengeId, req.user.sub);
+    return this.challengesService.getToday(
+      challengeId,
+      req.user.sub,
+      resolveRequestTimezone(req),
+    );
   }
 
   @Get(':id/progress-summary')
@@ -317,6 +323,10 @@ export class ChallengesController {
     @Param('id', ParseUUIDPipe) challengeId: string,
     @Req() req,
   ) {
-    return this.challengesService.getProgressSummary(challengeId, req.user.sub);
+    return this.challengesService.getProgressSummary(
+      challengeId,
+      req.user.sub,
+      resolveRequestTimezone(req),
+    );
   }
 }

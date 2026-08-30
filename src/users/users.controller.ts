@@ -30,6 +30,7 @@ import {
 } from './dto/profile-response.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
+import { resolveRequestTimezone } from '../common/timezone.util';
 
 @ApiTags('Users')
 @Controller('users')
@@ -61,7 +62,10 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'Lista de desafíos del usuario' })
   @ApiResponse({ status: 401, description: 'No autorizado' })
   getMyChallenges(@Req() req) {
-    return this.usersService.getUserChallenges(req.user.sub);
+    return this.usersService.getUserChallenges(
+      req.user.sub,
+      resolveRequestTimezone(req),
+    );
   }
 
   @Get('me/profile')

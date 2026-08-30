@@ -733,4 +733,114 @@ describe('UsersService', () => {
       expect(activeChallenges(result)[0].dominant_activity_category).toBeNull();
     });
   });
+
+  describe('getUserChallenges (timezone-aware current_day)', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    function relationJoinedAt(challengeId: string, joinedAt: Date) {
+      return {
+        challenge_id: challengeId,
+        user_id: 'user-1',
+        status: 'active',
+        joined_at: joinedAt,
+        challenge: { id: challengeId, duration_days: 30, cycle_length_days: 3 },
+      };
+    }
+
+    // Same bug scenario as ChallengesService.calculateCurrentDay's regression
+    // tests: attachProgress() used to diff UTC calendar dates only, so a user
+    // behind UTC saw current_day roll over as soon as the server's UTC day
+    // ticked, even while it was still "yesterday" on their own device.
+    it('does not roll current_day over just because UTC crossed midnight, for a user behind UTC', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-08-28T04:00:00.000Z'));
+      const joinedAt = new Date('2026-08-27T12:00:00.000Z');
+
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        relationJoinedAt('challenge-1', joinedAt),
+      ]);
+      challengeCycleDayRepo.find.mockResolvedValue([]);
+
+      mockWorkoutQueries(workoutRepo, {});
+      const utcResult = await service.getUserChallenges('user-1', 'UTC');
+
+      mockWorkoutQueries(workoutRepo, {});
+      const laResult = await service.getUserChallenges(
+        'user-1',
+        'America/Los_Angeles',
+      );
+
+      expect((utcResult.active[0] as { current_day: number }).current_day).toBe(
+        2,
+      );
+      expect((laResult.active[0] as { current_day: number }).current_day).toBe(
+        1,
+      );
+    });
+
+    // Reverse direction: a user ahead of UTC must see current_day roll over
+    // as soon as THEIR local midnight passes, without waiting for UTC's.
+    it('rolls current_day over as soon as local midnight passes, even before UTC midnight, for a user ahead of UTC', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-08-27T16:00:00.000Z'));
+      const joinedAt = new Date('2026-08-27T12:00:00.000Z');
+
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        relationJoinedAt('challenge-1', joinedAt),
+      ]);
+      challengeCycleDayRepo.find.mockResolvedValue([]);
+
+      mockWorkoutQueries(workoutRepo, {});
+      const utcResult = await service.getUserChallenges('user-1', 'UTC');
+
+      mockWorkoutQueries(workoutRepo, {});
+      const tokyoResult = await service.getUserChallenges(
+        'user-1',
+        'Asia/Tokyo',
+      );
+
+      expect((utcResult.active[0] as { current_day: number }).current_day).toBe(
+        1,
+      );
+      expect(
+        (tokyoResult.active[0] as { current_day: number }).current_day,
+      ).toBe(2);
+    });
+
+    it('falls back to UTC when no timezone is provided, matching the pre-fix behavior', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-08-28T04:00:00.000Z'));
+      const joinedAt = new Date('2026-08-27T12:00:00.000Z');
+
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        relationJoinedAt('challenge-1', joinedAt),
+      ]);
+      challengeCycleDayRepo.find.mockResolvedValue([]);
+      mockWorkoutQueries(workoutRepo, {});
+
+      const result = await service.getUserChallenges('user-1');
+
+      expect((result.active[0] as { current_day: number }).current_day).toBe(2);
+    });
+
+    it('never throws for an unrecognized timezone string, degrading to UTC', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-08-28T04:00:00.000Z'));
+      const joinedAt = new Date('2026-08-27T12:00:00.000Z');
+
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        relationJoinedAt('challenge-1', joinedAt),
+      ]);
+      challengeCycleDayRepo.find.mockResolvedValue([]);
+      mockWorkoutQueries(workoutRepo, {});
+
+      await expect(
+        service.getUserChallenges('user-1', 'Not/AZone'),
+      ).resolves.toMatchObject({
+        active: [expect.objectContaining({ current_day: 2 })],
+      });
+    });
+  });
 });

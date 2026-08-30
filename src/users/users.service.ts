@@ -16,6 +16,10 @@ import {
   PublicProfileResponseDto,
 } from './dto/profile-response.dto';
 import { FollowsService } from '../follows/follows.service';
+import {
+  getLocalDayBoundsUtc,
+  getLocalMidnightUtc,
+} from '../common/timezone.util';
 
 @Injectable()
 export class UsersService {
@@ -247,7 +251,10 @@ export class UsersService {
    * challenges looked "stuck" on the home screen and the progress bar on the
    * Challenges tab never moved.
    */
-  private async attachProgress(relations: ChallengeUserMap[]): Promise<
+  private async attachProgress(
+    relations: ChallengeUserMap[],
+    timezone: string = 'UTC',
+  ): Promise<
     Map<
       string,
       {
@@ -276,32 +283,11 @@ export class UsersService {
     if (activeRelations.length === 0) return result;
 
     const challengeIds = activeRelations.map((r) => r.challenge_id);
-    // UTC day boundaries (not server-local time) so "today" agrees with the
-    // UTC-based day/streak math below — a server whose local timezone isn't
-    // UTC would otherwise miss/misfire "completed today" near midnight.
-    const nowForRange = new Date();
-    const start = new Date(
-      Date.UTC(
-        nowForRange.getUTCFullYear(),
-        nowForRange.getUTCMonth(),
-        nowForRange.getUTCDate(),
-        0,
-        0,
-        0,
-        0,
-      ),
-    );
-    const end = new Date(
-      Date.UTC(
-        nowForRange.getUTCFullYear(),
-        nowForRange.getUTCMonth(),
-        nowForRange.getUTCDate(),
-        23,
-        59,
-        59,
-        999,
-      ),
-    );
+    // Day boundaries local to the caller's timezone (from the `X-Timezone`
+    // request header, defaulted to 'UTC' by the controller) so "today" here
+    // agrees with the day the user actually sees on their device, not
+    // necessarily the server's UTC calendar day.
+    const { start, end } = getLocalDayBoundsUtc(new Date(), timezone);
 
     const [
       todayWorkouts,
@@ -371,25 +357,21 @@ export class UsersService {
     }
 
     const msPerDay = 1000 * 60 * 60 * 24;
-    // UTC calendar dates (not local midnight) so the day count matches the UTC
-    // database and cannot drift by a day with the server's timezone. Mirrors
-    // ChallengesService.calculateCurrentDay.
-    const now = new Date();
-    const todayMidnightUtc = Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate(),
-    );
+    // Local calendar dates in the caller's timezone (not UTC midnight), so
+    // the day count matches what the user sees, not just the server's UTC
+    // clock. Mirrors ChallengesService.calculateCurrentDay.
+    const todayMidnightUtc = getLocalMidnightUtc(
+      new Date(),
+      timezone,
+    ).getTime();
 
     for (const relation of activeRelations) {
       const durationDays = relation.challenge?.duration_days ?? 0;
 
-      const joined = new Date(relation.joined_at!);
-      const joinedMidnightUtc = Date.UTC(
-        joined.getUTCFullYear(),
-        joined.getUTCMonth(),
-        joined.getUTCDate(),
-      );
+      const joinedMidnightUtc = getLocalMidnightUtc(
+        new Date(relation.joined_at!),
+        timezone,
+      ).getTime();
       const daysSinceStart = Math.floor(
         (todayMidnightUtc - joinedMidnightUtc) / msPerDay,
       );
@@ -501,7 +483,7 @@ export class UsersService {
     return { categoriesByChallenge, locationsByChallenge };
   }
 
-  async getUserChallenges(userId: string) {
+  async getUserChallenges(userId: string, timezone: string = 'UTC') {
     const challenges = await this.challengeUserRepo
       .createQueryBuilder('cu')
       .leftJoinAndSelect('cu.challenge', 'challenge')
@@ -509,7 +491,7 @@ export class UsersService {
       .orderBy('cu.joined_at', 'DESC')
       .getMany();
 
-    const progressByChallenge = await this.attachProgress(challenges);
+    const progressByChallenge = await this.attachProgress(challenges, timezone);
     const { categoriesByChallenge, locationsByChallenge } =
       await this.attachCategoriesAndLocations(
         challenges.map((c) => c.challenge_id),

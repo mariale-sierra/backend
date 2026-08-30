@@ -36,6 +36,10 @@ import { RoutineExerciseSetTarget } from '../routine/entities/routine-exercise-s
 import { getDominantActivityCategories } from './dominant-activity-category.util';
 import { buildTargetValueColumns } from '../metrics/target-value.util';
 import {
+  getLocalDayBoundsUtc,
+  getLocalMidnightUtc,
+} from '../common/timezone.util';
+import {
   activityTypeToCategoryName,
   categoryNameToActivityType,
 } from './activity-type.util';
@@ -948,7 +952,11 @@ export class ChallengesService {
       data: users,
     };
   }
-  async getProgress(userId: string, challengeId: string) {
+  async getProgress(
+    userId: string,
+    challengeId: string,
+    timezone: string = 'UTC',
+  ) {
     if (!challengeId) {
       // No challenge specified — fall back to the user's most recently joined
       // active challenge instead of letting TypeORM silently drop the filter
@@ -977,7 +985,7 @@ export class ChallengesService {
     if (!challenge) return null;
 
     // nueva lógica para calcular currentDay y currentDayInCycle
-    const currentDay = this.calculateCurrentDay(relation.joined_at!);
+    const currentDay = this.calculateCurrentDay(relation.joined_at!, timezone);
     if (!challenge.cycle_length_days) {
       throw new BadRequestException('Challenge cycle length not configured');
     }
@@ -986,12 +994,11 @@ export class ChallengesService {
       challenge.cycle_length_days,
     );
 
-    // completedToday
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-
-    const end = new Date();
-    end.setHours(23, 59, 59, 999);
+    // completedToday — bounded by the user's local calendar day, not UTC's,
+    // so a workout logged late local-time (but before UTC midnight) still
+    // counts, and one logged just after local midnight isn't misread as
+    // belonging to "yesterday" until UTC also rolls over.
+    const { start, end } = getLocalDayBoundsUtc(new Date(), timezone);
 
     const todayWorkout = await this.workoutRepo.findOne({
       where: {
@@ -1001,13 +1008,9 @@ export class ChallengesService {
       },
     });
 
-    // hours left
-    const now = new Date();
-    const endDay = new Date();
-    endDay.setHours(23, 59, 59, 999);
-
+    // hours left (until the user's local end-of-day, not UTC's)
     const hoursLeft = Math.ceil(
-      (endDay.getTime() - now.getTime()) / (1000 * 60 * 60),
+      (end.getTime() - Date.now()) / (1000 * 60 * 60),
     );
 
     return {
@@ -1020,7 +1023,11 @@ export class ChallengesService {
     };
   }
 
-  async getToday(challengeId: string, userId: string) {
+  async getToday(
+    challengeId: string,
+    userId: string,
+    timezone: string = 'UTC',
+  ) {
     const relation = await this.challengeUserMapRepo.findOne({
       where: {
         user_id: userId,
@@ -1040,7 +1047,7 @@ export class ChallengesService {
       throw new NotFoundException('Challenge not found');
     }
 
-    const currentDay = this.calculateCurrentDay(relation.joined_at!);
+    const currentDay = this.calculateCurrentDay(relation.joined_at!, timezone);
     if (!challenge.cycle_length_days) {
       throw new BadRequestException('Challenge cycle length not configured');
     }
@@ -1112,29 +1119,22 @@ export class ChallengesService {
    * Shared by `getProgress`/`getToday`/`getProgressSummary`, which previously
    * copy-pasted this exact calculation.
    *
-   * Computed on UTC calendar dates (not local midnight) so the result is
-   * deterministic regardless of the server's timezone and cannot drift by a
-   * day depending on where the process runs — the database is UTC. Guarded to
-   * never return < 1 (a user cannot have joined in the future).
+   * `timezone` is the caller's IANA timezone (from the `X-Timezone` request
+   * header, already validated/defaulted to 'UTC' by the controller) — "today"
+   * is computed against local midnight in that timezone, then converted to
+   * UTC for the actual date-diff math, so a user ahead of UTC who crosses
+   * their own local midnight sees the day roll over immediately instead of
+   * waiting for the server's UTC day to also roll over (and vice versa for a
+   * user behind UTC). Guarded to never return < 1 (a user cannot have joined
+   * in the future).
    */
-  private calculateCurrentDay(joinedAt: Date): number {
-    const joined = new Date(joinedAt);
-    const joinedMidnightUtc = Date.UTC(
-      joined.getUTCFullYear(),
-      joined.getUTCMonth(),
-      joined.getUTCDate(),
-    );
-
-    const now = new Date();
-    const todayMidnightUtc = Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate(),
-    );
+  private calculateCurrentDay(joinedAt: Date, timezone: string): number {
+    const joinedMidnightUtc = getLocalMidnightUtc(new Date(joinedAt), timezone);
+    const todayMidnightUtc = getLocalMidnightUtc(new Date(), timezone);
 
     const msPerDay = 1000 * 60 * 60 * 24;
     const daysSinceStart = Math.floor(
-      (todayMidnightUtc - joinedMidnightUtc) / msPerDay,
+      (todayMidnightUtc.getTime() - joinedMidnightUtc.getTime()) / msPerDay,
     );
 
     return Math.max(daysSinceStart + 1, 1);
@@ -1157,7 +1157,11 @@ export class ChallengesService {
       .getOne();
   }
 
-  async getProgressSummary(challengeId: string, userId: string) {
+  async getProgressSummary(
+    challengeId: string,
+    userId: string,
+    timezone: string = 'UTC',
+  ) {
     // validar relación usuario-challenge
     const relation = await this.challengeUserMapRepo.findOne({
       where: {
@@ -1181,7 +1185,7 @@ export class ChallengesService {
     }
 
     // calcular currentDay
-    const currentDay = this.calculateCurrentDay(relation.joined_at!);
+    const currentDay = this.calculateCurrentDay(relation.joined_at!, timezone);
 
     // contar workouts completados
     const completedDays = await this.workoutRepo.count({
