@@ -136,6 +136,58 @@ describe('ExercisesService', () => {
     });
   });
 
+  describe('countMatchingExercises', () => {
+    function queryBuilderReturning(count: number) {
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(count),
+      };
+      exerciseRepo.createQueryBuilder.mockReturnValue(qb);
+      return qb;
+    }
+
+    it('should count only active exercises when no filters are given', async () => {
+      const qb = queryBuilderReturning(13);
+
+      const result = await service.countMatchingExercises([], []);
+
+      expect(result).toBe(13);
+      expect(qb.where).toHaveBeenCalledWith('exercise.is_active = true');
+      expect(qb.andWhere).not.toHaveBeenCalled();
+    });
+
+    it('should add an EXISTS filter for categories, lower-casing the given names', async () => {
+      const qb = queryBuilderReturning(4);
+
+      await service.countMatchingExercises(['Cardio Intense'], []);
+
+      const [sql, params] = qb.andWhere.mock.calls[0] as [string, unknown];
+      expect(sql).toContain('exercise_category_map');
+      expect(sql).toContain('LOWER(ec.name) IN (:...categoryNames)');
+      expect(params).toEqual({ categoryNames: ['cardio intense'] });
+    });
+
+    it('should add an EXISTS filter for locations, lower-casing the given names', async () => {
+      const qb = queryBuilderReturning(2);
+
+      await service.countMatchingExercises([], ['Gym', 'Outdoor']);
+
+      const [sql, params] = qb.andWhere.mock.calls[0] as [string, unknown];
+      expect(sql).toContain('exercise_location_map');
+      expect(sql).toContain('LOWER(el.name) IN (:...locationNames)');
+      expect(params).toEqual({ locationNames: ['gym', 'outdoor'] });
+    });
+
+    it('should apply both filters together when categories and locations are both given', async () => {
+      const qb = queryBuilderReturning(1);
+
+      await service.countMatchingExercises(['Strength'], ['Gym']);
+
+      expect(qb.andWhere).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe('updateRelations', () => {
     it('should throw NotFoundException for an unknown exercise', async () => {
       exerciseRepo.findOne.mockResolvedValue(null);

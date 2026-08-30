@@ -58,4 +58,40 @@ export class MetricsController {
       user.sub,
     );
   }
+
+  @Post('workout-log-exercise-sets/:id')
+  @ApiBearerAuth()
+  @ApiParam({
+    name: 'id',
+    description:
+      'ID del set (workout_log_exercise_set) del log de entrenamiento',
+  })
+  @ApiOperation({
+    summary: 'Agregar métrica a un set específico',
+    description:
+      'Registra el valor real de una métrica para un set puntual de un ejercicio registrado (a diferencia de POST /metrics/workout-log-exercises/:id, que no distingue entre sets). Si el set ya tiene un target para esa métrica (copiado de la rutina al crear el workout), lo sobrescribe con el valor real en vez de rechazarlo como duplicado.',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Métrica del set agregada exitosamente',
+  })
+  @ApiResponse({ status: 400, description: 'Datos inválidos' })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({
+    status: 403,
+    description: 'El log de entrenamiento no te pertenece',
+  })
+  @ApiResponse({ status: 404, description: 'Set no encontrado' })
+  addSetMetric(
+    @Param('id') id: string,
+    @Body() body: AddMetricDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.service.addSetMetric(
+      Number(id),
+      body.metricCode,
+      body.value,
+      user.sub,
+    );
+  }
 }

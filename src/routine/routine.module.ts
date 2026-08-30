@@ -13,6 +13,7 @@ import { AuthModule } from '../auth/auth.module';
 import { RoutineExerciseSet } from './entities/routine-exercise-set.entity';
 import { RoutineExerciseTarget } from './entities/routine-exercise-target.entity';
 import { RoutineExerciseSetTarget } from './entities/routine-exercise-set-target.entity';
+import { MetricType } from '../metrics/entities/metric-type.entity';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { RoutineExerciseSetTarget } from './entities/routine-exercise-set-target
       RoutineExerciseSetTarget,
       Exercise,
       Challenge,
+      MetricType,
     ]),
     ChallengesModule,
     AuthModule,

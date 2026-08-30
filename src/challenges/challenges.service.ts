@@ -34,6 +34,7 @@ import { RoutineExerciseSet } from '../routine/entities/routine-exercise-set.ent
 import { RoutineExerciseTarget } from '../routine/entities/routine-exercise-target.entity';
 import { RoutineExerciseSetTarget } from '../routine/entities/routine-exercise-set-target.entity';
 import { getDominantActivityCategories } from './dominant-activity-category.util';
+import { buildTargetValueColumns } from '../metrics/target-value.util';
 import {
   activityTypeToCategoryName,
   categoryNameToActivityType,
@@ -398,29 +399,6 @@ export class ChallengesService {
     }
   }
 
-  private buildTargetColumns(
-    metricType: MetricType,
-    rawValue: number | { minutes: number; seconds: number },
-  ) {
-    if (typeof rawValue === 'object' && rawValue !== null) {
-      const seconds = (rawValue.minutes ?? 0) * 60 + (rawValue.seconds ?? 0);
-      return { target_value_seconds: seconds };
-    }
-
-    switch (metricType.valueType) {
-      case 'int':
-        return { target_value_int: Math.round(rawValue) };
-      case 'decimal':
-        return { target_value_decimal: rawValue };
-      case 'seconds':
-        return { target_value_seconds: Math.round(rawValue) };
-      case 'boolean':
-        return { target_value_boolean: Boolean(rawValue) };
-      default:
-        return { target_value_text: String(rawValue) };
-    }
-  }
-
   private async saveExerciseMetricsTargets(
     manager: EntityManager,
     routineExerciseId: string,
@@ -445,7 +423,7 @@ export class ChallengesService {
             setTargetRepo.create({
               routine_exercise_set_id: savedSet.id,
               metric_type_id: repsMetricType.id,
-              ...this.buildTargetColumns(repsMetricType, set.reps),
+              ...buildTargetValueColumns(repsMetricType, set.reps),
             }),
           );
         }
@@ -470,7 +448,7 @@ export class ChallengesService {
         targetRepo.create({
           routine_exercise_id: routineExerciseId,
           metric_type_id: metricType.id,
-          ...this.buildTargetColumns(metricType, value),
+          ...buildTargetValueColumns(metricType, value),
         }),
       );
     }

@@ -5,6 +5,7 @@ import {
   Param,
   ParseIntPipe,
   Post,
+  Query,
 } from '@nestjs/common';
 import { ExercisesService } from './exercises.service';
 import {
@@ -16,6 +17,7 @@ import {
 } from '@nestjs/swagger';
 import { UpdateExerciseRelationsDto } from './dto/update-exercise-relations.dto';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
+import { CountExercisesQueryDto } from './dto/count-exercises-query.dto';
 import { Public } from '../auth/decorators/public.decorator';
 
 @ApiTags('Exercises')
@@ -51,11 +53,28 @@ export class ExercisesController {
   @Get('body-parts')
   @ApiOperation({
     summary: 'Obtener catálogo de partes del cuerpo',
-    description: 'Lista todas las partes del cuerpo activas (jerarquía de músculos)',
+    description:
+      'Lista todas las partes del cuerpo activas (jerarquía de músculos)',
   })
   @ApiResponse({ status: 200, description: 'Lista de partes del cuerpo' })
   findAllBodyParts() {
     return this.exercisesService.findAllBodyParts();
+  }
+
+  @Public()
+  @Get('count')
+  @ApiOperation({
+    summary: 'Contar ejercicios que coinciden con filtros',
+    description:
+      'Cuenta los ejercicios activos que coinciden con las categorías y/o ubicaciones dadas (por nombre, ver GET /exercises/categories). Sin filtros, cuenta todos los ejercicios activos.',
+  })
+  @ApiResponse({ status: 200, description: 'Conteo de ejercicios' })
+  async countMatching(@Query() query: CountExercisesQueryDto) {
+    const count = await this.exercisesService.countMatchingExercises(
+      query.categories ?? [],
+      query.locations ?? [],
+    );
+    return { count };
   }
 
   @Public()

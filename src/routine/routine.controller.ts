@@ -64,12 +64,13 @@ export class RoutineController {
   @ApiOperation({
     summary: 'Añadir ejercicio a rutina',
     description:
-      'Agrega un ejercicio a una rutina existente. Si la rutina tiene dueño registrado, solo el dueño puede modificarla.',
+      'Agrega un ejercicio a una rutina existente, junto con sus sets (reps, descanso) y targets por set/por ejercicio (metric_type_id + valor). Si la rutina tiene dueño registrado, solo el dueño puede modificarla.',
   })
   @ApiResponse({ status: 200, description: 'Ejercicio añadido exitosamente' })
+  @ApiResponse({ status: 400, description: 'Datos inválidos' })
   @ApiResponse({ status: 401, description: 'No autorizado' })
   @ApiResponse({ status: 403, description: 'No eres el dueño de esta rutina' })
-  @ApiResponse({ status: 404, description: 'Rutina no encontrada' })
+  @ApiResponse({ status: 404, description: 'Rutina o ejercicio no encontrado' })
   addExercise(
     @Param('id') routineId: string,
     @Body() body: AddRoutineExerciseDto,
@@ -77,7 +78,7 @@ export class RoutineController {
   ) {
     return this.routineService.addExerciseToRoutine(
       Number(routineId),
-      body.exerciseId,
+      body,
       user.sub,
     );
   }

@@ -6,6 +6,8 @@ import { MetricType } from './entities/metric-type.entity';
 import { WorkoutLogExercise } from '../workout-log/entities/workout-log-exercise.entity';
 import { WorkoutLogExerciseMetric } from './entities/workout-log-exercise-metric.entity';
 import { ExerciseMetric } from '../exercises/entities/exercise-metric.entity';
+import { WorkoutLogExerciseSet } from '../workout-log/entities/workout-log-exercise-set.entity';
+import { WorkoutLogExerciseSetTarget } from '../workout-log/entities/workout-log-exercise-set-target.entity';
 
 @Module({
   imports: [
@@ -14,6 +16,8 @@ import { ExerciseMetric } from '../exercises/entities/exercise-metric.entity';
       WorkoutLogExercise,
       WorkoutLogExerciseMetric,
       ExerciseMetric,
+      WorkoutLogExerciseSet,
+      WorkoutLogExerciseSetTarget,
     ]),
   ],
   controllers: [MetricsController],

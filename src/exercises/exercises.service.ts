@@ -99,6 +99,51 @@ export class ExercisesService {
     return this.categoryRepo.find({ order: { name: 'ASC' } });
   }
 
+  /**
+   * How many active exercises match the given category/location names — the
+   * Challenge Creator's Activity & Location step wants a live count of what
+   * the user's just-picked filters would actually match, before they commit
+   * to the challenge. Matches by name (case-insensitive), same lookup
+   * convention ChallengesService.findOrCreateCategoryId/findOrCreateLocationId
+   * already use elsewhere for these same two catalogs — the frontend already
+   * sends category/location display names for challenge creation, not codes.
+   * No filters at all just counts every active exercise.
+   */
+  async countMatchingExercises(
+    categoryNames: string[],
+    locationNames: string[],
+  ): Promise<number> {
+    const qb = this.exerciseRepo
+      .createQueryBuilder('exercise')
+      .where('exercise.is_active = true');
+
+    if (categoryNames.length > 0) {
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1 FROM havit.exercise_category_map ecm
+          JOIN havit.exercise_categories ec ON ec.id = ecm.category_id
+          WHERE ecm.exercise_id = exercise.id
+            AND LOWER(ec.name) IN (:...categoryNames)
+        )`,
+        { categoryNames: categoryNames.map((name) => name.toLowerCase()) },
+      );
+    }
+
+    if (locationNames.length > 0) {
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1 FROM havit.exercise_location_map elm
+          JOIN havit.exercise_locations el ON el.id = elm.location_id
+          WHERE elm.exercise_id = exercise.id
+            AND LOWER(el.name) IN (:...locationNames)
+        )`,
+        { locationNames: locationNames.map((name) => name.toLowerCase()) },
+      );
+    }
+
+    return qb.getCount();
+  }
+
   async findFullById(id: number) {
     const exercise = await this.exerciseRepo
       .createQueryBuilder('exercise')
