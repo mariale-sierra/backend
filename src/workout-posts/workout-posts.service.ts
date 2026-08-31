@@ -8,6 +8,7 @@ import {
 import { ModerationService } from '../openai/moderation.service';
 import { User } from '../users/entities/user.entity';
 import { DecodedCursor, encodeCursor } from './pagination.util';
+import { formatPrimaryMetric, MetricValueRow } from './metric-display.util';
 import { FollowsService } from '../follows/follows.service';
 
 /** Shape consumed by the frontend (types/challenge.ts ChallengePhoto). */
@@ -618,7 +619,16 @@ export class WorkoutPostsService {
     return { posts, nextCursor };
   }
 
-  /** Exercise summary (name + set count) per workout log, for the photo card. */
+  /**
+   * Exercise summary (name + actual logged value) per workout log, for the
+   * photo card. Used to show "12" reps / "20 min" walked etc. instead of just
+   * a set count — the real values a user typed in while logging live in two
+   * places, matching MetricsService's two write paths:
+   *  - workout_log_exercise_set_targets: per-set actual values (addSetMetric(),
+   *    an upsert that overwrites the routine-copied planned target).
+   *  - workout_log_exercise_metrics: exercise-level actual values (addMetric()),
+   *    for exercises with no per-set structure at all (e.g. a plain cardio log).
+   */
   private async metricsByWorkoutLog(
     workoutLogIds: Array<number | string>,
   ): Promise<Map<string, Array<{ label: string; value: string }>>> {
@@ -626,32 +636,120 @@ export class WorkoutPostsService {
     const ids = [...new Set(workoutLogIds.map((id) => Number(id)))];
     if (ids.length === 0) return map;
 
-    const rows: Array<{
+    interface BaseRow extends MetricValueRow {
       workout_log_id: number | string;
+      wle_id: number | string;
+      order_index: number | string;
       exercise_name: string;
-      set_count: number | string;
-    }> = await this.repo.manager.query(
-      `SELECT wle.workout_log_id, e.name AS exercise_name,
-              COUNT(wles.id) AS set_count
+      total_sets: number | string | null;
+    }
+    interface ExerciseMetricRow extends MetricValueRow {
+      workout_log_id: number | string;
+      wle_id: number | string;
+    }
+
+    // One row per (exercise, target on its FIRST set) — total_sets covers
+    // every exercise with per-set structure, even one whose first set has no
+    // metric logged yet (target_value_* stays null via the LEFT JOINs).
+    const baseRowsQuery = this.repo.manager.query<BaseRow[]>(
+      `SELECT wle.workout_log_id, wle.id AS wle_id, wle.order_index, e.name AS exercise_name,
+              sc.total_sets,
+              mt.code AS metric_code, mt.default_unit,
+              t.target_value_int, t.target_value_decimal, t.target_value_seconds
        FROM havit.workout_log_exercises wle
        JOIN havit.exercises e ON e.id = wle.exercise_id
-       LEFT JOIN havit.workout_log_exercise_sets wles
-              ON wles.workout_log_exercise_id = wle.id
+       LEFT JOIN (
+         SELECT workout_log_exercise_id, COUNT(*) AS total_sets,
+                MIN(set_number) AS first_set_number
+         FROM havit.workout_log_exercise_sets
+         GROUP BY workout_log_exercise_id
+       ) sc ON sc.workout_log_exercise_id = wle.id
+       LEFT JOIN havit.workout_log_exercise_sets first_set
+              ON first_set.workout_log_exercise_id = wle.id
+             AND first_set.set_number = sc.first_set_number
+       LEFT JOIN havit.workout_log_exercise_set_targets t
+              ON t.workout_log_exercise_set_id = first_set.id
+       LEFT JOIN havit.metric_types mt ON mt.id = t.metric_type_id
        WHERE wle.workout_log_id = ANY($1)
-       GROUP BY wle.workout_log_id, wle.order_index, e.name
        ORDER BY wle.workout_log_id, wle.order_index`,
       [ids],
     );
 
-    for (const row of rows) {
-      const key = String(row.workout_log_id);
-      const list = map.get(key) ?? [];
-      const sets = Number(row.set_count);
-      list.push({
-        label: row.exercise_name,
-        value: sets > 0 ? `${sets} set${sets === 1 ? '' : 's'}` : 'Logged',
-      });
-      map.set(key, list);
+    // Exercise-level actual values (no per-set structure at all) — aliased
+    // to the same target_value_* column names as baseRowsQuery so both row
+    // shapes can share extractMetricValue() below.
+    const exerciseMetricRowsQuery = this.repo.manager.query<
+      ExerciseMetricRow[]
+    >(
+      `SELECT wle.workout_log_id, wle.id AS wle_id,
+              mt.code AS metric_code, mt.default_unit,
+              m.value_int AS target_value_int,
+              m.value_decimal AS target_value_decimal,
+              m.value_seconds AS target_value_seconds
+       FROM havit.workout_log_exercises wle
+       JOIN havit.workout_log_exercise_metrics m
+              ON m.workout_log_exercise_id = wle.id
+       JOIN havit.metric_types mt ON mt.id = m.metric_type_id
+       WHERE wle.workout_log_id = ANY($1)`,
+      [ids],
+    );
+
+    const [baseRows, exerciseMetricRows] = await Promise.all([
+      baseRowsQuery,
+      exerciseMetricRowsQuery,
+    ]);
+
+    interface ExerciseGroup {
+      workoutLogId: string;
+      exerciseName: string;
+      totalSets: number;
+      setTargets: MetricValueRow[];
+    }
+    // Every exercise in the requested workout logs appears here exactly
+    // once (LEFT JOINs mean a set-less or metric-less exercise still gets a
+    // row), in the SQL's own (workout_log_id, order_index) order — no JS
+    // re-sort needed.
+    const exerciseGroups = new Map<string, ExerciseGroup>();
+    for (const row of baseRows) {
+      const key = String(row.wle_id);
+      let group = exerciseGroups.get(key);
+      if (!group) {
+        group = {
+          workoutLogId: String(row.workout_log_id),
+          exerciseName: row.exercise_name,
+          totalSets: Number(row.total_sets ?? 0),
+          setTargets: [],
+        };
+        exerciseGroups.set(key, group);
+      }
+      if (row.metric_code) group.setTargets.push(row);
+    }
+
+    const exerciseLevelMetricsByWle = new Map<string, MetricValueRow[]>();
+    for (const row of exerciseMetricRows) {
+      if (!row.metric_code) continue;
+      const key = String(row.wle_id);
+      const list = exerciseLevelMetricsByWle.get(key) ?? [];
+      list.push(row);
+      exerciseLevelMetricsByWle.set(key, list);
+    }
+
+    for (const [wleId, group] of exerciseGroups) {
+      const list = map.get(group.workoutLogId) ?? [];
+
+      let value: string;
+      if (group.setTargets.length > 0) {
+        const formatted = formatPrimaryMetric(group.setTargets);
+        value = formatted ? `${group.totalSets} × ${formatted}` : 'Logged';
+      } else {
+        const formatted = formatPrimaryMetric(
+          exerciseLevelMetricsByWle.get(wleId) ?? [],
+        );
+        value = formatted ?? 'Logged';
+      }
+
+      list.push({ label: group.exerciseName, value });
+      map.set(group.workoutLogId, list);
     }
 
     return map;

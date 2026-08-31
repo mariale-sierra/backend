@@ -479,7 +479,8 @@ describe('WorkoutPostsService', () => {
         is_active: true,
       });
       postRepo.manager.query.mockResolvedValueOnce([photoRow()]); // main query
-      postRepo.manager.query.mockResolvedValueOnce([]); // metricsByWorkoutLog batch query
+      postRepo.manager.query.mockResolvedValueOnce([]); // metricsByWorkoutLog: base rows
+      postRepo.manager.query.mockResolvedValueOnce([]); // metricsByWorkoutLog: exercise-level metric rows
 
       const { photos } = await service.getUserPosts(OTHER_USER_ID, VIEWER_ID, {
         limit: 20,
@@ -495,6 +496,117 @@ describe('WorkoutPostsService', () => {
           description: 'day 1',
         }),
       );
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // metricsByWorkoutLog (private, exercised via getChallengePhotos) — the
+  // photo card's per-exercise metric line ("12 reps" / "20m" / "Logged").
+  // ---------------------------------------------------------------------
+  describe('metricsByWorkoutLog (photo card metric display)', () => {
+    // Matches metricsByWorkoutLog's baseRowsQuery column shape.
+    function baseRow(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        workout_log_id: 10,
+        wle_id: 100,
+        order_index: 0,
+        exercise_name: 'Bench Press',
+        total_sets: 3,
+        metric_code: null,
+        default_unit: null,
+        target_value_int: null,
+        target_value_decimal: null,
+        target_value_seconds: null,
+        ...overrides,
+      };
+    }
+
+    // Matches metricsByWorkoutLog's exerciseMetricRowsQuery column shape.
+    function exerciseMetricRow(
+      overrides: Partial<Record<string, unknown>> = {},
+    ) {
+      return {
+        workout_log_id: 10,
+        wle_id: 200,
+        metric_code: null,
+        default_unit: null,
+        target_value_int: null,
+        target_value_decimal: null,
+        target_value_seconds: null,
+        ...overrides,
+      };
+    }
+
+    it('formats a real per-set reps value as "N × value" using the first set', async () => {
+      postRepo.manager.query.mockResolvedValueOnce([photoRow()]); // main query
+      postRepo.manager.query.mockResolvedValueOnce([
+        baseRow({ metric_code: 'reps', target_value_int: 12 }),
+      ]);
+      postRepo.manager.query.mockResolvedValueOnce([]); // no exercise-level metrics
+
+      const photos = await service.getChallengePhotos('challenge-1', VIEWER_ID);
+
+      expect(photos[0].metrics).toEqual([
+        { label: 'Bench Press', value: '3 × 12' },
+      ]);
+    });
+
+    it('formats an exercise-level-only metric (the Brisk Walk shape: no sets) directly, with no "N ×" prefix', async () => {
+      postRepo.manager.query.mockResolvedValueOnce([photoRow()]); // main query
+      postRepo.manager.query.mockResolvedValueOnce([
+        // No sets at all for this exercise — total_sets/metric_code null.
+        baseRow({
+          wle_id: 200,
+          exercise_name: 'Brisk Walk',
+          total_sets: null,
+          metric_code: null,
+        }),
+      ]);
+      postRepo.manager.query.mockResolvedValueOnce([
+        exerciseMetricRow({
+          wle_id: 200,
+          metric_code: 'time',
+          target_value_seconds: 1200,
+        }),
+      ]);
+
+      const photos = await service.getChallengePhotos('challenge-1', VIEWER_ID);
+
+      expect(photos[0].metrics).toEqual([
+        { label: 'Brisk Walk', value: '20m' },
+      ]);
+    });
+
+    it('falls back to the generic "Logged" label when genuinely neither a per-set nor an exercise-level value exists', async () => {
+      postRepo.manager.query.mockResolvedValueOnce([photoRow()]); // main query
+      postRepo.manager.query.mockResolvedValueOnce([
+        baseRow({ metric_code: null }),
+      ]);
+      postRepo.manager.query.mockResolvedValueOnce([]);
+
+      const photos = await service.getChallengePhotos('challenge-1', VIEWER_ID);
+
+      expect(photos[0].metrics).toEqual([
+        { label: 'Bench Press', value: 'Logged' },
+      ]);
+    });
+
+    it('reads the real default_unit for a weight value instead of hardcoding a unit', async () => {
+      postRepo.manager.query.mockResolvedValueOnce([photoRow()]); // main query
+      postRepo.manager.query.mockResolvedValueOnce([
+        baseRow({
+          metric_code: 'weight',
+          target_value_decimal: 45,
+          default_unit: 'kg',
+        }),
+      ]);
+      postRepo.manager.query.mockResolvedValueOnce([]);
+
+      const photos = await service.getChallengePhotos('challenge-1', VIEWER_ID);
+
+      expect(photos[0].metrics).toEqual([
+        { label: 'Bench Press', value: '3 × 45 kg' },
+      ]);
     });
   });
 });
