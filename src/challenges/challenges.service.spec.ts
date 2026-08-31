@@ -1129,4 +1129,65 @@ describe('ChallengesService', () => {
       expect(result!.hoursLeftToday).toBe(3);
     });
   });
+
+  describe('getToday() cycle position uses the CAPPED currentDay (regression: two services used to disagree)', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    // Real bug, reproduced against the live "mind body challenge"
+    // (duration_days=28, cycle_length_days=4, day4=workout): once a user has
+    // been enrolled longer than the challenge's own duration,
+    // calculateCurrentDay() used to feed the UNCAPPED elapsed-days count
+    // into the cycle-position formula here, while UsersService.attachProgress()
+    // capped it first — so the Log Metrics picker (capped, sees a workout
+    // day) and this very endpoint (uncapped, saw a rest day) disagreed for
+    // the same instant. Both now go through the same shared
+    // getCycleDayInfo(), which always caps before computing the position.
+    it('computes the cycle position from the capped day, not the raw elapsed-days count', async () => {
+      const joinedAt = new Date('2026-08-01T00:00:00.000Z');
+      jest.useFakeTimers();
+      // 29 full days after joining -> raw elapsed day 30, 2 days past the
+      // 28-day duration.
+      jest.setSystemTime(new Date('2026-08-30T00:00:00.000Z'));
+
+      challengeUserMapRepo.findOne.mockResolvedValue({
+        user_id: OWNER_ID,
+        challenge_id: CHALLENGE_ID,
+        status: 'active',
+        joined_at: joinedAt,
+      });
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        duration_days: 28,
+        cycle_length_days: 4,
+      });
+
+      const andWhere = jest.fn().mockReturnThis();
+      challengeCycleDaysRepo.createQueryBuilder.mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere,
+        getOne: jest.fn().mockResolvedValue({
+          id: 'cycle-day-4',
+          day_in_cycle: 4,
+          day_type: 'workout',
+          routine_id: 'routine-1',
+          routine: null,
+        }),
+      });
+
+      const result = await service.getToday(CHALLENGE_ID, OWNER_ID, 'UTC');
+
+      expect(result.currentDay).toBe(28); // capped, not the raw 30
+      // ((28-1) % 4) + 1 = 4 — NOT ((30-1) % 4) + 1 = 2, the rest day the
+      // uncapped bug produced for this same instant.
+      expect(result.currentDayInCycle).toBe(4);
+      expect(result.day_type).toBe('workout');
+      expect(andWhere).toHaveBeenCalledWith(
+        'cycleDay.day_in_cycle = :dayInCycle',
+        { dayInCycle: 4 },
+      );
+    });
+  });
 });

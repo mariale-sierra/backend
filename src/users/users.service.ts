@@ -16,10 +16,8 @@ import {
   PublicProfileResponseDto,
 } from './dto/profile-response.dto';
 import { FollowsService } from '../follows/follows.service';
-import {
-  getLocalDayBoundsUtc,
-  getLocalMidnightUtc,
-} from '../common/timezone.util';
+import { getLocalDayBoundsUtc } from '../common/timezone.util';
+import { getCycleDayInfo } from '../common/cycle-day.util';
 
 @Injectable()
 export class UsersService {
@@ -356,26 +354,22 @@ export class UsersService {
       );
     }
 
-    const msPerDay = 1000 * 60 * 60 * 24;
-    // Local calendar dates in the caller's timezone (not UTC midnight), so
-    // the day count matches what the user sees, not just the server's UTC
-    // clock. Mirrors ChallengesService.calculateCurrentDay.
-    const todayMidnightUtc = getLocalMidnightUtc(
-      new Date(),
-      timezone,
-    ).getTime();
-
     for (const relation of activeRelations) {
       const durationDays = relation.challenge?.duration_days ?? 0;
 
-      const joinedMidnightUtc = getLocalMidnightUtc(
-        new Date(relation.joined_at!),
-        timezone,
-      ).getTime();
-      const daysSinceStart = Math.floor(
-        (todayMidnightUtc - joinedMidnightUtc) / msPerDay,
-      );
-      const currentDay = Math.max(daysSinceStart + 1, 1);
+      // Shared with ChallengesService.getToday()/getProgress()/
+      // getProgressSummary() — previously an inline duplicate of that same
+      // "elapsed days, capped at duration, mapped onto a cycle position"
+      // math, which is exactly how ChallengesService's own uncapped copy
+      // could disagree with this one on a challenge running longer than its
+      // duration.
+      const { currentDay: cappedCurrentDay, currentDayInCycle } =
+        getCycleDayInfo(
+          relation.joined_at!,
+          timezone,
+          durationDays,
+          relation.challenge?.cycle_length_days,
+        );
 
       const completedDays =
         completedByChallenge.get(relation.challenge_id) ?? 0;
@@ -391,17 +385,6 @@ export class UsersService {
         new Set<string>();
       const consecutiveDays = this.calculateConsecutiveDays(completedDaySet);
 
-      const cappedCurrentDay = durationDays
-        ? Math.min(currentDay, durationDays)
-        : currentDay;
-
-      // Same cycle-position formula as ChallengesService.calculateCurrentDayInCycle
-      // — duplicated inline rather than imported, same precedent as
-      // calculateCurrentDay above, to avoid a cross-service dependency.
-      const cycleLengthDays = relation.challenge?.cycle_length_days;
-      const currentDayInCycle = cycleLengthDays
-        ? ((cappedCurrentDay - 1) % cycleLengthDays) + 1
-        : null;
       const dayType = currentDayInCycle
         ? dayTypeByChallengeAndCyclePosition.get(
             `${relation.challenge_id}:${currentDayInCycle}`,

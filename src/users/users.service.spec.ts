@@ -842,5 +842,51 @@ describe('UsersService', () => {
         active: [expect.objectContaining({ current_day: 2 })],
       });
     });
+
+    // Real bug, reproduced against the live "mind body challenge"
+    // (duration_days=28, cycle_length_days=4, day4=workout): attachProgress()
+    // always capped current_day at duration_days before computing the cycle
+    // position, but ChallengesService.calculateCurrentDay() didn't — so once
+    // a user had been enrolled longer than the challenge's duration, this
+    // endpoint (the Log Metrics picker's data source) and GET
+    // /routine/today/:challengeId disagreed on which cycle day it was for
+    // the same instant. Both now share getCycleDayInfo() (src/common/
+    // cycle-day.util.ts); challenges.service.spec.ts's matching test proves
+    // the other side of this same scenario stays consistent.
+    it('caps current_day at duration_days before computing is_rest_day, matching ChallengesService.getToday()', async () => {
+      jest.useFakeTimers();
+      // 29 full days after joining -> raw elapsed day 30, 2 days past the
+      // 28-day duration.
+      jest.setSystemTime(new Date('2026-08-30T00:00:00.000Z'));
+      const joinedAt = new Date('2026-08-01T00:00:00.000Z');
+
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        {
+          challenge_id: 'challenge-1',
+          user_id: 'user-1',
+          status: 'active',
+          joined_at: joinedAt,
+          challenge: {
+            id: 'challenge-1',
+            duration_days: 28,
+            cycle_length_days: 4,
+          },
+        },
+      ]);
+      // Cycle position 4 = workout — ((28-1) % 4) + 1 = 4, the capped
+      // position. The uncapped bug would have landed on position 2 instead.
+      challengeCycleDayRepo.find.mockResolvedValue([
+        { challenge_id: 'challenge-1', day_in_cycle: 4, day_type: 'workout' },
+        { challenge_id: 'challenge-1', day_in_cycle: 2, day_type: 'rest' },
+      ]);
+      mockWorkoutQueries(workoutRepo, {});
+
+      const result = await service.getUserChallenges('user-1');
+
+      expect(result.active[0]).toMatchObject({
+        current_day: 28,
+        is_rest_day: false,
+      });
+    });
   });
 });
