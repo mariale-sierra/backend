@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Req } from '@nestjs/common';
 import { RoutineService } from './routine.service';
 import {
   ApiTags,
@@ -11,6 +11,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { CreateRoutineDto } from './dto/create-routine.dto';
 import { AddRoutineExerciseDto } from './dto/add-routine-exercise.dto';
+import { resolveRequestTimezone } from '../common/timezone.util';
 
 @ApiTags('Routine')
 @Controller('routine')
@@ -88,7 +89,12 @@ export class RoutineController {
   getTodayRoutine(
     @Param('challengeId') challengeId: string,
     @CurrentUser() user: AuthenticatedUser,
+    @Req() req,
   ) {
-    return this.routineService.getTodayRoutine(challengeId, user.sub);
+    return this.routineService.getTodayRoutine(
+      challengeId,
+      user.sub,
+      resolveRequestTimezone(req),
+    );
   }
 }

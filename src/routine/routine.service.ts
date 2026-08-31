@@ -203,8 +203,16 @@ export class RoutineService {
     );
   }
 
-  async getTodayRoutine(challengeId: string, userId: string) {
-    const today = await this.challengeService.getToday(challengeId, userId);
+  async getTodayRoutine(
+    challengeId: string,
+    userId: string,
+    timezone: string = 'UTC',
+  ) {
+    const today = await this.challengeService.getToday(
+      challengeId,
+      userId,
+      timezone,
+    );
 
     if (!today.hasWorkout) {
       return {

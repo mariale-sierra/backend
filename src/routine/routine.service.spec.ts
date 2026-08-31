@@ -320,3 +320,62 @@ describe('RoutineService.addExerciseToRoutine', () => {
     ).rejects.toThrow(BadRequestException);
   });
 });
+
+describe('RoutineService.getTodayRoutine', () => {
+  let service: RoutineService;
+  let challengeService: { getToday: jest.Mock };
+
+  const CHALLENGE_ID = 'challenge-1';
+  const USER_ID = 'user-1';
+
+  beforeEach(async () => {
+    challengeService = { getToday: jest.fn() };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        RoutineService,
+        { provide: ChallengesService, useValue: challengeService },
+        { provide: DataSource, useValue: { transaction: jest.fn() } },
+        { provide: getRepositoryToken(Routine), useValue: createMockRepo() },
+        {
+          provide: getRepositoryToken(RoutineExercise),
+          useValue: createMockRepo(),
+        },
+        { provide: getRepositoryToken(Exercise), useValue: createMockRepo() },
+        { provide: getRepositoryToken(Challenge), useValue: createMockRepo() },
+        { provide: getRepositoryToken(MetricType), useValue: createMockRepo() },
+      ],
+    }).compile();
+
+    service = module.get(RoutineService);
+  });
+
+  // Real bug: this was the one remaining call site still silently defaulting
+  // to UTC — ChallengesService.getToday()'s own `timezone = 'UTC'` fallback
+  // masked the missing argument instead of surfacing it, so the metrics-entry
+  // screen kept using UTC "today" even after every other current-day call
+  // site had already been fixed to use the caller's real timezone.
+  it('passes the timezone through to challengeService.getToday()', async () => {
+    challengeService.getToday.mockResolvedValue({ hasWorkout: false });
+
+    await service.getTodayRoutine(CHALLENGE_ID, USER_ID, 'America/Los_Angeles');
+
+    expect(challengeService.getToday).toHaveBeenCalledWith(
+      CHALLENGE_ID,
+      USER_ID,
+      'America/Los_Angeles',
+    );
+  });
+
+  it('defaults to UTC when no timezone is given, matching the pre-fix behavior', async () => {
+    challengeService.getToday.mockResolvedValue({ hasWorkout: false });
+
+    await service.getTodayRoutine(CHALLENGE_ID, USER_ID);
+
+    expect(challengeService.getToday).toHaveBeenCalledWith(
+      CHALLENGE_ID,
+      USER_ID,
+      'UTC',
+    );
+  });
+});
