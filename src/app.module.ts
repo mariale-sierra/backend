@@ -16,6 +16,7 @@ import { FollowsModule } from './follows/follows.module';
 import { BadgesModule } from './badges/badges.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { OpenAiModule } from './openai/openai.module';
+import { ChatsModule } from './chats/chats.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -78,6 +79,7 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
     BadgesModule,
     UploadsModule,
     OpenAiModule,
+    ChatsModule,
   ],
   controllers: [AppController],
   providers: [
