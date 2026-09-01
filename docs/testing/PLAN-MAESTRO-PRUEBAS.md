@@ -14,7 +14,7 @@ Validar que las funcionalidades entregadas en cada sprint de Havit se comportan 
 
 Este documento cubre el backend (`backend/`, NestJS + PostgreSQL). Cada módulo del backend contribuye su propia sección al Plan de Pruebas (tabla CP). Al momento de escribir esto:
 
-- **Cubierto con pruebas automatizadas reales**: Auth, Challenges (parcial), Workout Log (parcial), Users/Perfil (parcial), **Posts/Feed (B2, completo)**, **Followers (completo)**, **Badges (completo)**, **Challenge Invites (completo)**, **Privacidad de posts en challenges privados / F8 (completo)**.
+- **Cubierto con pruebas automatizadas reales**: Auth, Challenges (parcial), Workout Log (parcial), Users/Perfil (parcial), **Posts/Feed (B2, completo)**, **Followers (completo)**, **Badges (completo)**, **Challenge Invites (completo)**, **Privacidad de posts en challenges privados / F8 (completo)**, **Chats / Mensajería directa 1:1 (completo a nivel unitario, ver limitaciones)**.
 - **Sin pruebas automatizadas todavía**: Uploads (R2), lectura/consulta de un challenge individual y `getProgress`/`getProgressSummary` (CP-03, CP-08), flujos de sistema end-to-end (CP-16, CP-17).
 - Frontend, infraestructura (Docker/CI) y pruebas manuales de UI quedan fuera de este documento — pertenecen a los repos `frontend/`/`raiz/` y a la guía manual de cada feature.
 
@@ -126,6 +126,27 @@ Estos dos módulos ya tenían pruebas reales en el repo (`badges.service.spec.ts
 | CP-35 | Challenge Invites | Integración | Aceptar/rechazar/cancelar invitación | Invitación `pending` existente | Aceptar agrega la membresía y marca la invitación en una sola transacción (reactivando membresía inactiva si existía); solo el destinatario puede aceptar/rechazar, solo el emisor puede cancelar; se rechaza aceptar una invitación ya procesada, expirada, o inexistente | Alta | `challenge-invites.service.spec.ts` → describe `accept` (6 tests), `decline` (3 tests), `cancel` (3 tests) | Ejecutado — Aprobado |
 | CP-36 | Challenge Invites | Funcional | Listar invitaciones | Usuario con invitaciones enviadas/recibidas | `listPendingReceived`/listados de enviadas y recibidas están correctamente delimitados por `sender`/`recipient`, y el de pendientes solo devuelve `status='pending'` | Media | `challenge-invites.service.spec.ts` → describe `listing` (3 tests) | Ejecutado — Aprobado |
 
+### Casos agregados — Chats / Mensajería directa 1:1 (CP-37 en adelante)
+
+Justificación: nuevo módulo (`src/chats/`), sin CP base previo. Usa las tablas `direct_conversations`/`direct_conversation_members`/`direct_messages`, ya definidas en el init-schema (sección "9. MENSAJERÍA PRIVADA") pero sin ningún módulo del backend leyéndolas o escribiéndolas hasta ahora; se agregó únicamente `read_at` vía migración aditiva (`2026-09-01-01-add-direct-messages-read-status.sql`).
+
+| ID | Funcionalidad | Tipo | Prueba | Condiciones/Entrada | Resultado esperado | Prioridad | Cobertura automatizada | Estado |
+|---|---|---|---|---|---|---|---|---|
+| CP-37 | Chats | Integración | Iniciar o reabrir una conversación 1:1 | Dos usuarios válidos y activos | Si no existe conversación entre ambos, se crea con exactamente los dos participantes; si ya existe, se reutiliza en vez de duplicarla | Alta | `chats.service.spec.ts` → describe `findOrCreateDirectConversation` (2 de 4 tests) | Ejecutado — Aprobado |
+| CP-38 | Chats | Funcional | Rechazar conversación inválida | `recipientUserId` = el propio usuario, o un usuario inexistente/inactivo | `400 BadRequestException` al intentar conversar consigo mismo (sin consultar la base de datos); `404 NotFoundException` si el destinatario no existe o está inactivo | Alta | mismo describe (2 de 4 tests) | Ejecutado — Aprobado |
+| CP-39 | Chats | Funcional | Listar mis conversaciones | Usuario con 0, 1 o varias conversaciones | `[]` sin conversaciones; ordenadas por actividad más reciente (último mensaje, no la fecha de creación de la conversación); una conversación cuyo otro participante ya no existe (cuenta eliminada) se omite en silencio en vez de romper el listado completo | Alta | `chats.service.spec.ts` → describe `listConversations` (3 tests) | Ejecutado — Aprobado |
+| CP-40 | Chats | Funcional | Control de acceso a una conversación ajena | Usuario que no es participante intenta listar/enviar mensajes o marcar como leída una conversación | `404 NotFoundException` en los tres casos — mismo código que "conversación inexistente", para no revelarle a alguien fuera de la conversación que el id sí existe | Alta | describe `listMessages`/`sendMessage`/`markConversationRead` (1 test de acceso por método) | Ejecutado — Aprobado |
+| CP-41 | Chats | Funcional | Paginación de mensajes | Conversación con más mensajes que el `limit` pedido | Mensajes en orden cronológico (más antiguo primero), recortados a `limit`, con `nextBefore` apuntando al id más antiguo de la página cuando hay más filas; `nextBefore = null` en la última página | Alta | describe `listMessages` (2 tests) | Ejecutado — Aprobado |
+| CP-42 | Chats | Funcional | Marcar conversación como leída | Conversación con mensajes propios y del otro participante | Solo se actualizan los mensajes del OTRO participante (`user_id != caller`); los propios nunca se tocan | Media | describe `markConversationRead` (1 test, verifica la cláusula `andWhere('user_id != :userId', ...)`) | Ejecutado — Aprobado |
+| CP-43 | Chats | Funcional | Enviar un mensaje | Usuario participante envía contenido válido | El mensaje se persiste asociado al remitente y a la conversación correctos | Alta | describe `sendMessage` (2 tests) | Ejecutado — Aprobado |
+
+**Riesgos y decisiones explícitamente NO tomadas en este cierre** (para que no se confundan con omisiones):
+- **Edición y borrado de mensajes**: no implementados. La tabla `direct_messages` ya trae una columna `is_active` (aparentemente pensada para soft-delete), pero ningún endpoint la expone ni la modifica — se deja en `true` siempre. Requiere una decisión de producto antes de implementarse (¿quién puede borrar/editar, hay ventana de tiempo, se notifica al otro participante?).
+- **Moderación de contenido**: `ChatsService.sendMessage()` no llama a ningún servicio de moderación. La Moderation API que construye Esteban (Bloque 4) no existe todavía en este repositorio (sin rama ni PR al momento de este cierre), así que no había contrato con el que integrar sin arriesgarse a duplicar lógica de validación. El punto de integración queda documentado como comentario directamente sobre `sendMessage()` en [chats.service.ts](../../src/chats/chats.service.ts).
+- **Grupal / Spaces**: fuera de alcance de este módulo. El esquema de `direct_conversation_members` (tabla intermedia participante↔conversación) se eligió deliberadamente compatible con una futura extensión grupal, pero el grupal real vive en las tablas `spaces`/`space_members`/`space_messages`, ya existentes mas no tocadas aquí.
+- **Migración no ejecutada contra la base real**: igual que el resto de este documento (ver limitaciones de la batería B2), esta sesión no tuvo credenciales de la base de datos de Azure disponibles — `2026-09-01-01-add-direct-messages-read-status.sql` no se corrió contra ningún Postgres real, solo se validó por lectura (SQL aditivo con `IF NOT EXISTS`, mismo patrón que las migraciones previas del repo). Se aplicará automáticamente en el próximo `npm run db:migrate` (arranque de contenedor o `docker compose up`).
+- **Condición de carrera de baja probabilidad**: dos solicitudes simultáneas de "iniciar conversación" entre el mismo par de usuarios, la primera vez que se escriben, podrían en teoría crear dos conversaciones en vez de reutilizar una — documentado como limitación aceptada en el propio doc-comment de `findOrCreateDirectConversation()`, no cubierto por un test (requeriría un test de concurrencia real, no de mocks).
+
 ---
 
 ## C. Resultados de pruebas ejecutadas
@@ -163,6 +184,24 @@ La primera tabla corresponde al Sprint B2 (Posts/Feed) original — comandos eje
 | Suite completa (actual) | `npm run build` + Todos los tests del backend | `npm run build && npm run test` | Build sin errores. **18 suites, 190 tests — todos pasan** | Aprobado | Ver salida completa, sección Verificación |
 
 **Nota sobre pruebas modificadas (no solo agregadas):** dos pruebas preexistentes de `workout-posts.service.spec.ts` (`getUserPosts`, casos "no owner bypass") afirmaban que la SQL de un viewer no-dueño nunca contenía el fragmento `OR p.user_id`. El nuevo filtro de CP-31 introduce legítimamente ese fragmento (para que el propio autor nunca se oculte su post a sí mismo), así que esa aserción genérica dejó de ser válida como estaba escrita. Se reemplazó por dos aserciones más específicas (`not.toContain('moderation_status = ANY')` y `not.toContain("p.visibility != 'private'")`) que siguen probando lo que realmente importaba (que no vuelve el bypass de moderación/visibilidad del dueño), sin quedar acopladas a un fragmento de SQL que ahora tiene un motivo legítimo para existir. Ninguna prueba se debilitó ni se eliminó — se corrigió una aserción que había quedado demasiado amplia.
+
+### C.3 — Chats / Mensajería directa 1:1
+
+| Caso | Prueba ejecutada | Comando | Resultado obtenido | Estado | Evidencia |
+|---|---|---|---|---|---|
+| CP-37, CP-38 | `chats.service.spec.ts` → describe `findOrCreateDirectConversation` | `npx jest src/chats/chats.service.spec.ts` | 4/4 tests pasan | Aprobado | `✓ should reject starting a conversation with yourself...`, `✓ should throw NotFoundException when the recipient does not exist...`, `✓ should create a new conversation with exactly the two participants...`, `✓ should return the existing conversation instead of creating a duplicate` |
+| CP-39 | `chats.service.spec.ts` → describe `listConversations` | `npx jest src/chats/chats.service.spec.ts` | 3/3 tests pasan | Aprobado | `✓ should return an empty array...`, `✓ should sort conversations by most recent activity...`, `✓ should silently skip a conversation whose other participant no longer exists` |
+| CP-40, CP-41 | `chats.service.spec.ts` → describe `listMessages` | `npx jest src/chats/chats.service.spec.ts` | 3/3 tests pasan | Aprobado | `✓ should throw NotFoundException when the caller is not a participant`, `✓ should return messages oldest-first and a nextBefore cursor...`, `✓ should return nextBefore null on the last page` |
+| CP-40, CP-43 | `chats.service.spec.ts` → describe `sendMessage` | `npx jest src/chats/chats.service.spec.ts` | 2/2 tests pasan | Aprobado | `✓ should throw NotFoundException when the caller is not a participant`, `✓ should persist the message tied to the sender and conversation` |
+| CP-40, CP-42 | `chats.service.spec.ts` → describe `markConversationRead` | `npx jest src/chats/chats.service.spec.ts` | 2/2 tests pasan | Aprobado | `✓ should throw NotFoundException when the caller is not a participant`, `✓ should only mark the other participant's messages as read...` |
+| CP-37 – CP-43 (delegación del controller) | `chats.controller.spec.ts` | `npx jest src/chats/chats.controller.spec.ts` | 5/5 tests pasan | Aprobado | Verifica que cada acción usa `user.sub` (JWT) como actor, nunca un parámetro de ruta, mismo patrón que `follows.controller.spec.ts` |
+| Lint dirigido | `eslint src/chats` | `npx eslint src/chats` | Sin errores ni warnings nuevos | Aprobado | — |
+| Build completo | `nest build` | `npm run build` | Sin errores | Aprobado | — |
+| Suite completa (con Chats) | Todos los tests del backend | `npm run test` | **20 suites, 209 tests — todos pasan** (190 previos + 19 nuevos de Chats) | Aprobado | Ver salida completa arriba |
+
+**No ejecutado en esta sesión** (requiere entorno con la base de datos real de Azure, no disponible aquí — sin archivo `.env`/credenciales en este sandbox):
+- Aplicar `2026-09-01-01-add-direct-messages-read-status.sql` con `npm run db:migrate` contra la base real.
+- Cualquier prueba de integración/sistema end-to-end (`POST /chats/conversations`, `GET /chats/conversations`, etc. contra un servidor real) — no existe infraestructura de e2e en el repo (mismo gap ya documentado para CP-16/CP-17).
 
 ### Espacio para otros integrantes
 
