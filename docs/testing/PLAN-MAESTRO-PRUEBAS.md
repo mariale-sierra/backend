@@ -147,6 +147,41 @@ Justificación: nuevo módulo (`src/chats/`), sin CP base previo. Usa las tablas
 - **Migración no ejecutada contra la base real**: igual que el resto de este documento (ver limitaciones de la batería B2), esta sesión no tuvo credenciales de la base de datos de Azure disponibles — `2026-09-01-01-add-direct-messages-read-status.sql` no se corrió contra ningún Postgres real, solo se validó por lectura (SQL aditivo con `IF NOT EXISTS`, mismo patrón que las migraciones previas del repo). Se aplicará automáticamente en el próximo `npm run db:migrate` (arranque de contenedor o `docker compose up`).
 - **Condición de carrera de baja probabilidad**: dos solicitudes simultáneas de "iniciar conversación" entre el mismo par de usuarios, la primera vez que se escriben, podrían en teoría crear dos conversaciones en vez de reutilizar una — documentado como limitación aceptada en el propio doc-comment de `findOrCreateDirectConversation()`, no cubierto por un test (requeriría un test de concurrencia real, no de mocks).
 
+### Casos agregados — Spaces (CP-44 en adelante)
+
+Justificación: nuevo módulo (`src/spaces/`), sin CP base previo. El init-schema ya traía `spaces`/`space_members` completos (sección "8. SPACES / CHATS GRUPALES") pero sin ningún módulo leyéndolos ni escribiéndolos hasta ahora — ver la nota de CP-37/`direct_conversation_members` arriba, que scopeaba deliberadamente el grupal fuera de Chats. Se agregó `activity_category_id` (FK a `exercise_categories`, reutilizando la taxonomía de challenges para el picker de "Activity Color" del wireframe 47C) y la tabla `space_join_requests` (flujo de solicitud/aprobación para spaces privados, wireframes 47C/47E) vía `2026-09-02-01-spaces-join-requests-and-activity-category.sql`. `space_messages` (mensajería dentro de un space, wireframe 47B) queda explícitamente fuera de este cierre — ver Pendientes/Bloqueos en el reporte de entrega.
+
+| ID | Funcionalidad | Tipo | Prueba | Condiciones/Entrada | Resultado esperado | Prioridad | Cobertura automatizada | Estado |
+|---|---|---|---|---|---|---|---|---|
+| CP-44 | Spaces | Integración | Crear space | Usuario autenticado, payload válido | Se crea el space y, en la misma transacción, se agrega al usuario como miembro activo con rol `owner`; una `activityCategoryId` inexistente se rechaza antes de abrir la transacción | Alta | `spaces.service.spec.ts` → describe `create` (2 tests) | Ejecutado — Aprobado |
+| CP-45 | Spaces | Funcional | Consultar spaces | Space público/privado, viewer miembro/no miembro/con solicitud pendiente | `GET /spaces`/`GET /spaces/:id` anotan `isMember`, `role` y `hasPendingRequest` correctamente para el usuario autenticado; space inexistente o inactivo devuelve 404 | Alta | describe `findOne` (4 tests) | Ejecutado — Aprobado |
+| CP-46 | Spaces | Funcional | Editar/eliminar space — permisos | Usuario que no es el owner intenta editar o eliminar | `403 ForbiddenException` en ambos casos; el owner sí puede editar campos parciales y eliminar (soft delete vía `is_active = false`) | Alta | describe `update / remove — ownership` (3 tests) | Ejecutado — Aprobado |
+| CP-47 | Spaces | Integración | Unirse a un space | Space público vs. privado, usuario sin relación previa | Público: ingreso instantáneo (`status: 'joined'`, fila activa en `space_members` con rol `member`); privado: crea una solicitud `pending` en `space_join_requests` (`status: 'requested'`), sin tocar `space_members` | Alta | describe `join` (5 tests) | Ejecutado — Aprobado |
+| CP-48 | Spaces | Funcional | Unión/solicitud duplicada | Usuario ya miembro activo intenta unirse de nuevo; usuario con solicitud pendiente vuelve a solicitar | `409 ConflictException` en ambos casos, sin insertar una segunda fila (respaldado a nivel de BD por el índice único parcial `uq_space_join_request_pending`, mismo patrón que `uq_challenge_invite_pending`) | Alta | mismo describe `join` (parte de los 5 tests) | Ejecutado — Aprobado |
+| CP-49 | Spaces | Funcional | Salir de un space | Miembro regular vs. owner | Un miembro regular puede salir (desactiva su membresía); el owner NO puede salir (`409 ConflictException`, debe eliminar el space en su lugar); usuario sin membresía activa recibe 404 | Alta | describe `leave` (3 tests) | Ejecutado — Aprobado |
+| CP-50 | Spaces | Funcional | Participantes de un space | Space existente con miembros activos | Devuelve solo miembros activos con datos públicos (id/username/displayName/profileImageUrl/role/joinedAt), nunca el `User` completo; space inexistente devuelve 404 | Media | describe `listMembers` (2 tests) | Ejecutado — Aprobado |
+| CP-51 | Spaces | Integración | Solicitudes de ingreso — listar y responder | Owner vs. no-owner; solicitud pendiente vs. ya procesada | Solo el owner puede listar (`403` para cualquier otro) y responder; aprobar agrega/reactiva la membresía (rol `member`) en la misma transacción que marca la solicitud `approved`; rechazar marca `rejected` sin tocar `space_members`; responder una solicitud ya procesada devuelve `409`; solicitud inexistente devuelve `404` | Alta | describe `listJoinRequests` (2 tests) y `respondToJoinRequest` (6 tests) | Ejecutado — Aprobado |
+| CP-52 | Spaces | Funcional | Delegación del controller | Cada endpoint de `SpacesController` | Cada acción usa `user.sub` (JWT) como actor — nunca un campo del body/param — mismo patrón verificado en `chats.controller.spec.ts`/`follows.controller.spec.ts`; `listMembers` no requiere el usuario autenticado como argumento (el chequeo de owner vive en las acciones que sí lo requieren) | Media | `spaces.controller.spec.ts` (12/12 tests) | Ejecutado — Aprobado |
+
+**Resultados de ejecución:**
+
+| Casos | Archivo / comando | Resultado | Estado | Evidencia |
+|---|---|---|---|---|
+| CP-44 – CP-51 | `spaces.service.spec.ts` | `npx jest src/spaces/spaces.service.spec.ts` | 26/26 tests pasan | Aprobado | Cubre create/findAll/findOne/update/remove/join/leave/listMembers/listJoinRequests/respondToJoinRequest |
+| CP-52 | `spaces.controller.spec.ts` | `npx jest src/spaces/spaces.controller.spec.ts` | 12/12 tests pasan | Aprobado | Verifica delegación con `user.sub` en cada acción |
+| Lint dirigido | `eslint src/spaces` | `npx eslint "src/spaces/**/*.ts"` | Sin errores ni warnings | Aprobado | — |
+| Build completo | `nest build` | `npm run build` | Sin errores | Aprobado | — |
+| Suite completa (con Spaces) | Todos los tests del backend | `npm run test` | **28 suites, 387 tests — todos pasan** (349 previos + 38 nuevos de Spaces) | Aprobado | Ver salida completa del comando |
+
+**No ejecutado en esta sesión** (mismo motivo que Chats — sin `.env`/credenciales de la base de datos de Azure en este sandbox):
+- Aplicar `2026-09-02-01-spaces-join-requests-and-activity-category.sql` con `npm run db:migrate` contra la base real.
+- Cualquier prueba de integración/sistema end-to-end (`POST /spaces`, `POST /spaces/:id/join`, etc. contra un servidor real) — mismo gap ya documentado para Chats/CP-16/CP-17.
+
+**Riesgos y decisiones explícitamente NO tomadas en este cierre:**
+- **Mensajería dentro de un space** (`space_messages`, wireframe 47B "Space thread"): fuera de alcance — no está en la lista de funcionalidades del Sprint 8 para este bloque (crear/consultar/ingresar/participantes) y su UI vive en los wireframes numerados "Chats-4xx". Ver Pendientes/Bloqueos.
+- **Rol `admin`**: el enum `space_member_role_enum` ya soporta `owner`/`admin`/`member`, pero ningún wireframe de este cierre muestra una acción para promover a un miembro a `admin` ni permisos diferenciados para ese rol — solo `owner` tiene acciones de gestión en este cierre.
+- **Límite máximo de participantes**: no hay ninguna regla de negocio definida (ni en el Sprint 8 ni en los wireframes) — no se agregó ningún constraint que lo simule.
+
 ---
 
 ## C. Resultados de pruebas ejecutadas
