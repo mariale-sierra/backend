@@ -13,6 +13,8 @@ describe('SpacesController', () => {
     join: jest.Mock;
     leave: jest.Mock;
     listMembers: jest.Mock;
+    listMessages: jest.Mock;
+    sendMessage: jest.Mock;
     listJoinRequests: jest.Mock;
     respondToJoinRequest: jest.Mock;
   };
@@ -33,6 +35,10 @@ describe('SpacesController', () => {
       join: jest.fn().mockResolvedValue({}),
       leave: jest.fn().mockResolvedValue({ message: 'ok' }),
       listMembers: jest.fn().mockResolvedValue([]),
+      listMessages: jest
+        .fn()
+        .mockResolvedValue({ messages: [], nextBefore: null }),
+      sendMessage: jest.fn().mockResolvedValue({}),
       listJoinRequests: jest.fn().mockResolvedValue([]),
       respondToJoinRequest: jest.fn().mockResolvedValue({}),
     };
@@ -80,6 +86,26 @@ describe('SpacesController', () => {
   it('should list members without requiring an owner check', async () => {
     await controller.listMembers('space-1');
     expect(service.listMembers).toHaveBeenCalledWith('space-1');
+  });
+
+  it('should list space messages scoped to the authenticated caller (membership check happens in the service)', async () => {
+    const query = { limit: 10 };
+    await controller.listMessages('space-1', query, currentUser);
+    expect(service.listMessages).toHaveBeenCalledWith(
+      'user-1',
+      'space-1',
+      query,
+    );
+  });
+
+  it('should send a space message on behalf of the authenticated caller', async () => {
+    const dto = { content: 'hola equipo' };
+    await controller.sendMessage('space-1', dto, currentUser);
+    expect(service.sendMessage).toHaveBeenCalledWith(
+      'user-1',
+      'space-1',
+      'hola equipo',
+    );
   });
 
   it('should list join requests scoped to the authenticated caller (owner check happens in the service)', async () => {

@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -30,6 +31,9 @@ import { SpaceResponseDto } from './dto/space-response.dto';
 import { SpaceMemberResponseDto } from './dto/space-member-response.dto';
 import { SpaceJoinRequestResponseDto } from './dto/space-join-request-response.dto';
 import { JoinSpaceResultDto } from './dto/join-space-result.dto';
+import { SpaceMessageDto } from './dto/space-message.dto';
+import { SpaceMessagesQueryDto } from './dto/space-messages-query.dto';
+import { SendSpaceMessageDto } from './dto/send-space-message.dto';
 
 @ApiTags('Spaces')
 @ApiBearerAuth()
@@ -159,6 +163,45 @@ export class SpacesController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<SpaceMemberResponseDto[]> {
     return this.spacesService.listMembers(id);
+  }
+
+  @Get(':id/messages')
+  @ApiParam({ name: 'id', description: 'ID (UUID) del space' })
+  @ApiOperation({
+    summary: 'Listar mensajes del chat grupal de un space',
+    description:
+      'Orden cronológico (más antiguo primero). Usar el `nextBefore` de la respuesta como `before` para pedir mensajes anteriores. Requiere ser miembro activo del space (cualquier rol).',
+  })
+  @ApiOkResponse({ type: SpaceMessageDto, isArray: true })
+  @ApiForbiddenResponse({
+    description:
+      'El usuario no es miembro activo del space (mismo status para un space inexistente — su existencia ya es pública via GET /spaces, así que no hay nada que ocultar con un 404 aquí)',
+  })
+  listMessages(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: SpaceMessagesQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.spacesService.listMessages(user.sub, id, query);
+  }
+
+  @Post(':id/messages')
+  @ApiParam({ name: 'id', description: 'ID (UUID) del space' })
+  @ApiOperation({
+    summary: 'Enviar un mensaje al chat grupal de un space',
+    description: 'Requiere ser miembro activo del space (cualquier rol).',
+  })
+  @ApiOkResponse({ type: SpaceMessageDto })
+  @ApiForbiddenResponse({
+    description:
+      'El usuario no es miembro activo del space (mismo status para un space inexistente — ver nota en GET /spaces/:id/messages)',
+  })
+  sendMessage(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SendSpaceMessageDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.spacesService.sendMessage(user.sub, id, dto.content);
   }
 
   @Get(':id/join-requests')

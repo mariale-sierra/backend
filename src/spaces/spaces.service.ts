@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -9,6 +10,7 @@ import { Space } from './entities/space.entity';
 import { SpaceMember } from './entities/space-member.entity';
 import type { SpaceMemberRole } from './entities/space-member.entity';
 import { SpaceJoinRequest } from './entities/space-join-request.entity';
+import { SpaceMessage } from './entities/space-message.entity';
 import { ExerciseCategory } from '../exercises/entities/exercise-category.entity';
 import { CreateSpaceDto } from './dto/create-space.dto';
 import { UpdateSpaceDto } from './dto/update-space.dto';
@@ -16,7 +18,17 @@ import { SpaceResponseDto } from './dto/space-response.dto';
 import { SpaceMemberResponseDto } from './dto/space-member-response.dto';
 import { SpaceJoinRequestResponseDto } from './dto/space-join-request-response.dto';
 import { JoinSpaceResultDto } from './dto/join-space-result.dto';
+import { SpaceMessageDto } from './dto/space-message.dto';
+import {
+  DEFAULT_MESSAGES_LIMIT,
+  MAX_MESSAGES_LIMIT,
+} from './dto/space-messages-query.dto';
 import { assertOwnership } from '../auth/utils/assert-ownership';
+
+export interface ListSpaceMessagesResult {
+  messages: SpaceMessageDto[];
+  nextBefore: number | null;
+}
 
 const SPACE_RELATIONS = {
   createdBy: { profile: true },
@@ -32,6 +44,8 @@ export class SpacesService {
     private memberRepo: Repository<SpaceMember>,
     @InjectRepository(SpaceJoinRequest)
     private joinRequestRepo: Repository<SpaceJoinRequest>,
+    @InjectRepository(SpaceMessage)
+    private messageRepo: Repository<SpaceMessage>,
     @InjectRepository(ExerciseCategory)
     private categoryRepo: Repository<ExerciseCategory>,
     private dataSource: DataSource,
@@ -294,6 +308,82 @@ export class SpacesService {
     return SpaceMemberResponseDto.fromEntities(members);
   }
 
+  /**
+   * Group chat thread for a space (Sprint 8, Bloque 2 — Chats-47B). Any
+   * active member (owner/admin/member alike) can read it — requires an
+   * active space_members row, same as sendMessage() below. Same
+   * keyset-pagination shape as ChatsService.listMessages() (order by id
+   * DESC, take limit+1, reverse to oldest-first), but joins the sender's
+   * user+profile here since a group thread needs each message's own
+   * avatar/name, unlike a 1:1 DM where the "other" participant is already
+   * known from context.
+   */
+  async listMessages(
+    userId: string,
+    spaceId: string,
+    query: { before?: number; limit?: number },
+  ): Promise<ListSpaceMessagesResult> {
+    await this.assertMembership(spaceId, userId);
+
+    const limit = Math.min(
+      query.limit ?? DEFAULT_MESSAGES_LIMIT,
+      MAX_MESSAGES_LIMIT,
+    );
+
+    const qb = this.messageRepo
+      .createQueryBuilder('m')
+      .leftJoinAndSelect('m.sender', 'sender')
+      .leftJoinAndSelect('sender.profile', 'profile')
+      .where('m.space_id = :spaceId', { spaceId })
+      .andWhere('m.is_active = true')
+      .orderBy('m.id', 'DESC')
+      .take(limit + 1);
+
+    if (query.before !== undefined) {
+      qb.andWhere('m.id < :before', { before: query.before });
+    }
+
+    const rows = await qb.getMany();
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    const nextBefore = hasMore ? page[page.length - 1].id : null;
+
+    // Reversed to oldest-first — the natural order for rendering a thread.
+    const messages = page.reverse().map((m) => this.toSpaceMessageDto(m));
+
+    return { messages, nextBefore };
+  }
+
+  /**
+   * Persists and returns a new group message. Deliberately does NOT run any
+   * content moderation yet — same reasoning as ChatsService.sendMessage:
+   * Esteban's Moderation API (Bloque 4) isn't wired to either chat surface
+   * yet, so there's no contract to integrate against without duplicating
+   * validation logic. This is the call site once that contract exists.
+   */
+  async sendMessage(
+    userId: string,
+    spaceId: string,
+    content: string,
+  ): Promise<SpaceMessageDto> {
+    await this.assertMembership(spaceId, userId);
+
+    const message = this.messageRepo.create({
+      space_id: spaceId,
+      user_id: userId,
+      message_text: content,
+    });
+    const saved = await this.messageRepo.save(message);
+
+    // Re-fetched with the sender relation so the response the frontend
+    // appends directly to the thread has a fully populated `sender`.
+    const withSender = await this.messageRepo.findOne({
+      where: { id: saved.id },
+      relations: { sender: { profile: true } },
+    });
+    return this.toSpaceMessageDto(withSender!);
+  }
+
   async listJoinRequests(
     userId: string,
     spaceId: string,
@@ -414,5 +504,39 @@ export class SpacesService {
       where: { id: categoryId },
     });
     if (!exists) throw new NotFoundException('Activity category not found');
+  }
+
+  /**
+   * Requires an active space_members row for (spaceId, userId), any role.
+   * Throws Forbidden — NOT NotFound like ChatsService's own
+   * assertMembership — because a space's existence is already public via
+   * GET /spaces/:id and GET /spaces, so there's nothing to hide by
+   * confirming it exists to a non-member here.
+   */
+  private async assertMembership(
+    spaceId: string,
+    userId: string,
+  ): Promise<void> {
+    const membership = await this.memberRepo.findOne({
+      where: { space_id: spaceId, user_id: userId, is_active: true },
+    });
+    if (!membership) {
+      throw new ForbiddenException('You are not a member of this space');
+    }
+  }
+
+  private toSpaceMessageDto(message: SpaceMessage): SpaceMessageDto {
+    const dto = new SpaceMessageDto();
+    dto.id = message.id;
+    dto.spaceId = message.space_id;
+    dto.sender = {
+      id: message.sender?.id ?? message.user_id,
+      username: message.sender?.username ?? '',
+      displayName: message.sender?.profile?.display_name ?? null,
+      profileImageUrl: message.sender?.profile?.profile_image_url ?? null,
+    };
+    dto.content = message.message_text;
+    dto.sentAt = message.sent_at;
+    return dto;
   }
 }

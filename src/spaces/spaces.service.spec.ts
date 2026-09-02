@@ -10,6 +10,7 @@ import { SpacesService } from './spaces.service';
 import { Space } from './entities/space.entity';
 import { SpaceMember } from './entities/space-member.entity';
 import { SpaceJoinRequest } from './entities/space-join-request.entity';
+import { SpaceMessage } from './entities/space-message.entity';
 import { ExerciseCategory } from '../exercises/entities/exercise-category.entity';
 
 const createMockRepo = () => ({
@@ -32,6 +33,7 @@ describe('SpacesService', () => {
   let spaceRepo: ReturnType<typeof createMockRepo>;
   let memberRepo: ReturnType<typeof createMockRepo>;
   let joinRequestRepo: ReturnType<typeof createMockRepo>;
+  let messageRepo: ReturnType<typeof createMockRepo>;
   let categoryRepo: ReturnType<typeof createMockRepo>;
   let dataSource: { transaction: jest.Mock };
 
@@ -58,6 +60,7 @@ describe('SpacesService', () => {
     spaceRepo = createMockRepo();
     memberRepo = createMockRepo();
     joinRequestRepo = createMockRepo();
+    messageRepo = createMockRepo();
     categoryRepo = createMockRepo();
     dataSource = { transaction: jest.fn() };
 
@@ -70,6 +73,7 @@ describe('SpacesService', () => {
           provide: getRepositoryToken(SpaceJoinRequest),
           useValue: joinRequestRepo,
         },
+        { provide: getRepositoryToken(SpaceMessage), useValue: messageRepo },
         {
           provide: getRepositoryToken(ExerciseCategory),
           useValue: categoryRepo,
@@ -336,6 +340,168 @@ describe('SpacesService', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].username).toBe('bob');
+    });
+  });
+
+  describe('listMessages', () => {
+    const createMockQueryBuilder = () => {
+      const qb: Record<string, jest.Mock> = {};
+      ['leftJoinAndSelect', 'where', 'andWhere', 'orderBy', 'take'].forEach(
+        (method) => {
+          qb[method] = jest.fn().mockReturnValue(qb);
+        },
+      );
+      qb.getMany = jest.fn();
+      return qb;
+    };
+
+    it('should reject a non-member with Forbidden, not NotFound — a space is already public via GET /spaces', async () => {
+      memberRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.listMessages(OUTSIDER, SPACE_ID, {}),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should return messages oldest-first, with the sender populated, and a nextBefore cursor when there are more rows than the limit', async () => {
+      memberRepo.findOne.mockResolvedValue({
+        space_id: SPACE_ID,
+        user_id: MEMBER,
+        role: 'member',
+        is_active: true,
+      });
+
+      const qb = createMockQueryBuilder();
+      // limit=2 requested -> service asks for 3 (limit+1) to detect "hasMore"
+      qb.getMany.mockResolvedValue([
+        {
+          id: 5,
+          space_id: SPACE_ID,
+          user_id: MEMBER,
+          message_text: 'c',
+          sent_at: new Date(),
+          sender: { id: MEMBER, username: 'bob', profile: undefined },
+        },
+        {
+          id: 4,
+          space_id: SPACE_ID,
+          user_id: OWNER,
+          message_text: 'b',
+          sent_at: new Date(),
+          sender: { id: OWNER, username: 'alice', profile: undefined },
+        },
+        {
+          id: 3,
+          space_id: SPACE_ID,
+          user_id: MEMBER,
+          message_text: 'a',
+          sent_at: new Date(),
+          sender: { id: MEMBER, username: 'bob', profile: undefined },
+        },
+      ]);
+      messageRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.listMessages(MEMBER, SPACE_ID, {
+        limit: 2,
+      });
+
+      expect(qb.take).toHaveBeenCalledWith(3);
+      expect(result.messages.map((m) => m.id)).toEqual([4, 5]); // oldest-first, trimmed to limit
+      expect(result.nextBefore).toBe(4); // id of the oldest row actually returned
+      expect(result.messages[0].sender).toEqual({
+        id: OWNER,
+        username: 'alice',
+        displayName: null,
+        profileImageUrl: null,
+      });
+    });
+
+    it('should return nextBefore null on the last page', async () => {
+      memberRepo.findOne.mockResolvedValue({
+        space_id: SPACE_ID,
+        user_id: MEMBER,
+        role: 'member',
+        is_active: true,
+      });
+
+      const qb = createMockQueryBuilder();
+      qb.getMany.mockResolvedValue([
+        {
+          id: 2,
+          space_id: SPACE_ID,
+          user_id: MEMBER,
+          message_text: 'b',
+          sent_at: new Date(),
+          sender: { id: MEMBER, username: 'bob', profile: undefined },
+        },
+        {
+          id: 1,
+          space_id: SPACE_ID,
+          user_id: MEMBER,
+          message_text: 'a',
+          sent_at: new Date(),
+          sender: { id: MEMBER, username: 'bob', profile: undefined },
+        },
+      ]);
+      messageRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.listMessages(MEMBER, SPACE_ID, {
+        limit: 10,
+      });
+
+      expect(result.nextBefore).toBeNull();
+    });
+  });
+
+  describe('sendMessage', () => {
+    it('should reject a non-member with Forbidden, not NotFound', async () => {
+      memberRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.sendMessage(OUTSIDER, SPACE_ID, 'hi'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(messageRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should persist the message tied to the sender and space, and return it with the sender populated', async () => {
+      memberRepo.findOne.mockResolvedValue({
+        space_id: SPACE_ID,
+        user_id: MEMBER,
+        role: 'member',
+        is_active: true,
+      });
+      messageRepo.create.mockImplementation((m: object) => m);
+      messageRepo.save.mockResolvedValue({ id: 42 });
+      messageRepo.findOne.mockResolvedValue({
+        id: 42,
+        space_id: SPACE_ID,
+        user_id: MEMBER,
+        message_text: 'hola equipo',
+        sent_at: new Date(),
+        sender: {
+          id: MEMBER,
+          username: 'bob',
+          profile: { display_name: 'Bob', profile_image_url: null },
+        },
+      });
+
+      const result = await service.sendMessage(MEMBER, SPACE_ID, 'hola equipo');
+
+      expect(messageRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          space_id: SPACE_ID,
+          user_id: MEMBER,
+          message_text: 'hola equipo',
+        }),
+      );
+      expect(result.id).toBe(42);
+      expect(result.content).toBe('hola equipo');
+      expect(result.sender).toEqual({
+        id: MEMBER,
+        username: 'bob',
+        displayName: 'Bob',
+        profileImageUrl: null,
+      });
     });
   });
 

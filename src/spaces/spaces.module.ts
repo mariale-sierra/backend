@@ -5,6 +5,7 @@ import { SpacesController } from './spaces.controller';
 import { Space } from './entities/space.entity';
 import { SpaceMember } from './entities/space-member.entity';
 import { SpaceJoinRequest } from './entities/space-join-request.entity';
+import { SpaceMessage } from './entities/space-message.entity';
 import { ExerciseCategory } from '../exercises/entities/exercise-category.entity';
 import { User } from '../users/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
@@ -15,6 +16,7 @@ import { AuthModule } from '../auth/auth.module';
       Space,
       SpaceMember,
       SpaceJoinRequest,
+      SpaceMessage,
       ExerciseCategory,
       User,
     ]),
