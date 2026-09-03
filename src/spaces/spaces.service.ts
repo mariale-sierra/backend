@@ -177,6 +177,14 @@ export class SpacesService {
     if (dto.activityCategoryId !== undefined) {
       await this.assertCategoryExists(dto.activityCategoryId);
       space.activity_category_id = dto.activityCategoryId;
+      // getActiveSpaceOrThrow() eager-loads `activityCategory` (SPACE_RELATIONS)
+      // — when both the FK scalar and its relation are present on a saved
+      // entity, TypeORM resolves the join column from the RELATION, not the
+      // scalar just set above, so save() would silently overwrite
+      // activity_category_id back to the stale category's id. Clearing the
+      // relation leaves nothing to fall back to; it's re-resolved from the
+      // scalar on findOne()'s fresh query right below.
+      space.activityCategory = undefined;
     }
     if (dto.name !== undefined) space.name = dto.name.trim();
     if (dto.description !== undefined)

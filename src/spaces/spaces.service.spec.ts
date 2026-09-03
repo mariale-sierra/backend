@@ -220,6 +220,56 @@ describe('SpacesService', () => {
     });
   });
 
+  describe('update — activityCategoryId persistence (stale relation shadowing bug)', () => {
+    // getActiveSpaceOrThrow() eager-loads `activityCategory` (SPACE_RELATIONS).
+    // When a space already HAS a category (unlike setting one for the first
+    // time on a space with none, which has no stale relation to shadow it),
+    // that loaded relation object stays attached to the entity even after
+    // reassigning the activity_category_id scalar — TypeORM resolves the FK
+    // from the relation over the scalar on save(), silently reverting the
+    // change. This only reproduces with an ALREADY-set category being
+    // changed to a DIFFERENT one.
+    it('should clear the stale activityCategory relation so save() persists the new category, not the old one', async () => {
+      const oldCategory = { id: 1, code: 'strength', name: 'Strength' };
+      const newCategory = {
+        id: 2,
+        code: 'cardio-intense',
+        name: 'Cardio Intense',
+      };
+      const spaceWithOldCategory = {
+        ...basePublicSpace(),
+        activity_category_id: oldCategory.id,
+        activityCategory: oldCategory,
+      };
+
+      spaceRepo.findOne
+        .mockResolvedValueOnce(spaceWithOldCategory) // getActiveSpaceOrThrow() inside update()
+        .mockResolvedValueOnce({
+          // Fresh re-fetch inside this.findOne() after save() — reflects
+          // what the DB actually holds once the fix takes effect.
+          ...spaceWithOldCategory,
+          activity_category_id: newCategory.id,
+          activityCategory: newCategory,
+        });
+      categoryRepo.findOne.mockResolvedValue(newCategory);
+      spaceRepo.save.mockResolvedValue(undefined);
+
+      const result = await service.update(OWNER, SPACE_ID, {
+        activityCategoryId: newCategory.id,
+      });
+
+      // The actual fix: nothing left for TypeORM to fall back to.
+      expect(spaceRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          activity_category_id: newCategory.id,
+          activityCategory: undefined,
+        }),
+      );
+      // The re-read response reflects the new category, not the old one.
+      expect(result.activityCategory?.id).toBe(newCategory.id);
+    });
+  });
+
   describe('join', () => {
     it('should join a public space instantly', async () => {
       spaceRepo.findOne.mockResolvedValue(basePublicSpace());
