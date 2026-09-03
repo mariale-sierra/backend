@@ -11,6 +11,7 @@ import { CreateWorkoutProgressDto } from './dto/create-workout-progress.dto';
 import { CreateWorkoutLogDto } from './dto/create-workout-log.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
+import { resolveRequestTimezone } from '../common/timezone.util';
 
 @ApiTags('Workout Logs')
 @Controller('workout-logs')
@@ -91,6 +92,7 @@ export class WorkoutLogController {
       caption: body.caption,
       visibility: body.visibility,
       isRestDay: body.isRestDay,
+      timezone: resolveRequestTimezone(req),
     });
   }
 

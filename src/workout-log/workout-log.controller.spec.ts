@@ -50,6 +50,41 @@ describe('WorkoutLogController', () => {
     });
   });
 
+  describe('createProgress', () => {
+    it("should resolve the caller's timezone from the X-Timezone header and pass it through", async () => {
+      const body = {
+        challengeId: 'challenge-1',
+        routineId: 42,
+        imageUrl: 'https://example.com/x.jpg',
+      };
+      const req = {
+        user: { sub: 'jwt-user-1' },
+        headers: { 'x-timezone': 'America/Guatemala' },
+      };
+
+      await controller.createProgress(body, req);
+
+      expect(service.createWorkout).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'jwt-user-1',
+          challengeId: 'challenge-1',
+          timezone: 'America/Guatemala',
+        }),
+      );
+    });
+
+    it('should default to UTC when the X-Timezone header is missing, matching the pre-fix behavior', async () => {
+      const body = { challengeId: 'challenge-1' };
+      const req = { user: { sub: 'jwt-user-1' }, headers: {} };
+
+      await controller.createProgress(body, req);
+
+      expect(service.createWorkout).toHaveBeenCalledWith(
+        expect.objectContaining({ timezone: 'UTC' }),
+      );
+    });
+  });
+
   describe('findAll', () => {
     it('should scope the list to the authenticated caller only', async () => {
       await controller.findAll(user);

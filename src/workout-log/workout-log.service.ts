@@ -16,6 +16,7 @@ import { WorkoutLogExerciseSetTarget } from './entities/workout-log-exercise-set
 import { Between } from 'typeorm';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
 import { Challenge } from '../challenges/entities/challenge.entity';
+import { getLocalDayBoundsUtc } from '../common/timezone.util';
 
 @Injectable()
 export class WorkoutLogService {
@@ -44,6 +45,12 @@ export class WorkoutLogService {
     caption?: string;
     visibility?: 'private' | 'followers' | 'public';
     isRestDay?: boolean;
+    /** Caller's IANA timezone (from the `X-Timezone` request header,
+     * already validated/defaulted to 'UTC' by the controller). Only
+     * consulted when `challengeId` is set — the plain routineId-only
+     * create() path never reaches the day-check block below, so it's fine
+     * to omit there. */
+    timezone?: string;
   }) {
     if (!dto.isRestDay && !dto.imageUrl) {
       throw new BadRequestException(
@@ -52,17 +59,21 @@ export class WorkoutLogService {
     }
 
     if (dto.challengeId) {
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-
-      const todayEnd = new Date();
-      todayEnd.setHours(23, 59, 59, 999);
+      // Bounded by the user's local calendar day, not the server's UTC
+      // clock, so the one-log-per-day gate agrees with the "completed
+      // today" display logic elsewhere (ChallengesService, UsersService) —
+      // logging late at night now flips back to "available" at the user's
+      // own midnight, not the server's.
+      const { start, end } = getLocalDayBoundsUtc(
+        new Date(),
+        dto.timezone ?? 'UTC',
+      );
 
       const existing = await this.workoutRepo.findOne({
         where: {
           userId: dto.userId,
           challengeId: dto.challengeId,
-          started_at: Between(todayStart, todayEnd),
+          started_at: Between(start, end),
         },
       });
 

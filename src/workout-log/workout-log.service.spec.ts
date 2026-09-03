@@ -5,7 +5,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { Between, DataSource } from 'typeorm';
 import { WorkoutLogService } from './workout-log.service';
 import { WorkoutLog } from './entities/workout-log.entity';
 import { RoutineExercise } from '../routine/entities/routine-exercise.entity';
@@ -74,6 +74,51 @@ describe('WorkoutLogService', () => {
         }),
       ).rejects.toThrow(ConflictException);
       expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    // Real bug: the duplicate-log check used to bound "today" with
+    // Date.setHours(), the SERVER's local clock (pinned to UTC), not the
+    // caller's own timezone — so logging late at night didn't cleanly flip
+    // back to "available" at the user's own midnight.
+    it("should key the duplicate-log check off the caller's local day, not the server's UTC day", async () => {
+      jest.useFakeTimers();
+      // 2026-08-28T05:59:00Z is already the next UTC calendar day, but
+      // still 2026-08-27T23:59:00 local in America/Guatemala (UTC-6, no
+      // DST) — the exact "logged late at night" scenario from the bug.
+      jest.setSystemTime(new Date('2026-08-28T05:59:00.000Z'));
+
+      workoutRepo.findOne.mockResolvedValue({
+        id: 1,
+        userId: OWNER_ID,
+        challengeId: 'challenge-1',
+      });
+
+      await expect(
+        service.createWorkout({
+          userId: OWNER_ID,
+          challengeId: 'challenge-1',
+          imageUrl: 'https://example.com/x.jpg',
+          timezone: 'America/Guatemala',
+        }),
+      ).rejects.toThrow(ConflictException);
+
+      expect(workoutRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            // Local midnight Aug 27 in Guatemala (UTC-6) -> UTC 06:00; local
+            // end-of-day Aug 27 23:59:59.999 -> UTC Aug 28 05:59:59.999. A
+            // server-UTC-only check would have used Aug 28's own boundaries
+            // instead, missing the log the user made just before their own
+            // midnight and letting a duplicate through.
+            started_at: Between(
+              new Date('2026-08-27T06:00:00.000Z'),
+              new Date('2026-08-28T05:59:59.999Z'),
+            ),
+          }),
+        }),
+      );
+
+      jest.useRealTimers();
     });
 
     it('should save the workout under the userId passed by the caller (the JWT-derived id)', async () => {
