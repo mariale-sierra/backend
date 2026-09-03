@@ -38,4 +38,10 @@ export class ConversationSummaryDto {
       'Cantidad de mensajes del otro participante que el usuario autenticado todavía no ha leído',
   })
   unreadCount!: number;
+
+  @ApiProperty({
+    description:
+      'True si el usuario autenticado es el destinatario de una solicitud de mensaje todavía no aceptada (siempre false para quien la inició)',
+  })
+  isPending!: boolean;
 }

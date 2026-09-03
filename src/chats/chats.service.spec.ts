@@ -1,6 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ChatsService } from './chats.service';
 import { DirectConversation } from './entities/direct-conversation.entity';
 import { DirectConversationMember } from './entities/direct-conversation-member.entity';
@@ -32,6 +36,7 @@ const createMockConversationRepo = () => ({
   findOne: jest.fn(),
   create: jest.fn((data: Record<string, unknown>) => data),
   save: jest.fn(),
+  update: jest.fn(),
 });
 
 const createMockMemberRepo = () => ({
@@ -136,14 +141,18 @@ describe('ChatsService', () => {
         'user-2',
       );
 
+      // The initiator (userA, the caller) starts 'accepted'; the recipient
+      // (userB) starts 'pending' — the message-request behavior.
       expect(memberRepo.save).toHaveBeenCalledWith([
         expect.objectContaining({
           direct_conversation_id: 'conv-1',
           user_id: 'user-1',
+          status: 'accepted',
         }),
         expect.objectContaining({
           direct_conversation_id: 'conv-1',
           user_id: 'user-2',
+          status: 'pending',
         }),
       ]);
       expect(result.id).toBe('conv-1');
@@ -387,6 +396,120 @@ describe('ChatsService', () => {
       );
       expect(result.id).toBe(42);
       expect(result.content).toBe('hola');
+    });
+
+    it("should reject with Forbidden while the caller's own membership is still 'pending', without persisting anything", async () => {
+      memberRepo.findOne.mockResolvedValue({
+        direct_conversation_id: 'conv-1',
+        user_id: 'user-1',
+        status: 'pending',
+      });
+
+      await expect(
+        service.sendMessage('user-1', 'conv-1', 'hola'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(messageRepo.save).not.toHaveBeenCalled();
+    });
+
+    it("should allow sending once the caller's membership is 'accepted'", async () => {
+      memberRepo.findOne.mockResolvedValue({
+        direct_conversation_id: 'conv-1',
+        user_id: 'user-1',
+        status: 'accepted',
+      });
+      messageRepo.save.mockImplementation((m) =>
+        Promise.resolve({ ...m, id: 42, sent_at: new Date(), read_at: null }),
+      );
+
+      await expect(
+        service.sendMessage('user-1', 'conv-1', 'hola'),
+      ).resolves.toMatchObject({ id: 42 });
+    });
+  });
+
+  describe('acceptRequest', () => {
+    it('should throw NotFoundException when the caller has no membership row', async () => {
+      memberRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.acceptRequest('intruder', 'conv-1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(memberRepo.save).not.toHaveBeenCalled();
+    });
+
+    it("should flip the caller's own status to 'accepted' and return a summary with isPending: false", async () => {
+      const membership = {
+        direct_conversation_id: 'conv-1',
+        user_id: 'user-1',
+        status: 'pending',
+      };
+      memberRepo.findOne
+        .mockResolvedValueOnce(membership) // the caller's own row, looked up first
+        .mockResolvedValueOnce({
+          direct_conversation_id: 'conv-1',
+          user_id: 'other-user',
+        }) // otherMember, inside buildConversationSummary
+        .mockResolvedValueOnce({
+          direct_conversation_id: 'conv-1',
+          user_id: 'user-1',
+          status: 'accepted',
+        }); // viewerMember, re-read after save — reflects the flip
+      memberRepo.save.mockResolvedValue(undefined);
+      conversationRepo.findOne.mockResolvedValue({
+        id: 'conv-1',
+        created_at: new Date('2026-09-01T00:00:00Z'),
+      });
+      userRepo.findOne.mockResolvedValue({
+        id: 'other-user',
+        username: 'bob',
+      });
+      messageRepo.findOne.mockResolvedValue(null);
+      messageRepo.count.mockResolvedValue(0);
+
+      const result = await service.acceptRequest('user-1', 'conv-1');
+
+      expect(memberRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'accepted' }),
+      );
+      expect(result.isPending).toBe(false);
+    });
+  });
+
+  describe('declineRequest', () => {
+    it('should throw NotFoundException when the caller has no membership row', async () => {
+      memberRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.declineRequest('intruder', 'conv-1'),
+      ).rejects.toThrow(NotFoundException);
+      expect(conversationRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('should soft-delete the whole conversation (is_active: false), removing it for both participants', async () => {
+      memberRepo.findOne.mockResolvedValue({
+        direct_conversation_id: 'conv-1',
+        user_id: 'user-1',
+        status: 'pending',
+      });
+
+      await service.declineRequest('user-1', 'conv-1');
+
+      expect(conversationRepo.update).toHaveBeenCalledWith('conv-1', {
+        is_active: false,
+      });
+    });
+
+    it('should no longer be visible to either participant afterward — buildConversationSummary returns null for an inactive conversation', async () => {
+      memberRepo.find.mockResolvedValue([
+        { direct_conversation_id: 'conv-1', user_id: 'user-1' },
+      ]);
+      // Matches a real is_active: true filter: a soft-deleted conversation
+      // simply doesn't come back from this lookup.
+      conversationRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.listConversations('user-1');
+
+      expect(result).toEqual([]);
     });
   });
 

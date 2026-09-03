@@ -10,6 +10,8 @@ describe('ChatsController', () => {
     listMessages: jest.Mock;
     sendMessage: jest.Mock;
     markConversationRead: jest.Mock;
+    acceptRequest: jest.Mock;
+    declineRequest: jest.Mock;
   };
 
   const currentUser: AuthenticatedUser = {
@@ -27,6 +29,8 @@ describe('ChatsController', () => {
         .mockResolvedValue({ messages: [], nextBefore: null }),
       sendMessage: jest.fn().mockResolvedValue({}),
       markConversationRead: jest.fn().mockResolvedValue({ updated: 0 }),
+      acceptRequest: jest.fn().mockResolvedValue({}),
+      declineRequest: jest.fn().mockResolvedValue(undefined),
     };
 
     controller = new ChatsController(service as unknown as ChatsService);
@@ -75,5 +79,17 @@ describe('ChatsController', () => {
       'user-1',
       'conv-1',
     );
+  });
+
+  it('should accept a message request on behalf of the authenticated caller', async () => {
+    await controller.acceptRequest('conv-1', currentUser);
+
+    expect(service.acceptRequest).toHaveBeenCalledWith('user-1', 'conv-1');
+  });
+
+  it('should decline a message request on behalf of the authenticated caller', async () => {
+    await controller.declineRequest('conv-1', currentUser);
+
+    expect(service.declineRequest).toHaveBeenCalledWith('user-1', 'conv-1');
   });
 });

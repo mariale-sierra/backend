@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -12,6 +13,7 @@ import {
 import {
   ApiBearerAuth,
   ApiBadRequestResponse,
+  ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -93,6 +95,10 @@ export class ChatsController {
   @ApiNotFoundResponse({
     description: 'Conversación no encontrada o el usuario no es participante',
   })
+  @ApiForbiddenResponse({
+    description:
+      'El usuario todavía no acepta esta solicitud de mensaje (debe aceptarla antes de responder)',
+  })
   sendMessage(
     @Param('id', ParseUUIDPipe) conversationId: string,
     @Body() dto: SendMessageDto,
@@ -117,5 +123,32 @@ export class ChatsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.chatsService.markConversationRead(user.sub, conversationId);
+  }
+
+  @Patch(':id/accept')
+  @ApiParam({ name: 'id', description: 'ID (UUID) de la conversación' })
+  @ApiOperation({ summary: 'Aceptar una solicitud de mensaje' })
+  @ApiOkResponse({ type: ConversationSummaryDto })
+  @ApiNotFoundResponse({ description: 'Conversación no encontrada' })
+  acceptRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.chatsService.acceptRequest(user.sub, id);
+  }
+
+  @Delete(':id/decline')
+  @ApiParam({ name: 'id', description: 'ID (UUID) de la conversación' })
+  @ApiOperation({
+    summary:
+      'Rechazar una solicitud de mensaje (elimina la conversación para ambos)',
+  })
+  @ApiOkResponse({ description: 'Conversación rechazada' })
+  @ApiNotFoundResponse({ description: 'Conversación no encontrada' })
+  declineRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.chatsService.declineRequest(user.sub, id);
   }
 }

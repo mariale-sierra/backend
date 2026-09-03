@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -154,6 +155,17 @@ export class ChatsService {
   ): Promise<MessageDto> {
     await this.assertMembership(conversationId, userId);
 
+    // A pending recipient can already read (assertMembership alone covers
+    // that) but can't reply until they accept the request — the frontend
+    // already hides the composer for this state, this is defense in depth
+    // so the endpoint doesn't just trust that.
+    const membership = await this.memberRepo.findOne({
+      where: { direct_conversation_id: conversationId, user_id: userId },
+    });
+    if (membership?.status === 'pending') {
+      throw new ForbiddenException('Accept this request before replying');
+    }
+
     const message = this.messageRepo.create({
       direct_conversation_id: conversationId,
       user_id: userId,
@@ -182,6 +194,46 @@ export class ChatsService {
     return { updated: result.affected ?? 0 };
   }
 
+  /** Accepts a message request — flips the caller's OWN membership row from
+   * 'pending' to 'accepted', unlocking sendMessage() for them. Same
+   * "conversation not found" status for a missing membership row as
+   * assertMembership uses elsewhere in this service. */
+  async acceptRequest(
+    userId: string,
+    conversationId: string,
+  ): Promise<ConversationSummaryDto> {
+    const membership = await this.memberRepo.findOne({
+      where: { direct_conversation_id: conversationId, user_id: userId },
+    });
+    if (!membership) throw new NotFoundException('Conversation not found');
+
+    membership.status = 'accepted';
+    await this.memberRepo.save(membership);
+
+    const summary = await this.buildConversationSummary(conversationId, userId);
+    if (!summary) throw new NotFoundException('Conversation not found');
+    return summary;
+  }
+
+  /** Declines a message request — soft-deletes the WHOLE conversation
+   * (matches this codebase's existing soft-delete convention, e.g.
+   * SpacesService.remove()), removing it for BOTH participants, not just
+   * the decliner. */
+  async declineRequest(userId: string, conversationId: string): Promise<void> {
+    const membership = await this.memberRepo.findOne({
+      where: { direct_conversation_id: conversationId, user_id: userId },
+    });
+    if (!membership) throw new NotFoundException('Conversation not found');
+
+    await this.conversationRepo.update(conversationId, { is_active: false });
+  }
+
+  /**
+   * `userA` is always the caller (findOrCreateDirectConversation's
+   * currentUserId) — their own row starts 'accepted'; `userB`'s (the
+   * recipient) starts 'pending', the message-request behavior: they can
+   * read immediately but can't reply until they accept.
+   */
   private async createConversation(
     userA: string,
     userB: string,
@@ -193,15 +245,23 @@ export class ChatsService {
       this.memberRepo.create({
         direct_conversation_id: conversation.id,
         user_id: userA,
+        status: 'accepted',
       }),
       this.memberRepo.create({
         direct_conversation_id: conversation.id,
         user_id: userB,
+        status: 'pending',
       }),
     ]);
     return conversation.id;
   }
 
+  /**
+   * Only matches an ACTIVE conversation — a previously declined one
+   * (declineRequest soft-deletes it) must not be resurrected the next time
+   * userA tries to message userB; a fresh conversation (with a fresh
+   * 'pending' recipient row) should be created instead.
+   */
   private async findExistingConversationId(
     userA: string,
     userB: string,
@@ -213,6 +273,11 @@ export class ChatsService {
         'm2',
         'm2.direct_conversation_id = m1.direct_conversation_id AND m2.user_id = :userB',
         { userB },
+      )
+      .innerJoin(
+        DirectConversation,
+        'c',
+        'c.id = m1.direct_conversation_id AND c.is_active = true',
       )
       .where('m1.user_id = :userA', { userA })
       .select('m1.direct_conversation_id', 'conversationId')
@@ -242,17 +307,27 @@ export class ChatsService {
     conversationId: string,
     viewerUserId: string,
   ): Promise<ConversationSummaryDto | null> {
+    // is_active: true — a declined conversation (declineRequest soft-deletes
+    // it) must stop showing up for either participant.
     const conversation = await this.conversationRepo.findOne({
-      where: { id: conversationId },
+      where: { id: conversationId, is_active: true },
     });
     if (!conversation) return null;
 
-    const otherMember = await this.memberRepo.findOne({
-      where: {
-        direct_conversation_id: conversationId,
-        user_id: Not(viewerUserId),
-      },
-    });
+    const [otherMember, viewerMember] = await Promise.all([
+      this.memberRepo.findOne({
+        where: {
+          direct_conversation_id: conversationId,
+          user_id: Not(viewerUserId),
+        },
+      }),
+      this.memberRepo.findOne({
+        where: {
+          direct_conversation_id: conversationId,
+          user_id: viewerUserId,
+        },
+      }),
+    ]);
     // Under this service's own invariant (always exactly two members), a
     // missing "other" member means that user's account is gone (FK cascade
     // removed their membership row) — treat the conversation as unusable
@@ -287,6 +362,9 @@ export class ChatsService {
       ? this.toLastMessagePreview(lastMessage)
       : null;
     summary.unreadCount = unreadCount;
+    // Only the recipient of a not-yet-accepted request sees this as true —
+    // the initiator's own row is always 'accepted' (createConversation).
+    summary.isPending = viewerMember?.status === 'pending';
     return summary;
   }
 
