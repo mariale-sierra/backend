@@ -4,6 +4,7 @@ import {
   Param,
   ParseUUIDPipe,
   Query,
+  Req,
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
@@ -21,6 +22,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { CursorPaginationQueryDto } from './dto/cursor-pagination-query.dto';
 import { decodeCursor, DEFAULT_PAGE_LIMIT } from './pagination.util';
+import { resolveRequestTimezone } from '../common/timezone.util';
 
 @ApiTags('Workout Posts')
 @Controller('workout-posts')
@@ -33,8 +35,11 @@ export class WorkoutPostsController {
     summary: 'Fotos de progreso del usuario autenticado',
     description: 'Devuelve todas las fotos de progreso del usuario (perfil).',
   })
-  getMyPhotos(@CurrentUser() user: AuthenticatedUser) {
-    return this.workoutPostsService.getUserPhotos(user.sub);
+  getMyPhotos(@CurrentUser() user: AuthenticatedUser, @Req() req) {
+    return this.workoutPostsService.getUserPhotos(
+      user.sub,
+      resolveRequestTimezone(req),
+    );
   }
 
   @Get('challenge/:challengeId')
@@ -46,8 +51,13 @@ export class WorkoutPostsController {
   getChallengePhotos(
     @Param('challengeId', new ParseUUIDPipe()) challengeId: string,
     @CurrentUser() user: AuthenticatedUser,
+    @Req() req,
   ) {
-    return this.workoutPostsService.getChallengePhotos(challengeId, user.sub);
+    return this.workoutPostsService.getChallengePhotos(
+      challengeId,
+      user.sub,
+      resolveRequestTimezone(req),
+    );
   }
 
   @Get('challenge/:challengeId/latest')
@@ -65,10 +75,12 @@ export class WorkoutPostsController {
   getLatestChallengePhoto(
     @Param('challengeId', new ParseUUIDPipe()) challengeId: string,
     @CurrentUser() user: AuthenticatedUser,
+    @Req() req,
   ) {
     return this.workoutPostsService.getLatestChallengePhoto(
       challengeId,
       user.sub,
+      resolveRequestTimezone(req),
     );
   }
 
@@ -114,6 +126,7 @@ export class WorkoutPostsController {
     @Query() query: CursorPaginationQueryDto,
     @Res({ passthrough: true }) res: Response,
     @CurrentUser() user: AuthenticatedUser,
+    @Req() req,
   ) {
     const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
     const cursor = query.cursor ? decodeCursor(query.cursor) : undefined;
@@ -122,6 +135,7 @@ export class WorkoutPostsController {
       userId,
       user.sub,
       { limit, cursor },
+      resolveRequestTimezone(req),
     );
 
     if (nextCursor) {

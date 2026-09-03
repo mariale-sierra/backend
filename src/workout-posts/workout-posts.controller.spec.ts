@@ -20,6 +20,7 @@ describe('WorkoutPostsController.getUserPosts', () => {
     email: 'v@v.com',
     username: 'viewer',
   };
+  const req = { headers: { 'x-timezone': 'America/Guatemala' } };
 
   beforeEach(() => {
     service = { getUserPosts: jest.fn() };
@@ -38,12 +39,14 @@ describe('WorkoutPostsController.getUserPosts', () => {
       query,
       res as unknown as Response,
       viewer,
+      req,
     );
 
     expect(service.getUserPosts).toHaveBeenCalledWith(
       'target-user-id',
       'viewer-1',
       { limit: DEFAULT_PAGE_LIMIT, cursor: undefined },
+      'America/Guatemala',
     );
   });
 
@@ -57,6 +60,7 @@ describe('WorkoutPostsController.getUserPosts', () => {
       query,
       res as unknown as Response,
       viewer,
+      req,
     );
 
     expect(service.getUserPosts).toHaveBeenCalledWith(
@@ -66,6 +70,7 @@ describe('WorkoutPostsController.getUserPosts', () => {
         limit: 5,
         cursor: { createdAt: '2026-08-16T10:00:00.000Z', id: '9' },
       },
+      'America/Guatemala',
     );
   });
 
@@ -78,6 +83,7 @@ describe('WorkoutPostsController.getUserPosts', () => {
         query,
         res as unknown as Response,
         viewer,
+        req,
       ),
     ).rejects.toThrow(BadRequestException);
     expect(service.getUserPosts).not.toHaveBeenCalled();
@@ -94,6 +100,7 @@ describe('WorkoutPostsController.getUserPosts', () => {
       {},
       res as unknown as Response,
       viewer,
+      req,
     );
 
     expect(res.setHeader).toHaveBeenCalledWith('X-Next-Cursor', 'next-abc');
@@ -107,6 +114,7 @@ describe('WorkoutPostsController.getUserPosts', () => {
       {},
       res as unknown as Response,
       viewer,
+      req,
     );
 
     expect(res.setHeader).not.toHaveBeenCalled();
@@ -121,9 +129,29 @@ describe('WorkoutPostsController.getUserPosts', () => {
       {},
       res as unknown as Response,
       viewer,
+      req,
     );
 
     expect(result).toBe(photos);
+  });
+
+  it('should default to UTC when the X-Timezone header is missing', async () => {
+    service.getUserPosts.mockResolvedValue({ photos: [] });
+
+    await controller.getUserPosts(
+      'target-user-id',
+      {},
+      res as unknown as Response,
+      viewer,
+      { headers: {} },
+    );
+
+    expect(service.getUserPosts).toHaveBeenCalledWith(
+      'target-user-id',
+      'viewer-1',
+      { limit: DEFAULT_PAGE_LIMIT, cursor: undefined },
+      'UTC',
+    );
   });
 });
 
@@ -136,6 +164,7 @@ describe('WorkoutPostsController.getLatestChallengePhoto', () => {
     email: 'v@v.com',
     username: 'viewer',
   };
+  const req = { headers: { 'x-timezone': 'America/Guatemala' } };
 
   beforeEach(() => {
     service = { getLatestChallengePhoto: jest.fn() };
@@ -144,14 +173,29 @@ describe('WorkoutPostsController.getLatestChallengePhoto', () => {
     );
   });
 
-  it('should delegate to the service with the challengeId and the JWT-derived viewer id', async () => {
+  it("should delegate to the service with the challengeId, the JWT-derived viewer id, and the caller's timezone", async () => {
     service.getLatestChallengePhoto.mockResolvedValue(null);
 
-    await controller.getLatestChallengePhoto('challenge-1', viewer);
+    await controller.getLatestChallengePhoto('challenge-1', viewer, req);
 
     expect(service.getLatestChallengePhoto).toHaveBeenCalledWith(
       'challenge-1',
       'viewer-1',
+      'America/Guatemala',
+    );
+  });
+
+  it('should default to UTC when the X-Timezone header is missing', async () => {
+    service.getLatestChallengePhoto.mockResolvedValue(null);
+
+    await controller.getLatestChallengePhoto('challenge-1', viewer, {
+      headers: {},
+    });
+
+    expect(service.getLatestChallengePhoto).toHaveBeenCalledWith(
+      'challenge-1',
+      'viewer-1',
+      'UTC',
     );
   });
 
@@ -161,6 +205,7 @@ describe('WorkoutPostsController.getLatestChallengePhoto', () => {
     const result = await controller.getLatestChallengePhoto(
       'challenge-1',
       viewer,
+      req,
     );
 
     expect(result).toBeNull();
@@ -173,6 +218,7 @@ describe('WorkoutPostsController.getLatestChallengePhoto', () => {
     const result = await controller.getLatestChallengePhoto(
       'challenge-1',
       viewer,
+      req,
     );
 
     expect(result).toBe(photo);

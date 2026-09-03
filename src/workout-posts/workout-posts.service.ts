@@ -10,6 +10,7 @@ import { User } from '../users/entities/user.entity';
 import { DecodedCursor, encodeCursor } from './pagination.util';
 import { formatPrimaryMetric, MetricValueRow } from './metric-display.util';
 import { FollowsService } from '../follows/follows.service';
+import { getLocalMidnightUtc } from '../common/timezone.util';
 
 /** Shape consumed by the frontend (types/challenge.ts ChallengePhoto). */
 export interface ChallengePhoto {
@@ -278,8 +279,14 @@ export class WorkoutPostsService {
   async getChallengePhotos(
     challengeId: string,
     viewerId: string,
+    timezone: string = 'UTC',
   ): Promise<ChallengePhoto[]> {
-    return this.fetchPhotos('wl.challenge_id = $1', [challengeId], viewerId);
+    return this.fetchPhotos(
+      'wl.challenge_id = $1',
+      [challengeId],
+      viewerId,
+      timezone,
+    );
   }
 
   /**
@@ -293,20 +300,29 @@ export class WorkoutPostsService {
   async getLatestChallengePhoto(
     challengeId: string,
     viewerId: string,
+    timezone: string = 'UTC',
   ): Promise<ChallengePhoto | null> {
-    const photos = await this.getChallengePhotos(challengeId, viewerId);
+    const photos = await this.getChallengePhotos(
+      challengeId,
+      viewerId,
+      timezone,
+    );
     return photos[0] ?? null;
   }
 
   /** Every progress photo the given user has posted, across all challenges. */
-  async getUserPhotos(userId: string): Promise<ChallengePhoto[]> {
-    return this.fetchPhotos('p.user_id = $1', [userId], userId);
+  async getUserPhotos(
+    userId: string,
+    timezone: string = 'UTC',
+  ): Promise<ChallengePhoto[]> {
+    return this.fetchPhotos('p.user_id = $1', [userId], userId, timezone);
   }
 
   private async fetchPhotos(
     whereClause: string,
     params: unknown[],
     viewerId: string,
+    timezone: string,
   ): Promise<ChallengePhoto[]> {
     const supportsModeration = await this.supportsModerationColumns();
 
@@ -360,7 +376,7 @@ export class WorkoutPostsService {
       params,
     );
 
-    return this.mapRowsToChallengePhotos(rows);
+    return this.mapRowsToChallengePhotos(rows, timezone);
   }
 
   /** Shared row -> ChallengePhoto enrichment (metrics batch + day calc) used
@@ -368,6 +384,7 @@ export class WorkoutPostsService {
    * fetchPaginatedPhotos(). */
   private async mapRowsToChallengePhotos(
     rows: PhotoRow[],
+    timezone: string,
   ): Promise<ChallengePhoto[]> {
     if (rows.length === 0) return [];
 
@@ -380,7 +397,7 @@ export class WorkoutPostsService {
       challengeId: r.challenge_id,
       userName: r.user_name,
       imageUrl: r.image_url,
-      day: this.dayFromJoinedAt(r.joined_at, r.created_at),
+      day: this.dayFromJoinedAt(r.joined_at, r.created_at, timezone),
       // Post visibility is 'private' | 'followers' | 'public'; the gallery
       // model only distinguishes 'private' | 'public' (followers-visible
       // reads as public here, same as an actual public post).
@@ -413,6 +430,7 @@ export class WorkoutPostsService {
       bypassForOwner: boolean;
       allowFollowerVisibility?: boolean;
     },
+    timezone: string,
   ): Promise<{ photos: ChallengePhoto[]; nextCursor?: string }> {
     const supportsModeration = await this.supportsModerationColumns();
     const params: unknown[] = [...baseParams];
@@ -477,7 +495,7 @@ export class WorkoutPostsService {
     const hasNextPage = rows.length > options.limit;
     const pageRows = hasNextPage ? rows.slice(0, options.limit) : rows;
 
-    const photos = await this.mapRowsToChallengePhotos(pageRows);
+    const photos = await this.mapRowsToChallengePhotos(pageRows, timezone);
 
     const last = pageRows[pageRows.length - 1];
     const nextCursor =
@@ -499,6 +517,7 @@ export class WorkoutPostsService {
     targetUserId: string,
     viewerId: string,
     options: { limit: number; cursor?: DecodedCursor },
+    timezone: string = 'UTC',
   ): Promise<{ photos: ChallengePhoto[]; nextCursor?: string }> {
     const user = await this.userRepo.findOne({
       where: { id: targetUserId, is_active: true },
@@ -520,6 +539,7 @@ export class WorkoutPostsService {
         bypassForOwner: isOwner,
         allowFollowerVisibility: isFollower,
       },
+      timezone,
     );
   }
 
@@ -605,7 +625,14 @@ export class WorkoutPostsService {
       user_avatar_url: r.user_avatar_url ?? undefined,
       challenge_id: r.challenge_id,
       challenge_name: r.challenge_name,
-      challenge_day: this.dayFromJoinedAt(r.joined_at, r.created_at),
+      // Deliberately still UTC, not the requesting viewer's timezone: the
+      // Feed is one shared, unpersonalized result set with no per-poster
+      // context — the correct timezone here would be the POST'S AUTHOR's,
+      // which isn't tracked anywhere, and using the viewer's own would be
+      // wrong for everyone else's cards. Lower-stakes than the Mine/
+      // challenge-gallery day label (a "Day N" caption here, not something
+      // driving a completion/rest-day state decision) — left as-is.
+      challenge_day: this.dayFromJoinedAt(r.joined_at, r.created_at, 'UTC'),
       image_url: r.image_url ?? undefined,
       caption: r.caption ?? undefined,
       posted_at: new Date(r.created_at).toISOString(),
@@ -755,23 +782,32 @@ export class WorkoutPostsService {
     return map;
   }
 
-  /** Challenge day (1-indexed, UTC) the photo belongs to, from the poster's
-   * join date. Falls back to day 1 when the join date is unknown. */
-  private dayFromJoinedAt(joinedAt: Date | null, createdAt: Date): number {
+  /**
+   * Challenge day (1-indexed) the photo belongs to, from the poster's join
+   * date — computed against LOCAL calendar days in `timezone`, not UTC's,
+   * so it agrees with ChallengesService.getCycleDayInfo()'s already-fixed
+   * "current day" (same getLocalMidnightUtc() helper): a photo logged late
+   * at night, local time, but already past UTC midnight must still count
+   * as the day it was taken on locally, not the next UTC day. Falls back to
+   * day 1 when the join date is unknown.
+   */
+  private dayFromJoinedAt(
+    joinedAt: Date | null,
+    createdAt: Date,
+    timezone: string,
+  ): number {
     if (!joinedAt) return 1;
     const msPerDay = 1000 * 60 * 60 * 24;
-    const joined = new Date(joinedAt);
-    const created = new Date(createdAt);
-    const joinedUtc = Date.UTC(
-      joined.getUTCFullYear(),
-      joined.getUTCMonth(),
-      joined.getUTCDate(),
+    const joinedMidnightUtc = getLocalMidnightUtc(new Date(joinedAt), timezone);
+    const createdMidnightUtc = getLocalMidnightUtc(
+      new Date(createdAt),
+      timezone,
     );
-    const createdUtc = Date.UTC(
-      created.getUTCFullYear(),
-      created.getUTCMonth(),
-      created.getUTCDate(),
+    return Math.max(
+      Math.floor(
+        (createdMidnightUtc.getTime() - joinedMidnightUtc.getTime()) / msPerDay,
+      ) + 1,
+      1,
     );
-    return Math.max(Math.floor((createdUtc - joinedUtc) / msPerDay) + 1, 1);
   }
 }

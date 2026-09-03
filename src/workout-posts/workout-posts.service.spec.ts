@@ -280,6 +280,48 @@ describe('WorkoutPostsService', () => {
       expect(sql).toContain('wl.challenge_id = $1');
       expect(params[0]).toBe('challenge-42');
     });
+
+    // Real bug, verified on live data: a photo logged at 22:25 local time
+    // in America/Guatemala (still Sept 1 locally) but already 04:25 the
+    // next UTC day got mislabeled "day 4" (UTC's answer) instead of the
+    // correct local "day 3" — the same class of bug the cycle-day-info and
+    // workout-log timezone fixes already covered, just never wired in here.
+    it("should compute the photo's challenge day against the poster's local calendar day, not UTC's", async () => {
+      // Joined 2026-08-30T20:18:00Z -> 2026-08-30 14:18 local (Guatemala,
+      // UTC-6). Logged 2026-09-02T04:25:00Z -> 2026-09-01 22:25 local —
+      // still Sept 1 locally, though already Sept 2 in UTC.
+      const row = photoRow({
+        joined_at: new Date('2026-08-30T20:18:00.000Z'),
+        created_at: new Date('2026-09-02T04:25:00.000Z'),
+      });
+      postRepo.manager.query.mockResolvedValueOnce([row]); // main query
+      postRepo.manager.query.mockResolvedValueOnce([]); // metricsByWorkoutLog: base rows
+      postRepo.manager.query.mockResolvedValueOnce([]); // metricsByWorkoutLog: exercise-level metric rows
+
+      const photos = await service.getChallengePhotos(
+        'challenge-1',
+        VIEWER_ID,
+        'America/Guatemala',
+      );
+
+      // Local day-diff: Aug 30 -> Sept 1 is 2 days elapsed -> day 3.
+      // A UTC-only calc (Aug 30 -> Sept 2, 3 days elapsed) would say day 4.
+      expect(photos[0].day).toBe(3);
+    });
+
+    it('should default to UTC when no timezone is given, matching the pre-fix behavior', async () => {
+      const row = photoRow({
+        joined_at: new Date('2026-08-30T20:18:00.000Z'),
+        created_at: new Date('2026-09-02T04:25:00.000Z'),
+      });
+      postRepo.manager.query.mockResolvedValueOnce([row]);
+      postRepo.manager.query.mockResolvedValueOnce([]);
+      postRepo.manager.query.mockResolvedValueOnce([]);
+
+      const photos = await service.getChallengePhotos('challenge-1', VIEWER_ID);
+
+      expect(photos[0].day).toBe(4);
+    });
   });
 
   // ---------------------------------------------------------------------
