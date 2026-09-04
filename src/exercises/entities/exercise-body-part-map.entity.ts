@@ -12,7 +12,11 @@ export class ExerciseBodyPartMap {
   @PrimaryColumn({ name: 'body_part_id' })
   bodyPartId!: number;
 
-  @Column({ name: 'relation_type', type: 'enum', enum: ['primary', 'secondary', 'supporting'] })
+  @Column({
+    name: 'relation_type',
+    type: 'enum',
+    enum: ['primary', 'secondary', 'supporting'],
+  })
   relationType!: BodyPartRelationType;
 
   @Column({ name: 'priority_order', type: 'int', nullable: true })

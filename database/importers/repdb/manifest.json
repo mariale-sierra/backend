@@ -1,0 +1,11 @@
+{
+  "source": "repdb",
+  "sourceRepo": "https://github.com/RepDB/exercise-dataset.git",
+  "pinnedCommit": "8f25d055e243b882aa05acaa66c2c51b1a9fc2d1",
+  "schemaVersion": 3,
+  "datasetChecksum": "9da2972bf526d3aebfe54f8a00e07a490fba418996e9e8012bad8e13cd448ca7",
+  "vendoredAt": "2026-09-03",
+  "exerciseCount": 601,
+  "imageBaseRawUrl": "https://raw.githubusercontent.com/RepDB/exercise-dataset/8f25d055e243b882aa05acaa66c2c51b1a9fc2d1/",
+  "notes": "exercises.json is vendored in dataset/exercises.json, pinned to the commit above (never fetched live at app runtime). Image bytes are fetched from imageBaseRawUrl (an immutable, pinned-commit URL, not the live/latest branch) only by this importer, never by the running app."
+}

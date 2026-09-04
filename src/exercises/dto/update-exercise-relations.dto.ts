@@ -1,6 +1,23 @@
 import { Type } from 'class-transformer';
-import { ArrayUnique, IsArray, IsInt, IsOptional, Min } from 'class-validator';
+import {
+  ArrayUnique,
+  IsArray,
+  IsIn,
+  IsInt,
+  IsOptional,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+
+export class MuscleAssignmentDto {
+  @IsInt()
+  @Min(1)
+  muscleId!: number;
+
+  @IsIn(['primary', 'secondary'])
+  role!: 'primary' | 'secondary';
+}
 
 export class UpdateExerciseRelationsDto {
   @ApiPropertyOptional({
@@ -61,4 +78,15 @@ export class UpdateExerciseRelationsDto {
   @IsInt({ each: true })
   @Min(1, { each: true })
   bodyPartIds?: number[];
+
+  @ApiPropertyOptional({
+    description:
+      'Asignaciones de músculo del ejercicio (reemplaza todas las existentes si se envía)',
+    type: [MuscleAssignmentDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => MuscleAssignmentDto)
+  muscleAssignments?: MuscleAssignmentDto[];
 }
