@@ -15,6 +15,7 @@
     "db:migrate": "node database/scripts/migrate.js",
     "db:baseline": "node database/scripts/baseline.js",
     "db:new": "node database/scripts/new-migration.js",
+    "db:import:repdb": "ts-node -T -P database/importers/repdb/tsconfig.json database/importers/repdb/import-repdb.ts",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",

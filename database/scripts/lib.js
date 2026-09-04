@@ -118,6 +118,7 @@ async function getAppliedFilenames(client) {
 module.exports = {
   DATABASE_DIR,
   PHASES,
+  loadEnvFile,
   createClient,
   connectWithRetry,
   listAllSqlFiles,

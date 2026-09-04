@@ -11,6 +11,13 @@ import { ExerciseBodyPart } from './entities/exercise-body-part.entity';
 import { ExerciseCategoryMap } from './entities/exercise-category-map.entity';
 import { ExerciseLocationMap } from './entities/exercise-location-map.entity';
 import { ExerciseBodyPartMap } from './entities/exercise-body-part-map.entity';
+import { MuscleRegion } from './entities/muscle-region.entity';
+import { Muscle } from './entities/muscle.entity';
+import { ExerciseMuscle } from './entities/exercise-muscle.entity';
+import { MuscleSvgPart } from './entities/muscle-svg-part.entity';
+import { ExerciseTranslation } from './entities/exercise-translation.entity';
+import { ExerciseAsset } from './entities/exercise-asset.entity';
+import { DatasetImport } from './entities/dataset-import.entity';
 
 @Module({
   imports: [
@@ -24,6 +31,13 @@ import { ExerciseBodyPartMap } from './entities/exercise-body-part-map.entity';
       ExerciseCategoryMap,
       ExerciseLocationMap,
       ExerciseBodyPartMap,
+      MuscleRegion,
+      Muscle,
+      ExerciseMuscle,
+      MuscleSvgPart,
+      ExerciseTranslation,
+      ExerciseAsset,
+      DatasetImport,
     ]),
   ],
   controllers: [ExercisesController],

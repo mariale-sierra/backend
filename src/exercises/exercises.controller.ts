@@ -18,6 +18,7 @@ import {
 import { UpdateExerciseRelationsDto } from './dto/update-exercise-relations.dto';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
 import { CountExercisesQueryDto } from './dto/count-exercises-query.dto';
+import { QueryExercisesDto } from './dto/query-exercises.dto';
 import { Public } from '../auth/decorators/public.decorator';
 
 @ApiTags('Exercises')
@@ -41,12 +42,68 @@ export class ExercisesController {
   @Public()
   @Get()
   @ApiOperation({
-    summary: 'Obtener todos los ejercicios',
-    description: 'Lista todos los ejercicios disponibles',
+    summary: 'Obtener catálogo de ejercicios (paginado, filtrable, buscable)',
+    description:
+      'Lista ejercicios activos, paginada. Filtros por category/location/region/muscle (códigos), búsqueda multilenguaje por nombre (?search=, busca en todos los locales guardados sin importar el idioma activo), y ?locale= para el nombre traducido. Respuesta liviana: siempre incluye una imagen, nunca la lista completa de músculos ni instrucciones.',
   })
-  @ApiResponse({ status: 200, description: 'Lista de ejercicios' })
-  findAll() {
-    return this.exercisesService.findAll();
+  @ApiResponse({ status: 200, description: 'Página de ejercicios' })
+  findAll(@Query() query: QueryExercisesDto) {
+    return this.exercisesService.findAll(query);
+  }
+
+  @Public()
+  @Get('muscle-regions')
+  @ApiOperation({
+    summary: 'Obtener regiones musculares',
+    description:
+      'Lista las 9 regiones musculares curadas, con conteo de músculos hijos',
+  })
+  @ApiResponse({ status: 200, description: 'Lista de regiones musculares' })
+  findMuscleRegions() {
+    return this.exercisesService.findMuscleRegions();
+  }
+
+  @Public()
+  @Get('muscle-regions/:code/muscles')
+  @ApiOperation({
+    summary: 'Obtener músculos de una región',
+    description:
+      'Lista los músculos de una región, cada uno con su ícono (o null) y sus muscle_svg_parts agrupados por vista, para armar el highlight a nivel región en un solo call',
+  })
+  @ApiParam({
+    name: 'code',
+    description: 'Código de la región',
+    example: 'shoulders',
+  })
+  @ApiResponse({ status: 200, description: 'Lista de músculos de la región' })
+  findMusclesInRegion(@Param('code') code: string) {
+    return this.exercisesService.findMusclesInRegion(code);
+  }
+
+  @Public()
+  @Get('muscles/:code')
+  @ApiOperation({
+    summary: 'Obtener detalle de un músculo',
+    description:
+      'Ícono, muscle_svg_parts con su coverage, y dos listas paginadas de ejercicios (donde el músculo es primary / donde es secondary)',
+  })
+  @ApiParam({
+    name: 'code',
+    description: 'Código del músculo',
+    example: 'biceps_brachii',
+  })
+  @ApiResponse({ status: 200, description: 'Detalle del músculo' })
+  @ApiResponse({ status: 404, description: 'Músculo no encontrado' })
+  findMuscleDetail(
+    @Param('code') code: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.exercisesService.findMuscleDetail(
+      code,
+      page ? Number(page) : undefined,
+      pageSize ? Number(pageSize) : undefined,
+    );
   }
 
   @Public()
@@ -98,8 +155,11 @@ export class ExercisesController {
   @ApiParam({ name: 'id', description: 'ID del ejercicio', example: 1 })
   @ApiResponse({ status: 200, description: 'Ejercicio completo con métricas' })
   @ApiResponse({ status: 404, description: 'Ejercicio no encontrado' })
-  findFullById(@Param('id', ParseIntPipe) id: number) {
-    return this.exercisesService.findFullById(id);
+  findFullById(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('locale') locale?: string,
+  ) {
+    return this.exercisesService.findFullById(id, locale ?? 'en');
   }
 
   @Post(':id/relations')

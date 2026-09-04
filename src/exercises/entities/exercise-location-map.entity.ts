@@ -24,6 +24,16 @@ export class ExerciseLocationMap {
   @Column({ name: 'is_primary', type: 'boolean', default: false })
   isPrimary!: boolean;
 
+  @Column({
+    type: 'enum',
+    enum: ['inferred', 'manual_override'],
+    default: 'manual_override',
+  })
+  source!: 'inferred' | 'manual_override';
+
+  @Column({ name: 'mapping_reason', type: 'varchar', nullable: true })
+  mappingReason?: string | null;
+
   @ManyToOne(() => Exercise, (exercise) => exercise.location_maps, {
     onDelete: 'CASCADE',
   })
