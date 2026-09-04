@@ -4,6 +4,9 @@ import { ExerciseMetric } from './exercise-metric.entity';
 import { ExerciseCategoryMap } from './exercise-category-map.entity';
 import { ExerciseLocationMap } from './exercise-location-map.entity';
 import { ExerciseBodyPartMap } from './exercise-body-part-map.entity';
+import { ExerciseMuscle } from './exercise-muscle.entity';
+import { ExerciseTranslation } from './exercise-translation.entity';
+import { ExerciseAsset } from './exercise-asset.entity';
 
 export enum TrackingMode {
   SINGLE = 'single',
@@ -38,6 +41,24 @@ export class Exercise {
   @Column({ default: true })
   is_active!: boolean;
 
+  @Column({ name: 'region_id', type: 'int', nullable: true })
+  regionId?: number | null;
+
+  @Column({ default: 'manual' })
+  source!: string;
+
+  @Column({ name: 'source_id', type: 'varchar', nullable: true })
+  sourceId?: string | null;
+
+  @Column({ name: 'source_import_id', type: 'int', nullable: true })
+  sourceImportId?: number | null;
+
+  @Column({ name: 'content_locked', default: false })
+  contentLocked!: boolean;
+
+  @Column({ name: 'exercise_source_metadata', type: 'jsonb', nullable: true })
+  exerciseSourceMetadata?: Record<string, unknown> | null;
+
   @OneToMany(() => RoutineExercise, (re) => re.exercise)
   routine_exercises?: RoutineExercise[];
 
@@ -52,4 +73,13 @@ export class Exercise {
 
   @OneToMany(() => ExerciseBodyPartMap, (map) => map.exercise)
   body_part_maps?: ExerciseBodyPartMap[];
+
+  @OneToMany(() => ExerciseMuscle, (map) => map.exercise)
+  muscle_maps?: ExerciseMuscle[];
+
+  @OneToMany(() => ExerciseTranslation, (t) => t.exercise)
+  translations?: ExerciseTranslation[];
+
+  @OneToMany(() => ExerciseAsset, (a) => a.exercise)
+  assets?: ExerciseAsset[];
 }
