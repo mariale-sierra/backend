@@ -388,24 +388,38 @@ export class ExercisesService {
     };
   }
 
-  /** 9 regions with a child-muscle count, same shape as GET /exercises/body-parts. */
+  /**
+   * 9 regions with a child-muscle count, same shape as GET /exercises/body-parts.
+   * Each region also carries a representative `iconUrl` — the first child muscle
+   * (by `sort_order`) that actually has a RepDB icon — reusing the same per-muscle
+   * image system rather than a separate region-level asset (regions have no assets
+   * of their own; `full_body` has no children at all, so it stays null).
+   */
   async findMuscleRegions() {
     const regions = await this.muscleRegionRepo.find({
       where: { isActive: true },
       order: { sortOrder: 'ASC' },
     });
-    const muscles = await this.muscleRepo.find({ where: { isActive: true } });
+    const muscles = await this.muscleRepo.find({
+      where: { isActive: true },
+      order: { sortOrder: 'ASC' },
+    });
     const countByRegion = new Map<number, number>();
+    const iconByRegion = new Map<number, string>();
     for (const muscle of muscles) {
       countByRegion.set(
         muscle.regionId,
         (countByRegion.get(muscle.regionId) ?? 0) + 1,
       );
+      if (!iconByRegion.has(muscle.regionId) && muscle.iconStorageKey) {
+        iconByRegion.set(muscle.regionId, muscle.iconStorageKey);
+      }
     }
     return regions.map((region) => ({
       code: region.code,
       name: region.name,
       muscleCount: countByRegion.get(region.id) ?? 0,
+      iconUrl: this.toPublicUrl(iconByRegion.get(region.id) ?? null),
     }));
   }
 
