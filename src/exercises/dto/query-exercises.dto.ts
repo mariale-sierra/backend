@@ -1,6 +1,25 @@
-import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  IsArray,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+
+/** Same comma-separated-query-param convention as CountExercisesQueryDto's
+ * splitCommaList — `?category=strength,functional` rather than a JSON array,
+ * matching every other list-shaped filter in this API. */
+function splitCommaList(value: unknown): string[] {
+  if (Array.isArray(value)) return value as string[];
+  if (typeof value !== 'string' || value.trim() === '') return [];
+  return value
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
 
 export class QueryExercisesDto {
   @ApiPropertyOptional({
@@ -35,17 +54,25 @@ export class QueryExercisesDto {
   search?: string;
 
   @ApiPropertyOptional({
-    description: 'Código de categoría',
+    description:
+      'Código(s) de categoría, separados por coma (ej. strength,functional)',
     example: 'strength',
   })
   @IsOptional()
-  @IsString()
-  category?: string;
+  @Transform(({ value }) => splitCommaList(value))
+  @IsArray()
+  @IsString({ each: true })
+  category?: string[];
 
-  @ApiPropertyOptional({ description: 'Código de location', example: 'gym' })
+  @ApiPropertyOptional({
+    description: 'Código(s) de location, separados por coma (ej. gym,home)',
+    example: 'gym',
+  })
   @IsOptional()
-  @IsString()
-  location?: string;
+  @Transform(({ value }) => splitCommaList(value))
+  @IsArray()
+  @IsString({ each: true })
+  location?: string[];
 
   @ApiPropertyOptional({
     description: 'Código de región muscular',

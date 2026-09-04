@@ -94,25 +94,25 @@ export class ExercisesService {
       );
     }
 
-    if (query.category) {
+    if (query.category?.length) {
       qb.andWhere(
         `EXISTS (
           SELECT 1 FROM havit.exercise_category_map ecm
           JOIN havit.exercise_categories ec ON ec.id = ecm.category_id
-          WHERE ecm.exercise_id = exercise.id AND ec.code = :categoryCode
+          WHERE ecm.exercise_id = exercise.id AND ec.code IN (:...categoryCodes)
         )`,
-        { categoryCode: query.category },
+        { categoryCodes: query.category },
       );
     }
 
-    if (query.location) {
+    if (query.location?.length) {
       qb.andWhere(
         `EXISTS (
           SELECT 1 FROM havit.exercise_location_map elm
           JOIN havit.exercise_locations el ON el.id = elm.location_id
-          WHERE elm.exercise_id = exercise.id AND el.code = :locationCode
+          WHERE elm.exercise_id = exercise.id AND el.code IN (:...locationCodes)
         )`,
-        { locationCode: query.location },
+        { locationCodes: query.location },
       );
     }
 
