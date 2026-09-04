@@ -68,6 +68,14 @@ END $$;
 
 -- 3. If a legacy 'home-outdoor' location row physically exists, decompose every reference to it
 --    into home + outdoor, then remove the row entirely. No-op on a fresh DB (row never existed).
+--
+--    Failed live on 2026-09-03 (this migration's second version): this block used to copy the
+--    source row's is_primary into BOTH split rows unconditionally, so a primary home-outdoor row
+--    (e.g. tai-chi) produced TWO primary rows for the same exercise — violating
+--    uq_exercise_location_primary (exercise_location_map(exercise_id) WHERE is_primary, at most
+--    one primary location per exercise). 'home' keeps the original is_primary value; 'outdoor'
+--    is always inserted as false — an exercise can't be primary at two locations at once, and
+--    'home' is the tie-break, matching step 4's own hardcoded choice for tai-chi below.
 DO $$
 DECLARE
   v_home_outdoor_id BIGINT;
@@ -85,7 +93,7 @@ BEGIN
     ON CONFLICT (exercise_id, location_id) DO NOTHING;
 
     INSERT INTO havit.exercise_location_map (exercise_id, location_id, is_primary, source, mapping_reason)
-    SELECT exercise_id, v_outdoor_id, is_primary, source, 'split from legacy home-outdoor'
+    SELECT exercise_id, v_outdoor_id, false, source, 'split from legacy home-outdoor'
     FROM havit.exercise_location_map WHERE location_id = v_home_outdoor_id
     ON CONFLICT (exercise_id, location_id) DO NOTHING;
 
