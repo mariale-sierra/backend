@@ -225,6 +225,11 @@ export class ExercisesService {
         category: primaryCategoryByExercise.get(exercise.id) ?? null,
         locations: locationsByExercise.get(exercise.id) ?? [],
         region: region ? { code: region.code, name: region.name } : null,
+        // Cheap (already-loaded entity field, no extra join) — kept in the
+        // thin list response because the routine builder's Add-Exercises
+        // screen (app/challenge/routine/exercises.tsx) needs it to decide
+        // between a strength (sets/reps) vs. schema (custom metric) editor.
+        trackingMode: exercise.tracking_mode,
       };
     });
 
