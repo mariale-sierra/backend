@@ -12,6 +12,18 @@
 -- pg_trgm + a GIN index power multilingual, cross-locale search (GET /exercises?search=) so a
 -- Spanish query finds an exercise whose only matching name is English, and vice versa, without
 -- depending on the UI's active locale.
+--
+-- pg_trgm is NOT allow-listed on the shared Azure Database for PostgreSQL instance this app
+-- deploys against (confirmed live, 2026-09-03: "extension \"pg_trgm\" is not allow-listed for
+-- users in Azure Database for PostgreSQL" — that failure blocked every deploy after this file
+-- was added, since db:migrate && node dist/main.js never gets past a failing migration). Rather
+-- than hard-depend on an extension this environment can't grant, the CREATE EXTENSION attempt is
+-- wrapped so a denial degrades to a plain btree index instead of aborting the whole migration —
+-- search still works (ILIKE), just without trigram fuzzy-matching until azure.extensions is
+-- updated to allow pg_trgm (Azure Portal / az cli, outside this repo) and this file's guard
+-- naturally starts taking the GIN branch on the next fresh deploy of a still-pending file... on
+-- an already-applied environment, re-enabling it later needs a new migration that (re)creates the
+-- trgm index, since this file only runs once per database.
 
 CREATE TABLE IF NOT EXISTS havit.exercise_translations (
   exercise_id BIGINT NOT NULL,
@@ -27,9 +39,23 @@ CREATE TABLE IF NOT EXISTS havit.exercise_translations (
 
 CREATE INDEX IF NOT EXISTS idx_exercise_translations_locale ON havit.exercise_translations(locale);
 
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+DO $$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS pg_trgm;
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE NOTICE 'pg_trgm unavailable (%), falling back to a plain btree index on name', SQLERRM;
+END $$;
 
-CREATE INDEX IF NOT EXISTS idx_exercise_translations_name_trgm
-  ON havit.exercise_translations USING GIN (name gin_trgm_ops);
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm') THEN
+    CREATE INDEX IF NOT EXISTS idx_exercise_translations_name_trgm
+      ON havit.exercise_translations USING GIN (name gin_trgm_ops);
+  ELSE
+    CREATE INDEX IF NOT EXISTS idx_exercise_translations_name_btree
+      ON havit.exercise_translations (name);
+  END IF;
+END $$;
 
 COMMENT ON TABLE havit.exercise_translations IS 'Per-locale exercise text. exercises.name/description/instructions remain the EN fallback.';
