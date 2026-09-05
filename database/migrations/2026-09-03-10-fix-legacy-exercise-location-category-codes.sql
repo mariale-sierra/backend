@@ -42,6 +42,18 @@ ON CONFLICT (exercise_id, category_id) DO UPDATE SET is_primary = true;
 
 -- 2. Merge the legacy 'cualquier-lugar' location into the canonical 'anywhere' one (see the
 --    header note above for why this isn't a plain rename).
+--
+--    Failed live AGAIN on 2026-09-03 (this migration's third version), even after fixing the
+--    'anywhere' target to merge instead of blindly rename: this block inserted the new
+--    'anywhere' row BEFORE deleting the old 'cualquier-lugar' row. uq_exercise_location_primary
+--    is checked immediately per statement, not deferred to end of transaction — so for any of
+--    the 16 exercises whose cualquier-lugar row was primary, inserting a new is_primary=true row
+--    at 'anywhere' while that OLD primary row still existed violated the constraint immediately,
+--    regardless of whether the (exercise_id, location_id) conflict would separately have been
+--    caught by ON CONFLICT. Now deletes the source rows FIRST (staged via a CTE), then
+--    upserts into 'anywhere' with is_primary = old OR already-there — preserving true from
+--    either side for the 4 exercises (confirmed live) that already had both rows, one of them
+--    (cualquier-lugar) primary and the other (anywhere) not.
 DO $$
 DECLARE
   v_cualquier_lugar_id BIGINT;
@@ -51,12 +63,17 @@ BEGIN
   SELECT id INTO v_anywhere_id FROM havit.exercise_locations WHERE code = 'anywhere';
 
   IF v_cualquier_lugar_id IS NOT NULL AND v_anywhere_id IS NOT NULL THEN
+    WITH deleted_rows AS (
+      DELETE FROM havit.exercise_location_map
+      WHERE location_id = v_cualquier_lugar_id
+      RETURNING exercise_id, is_primary, source
+    )
     INSERT INTO havit.exercise_location_map (exercise_id, location_id, is_primary, source, mapping_reason)
     SELECT exercise_id, v_anywhere_id, is_primary, source, 'merged from legacy cualquier-lugar'
-    FROM havit.exercise_location_map WHERE location_id = v_cualquier_lugar_id
-    ON CONFLICT (exercise_id, location_id) DO NOTHING;
+    FROM deleted_rows
+    ON CONFLICT (exercise_id, location_id) DO UPDATE
+      SET is_primary = havit.exercise_location_map.is_primary OR EXCLUDED.is_primary;
 
-    DELETE FROM havit.exercise_location_map WHERE location_id = v_cualquier_lugar_id;
     DELETE FROM havit.exercise_locations WHERE id = v_cualquier_lugar_id;
   ELSIF v_cualquier_lugar_id IS NOT NULL THEN
     -- No separate 'anywhere' row exists (fresh DB, or an environment where this already
@@ -69,13 +86,16 @@ END $$;
 -- 3. If a legacy 'home-outdoor' location row physically exists, decompose every reference to it
 --    into home + outdoor, then remove the row entirely. No-op on a fresh DB (row never existed).
 --
---    Failed live on 2026-09-03 (this migration's second version): this block used to copy the
---    source row's is_primary into BOTH split rows unconditionally, so a primary home-outdoor row
---    (e.g. tai-chi) produced TWO primary rows for the same exercise — violating
---    uq_exercise_location_primary (exercise_location_map(exercise_id) WHERE is_primary, at most
---    one primary location per exercise). 'home' keeps the original is_primary value; 'outdoor'
---    is always inserted as false — an exercise can't be primary at two locations at once, and
---    'home' is the tie-break, matching step 4's own hardcoded choice for tai-chi below.
+--    Two bugs found live on 2026-09-03: (a) this block used to copy the source row's is_primary
+--    into BOTH split rows unconditionally, so a primary home-outdoor row (e.g. tai-chi) produced
+--    TWO primary rows for the same exercise; (b) even after fixing that, it still inserted the
+--    new 'home' row BEFORE deleting the old home-outdoor row — uq_exercise_location_primary is
+--    checked immediately per statement, not deferred to end of transaction, so the still-present
+--    old primary blocked the new one regardless. Now stages the source rows in a temp table,
+--    deletes the old row FIRST, then inserts: 'home' keeps the original is_primary (upserted, in
+--    case a 'home' row already independently existed), 'outdoor' always false — an exercise
+--    can't be primary at two locations at once, and 'home' is the tie-break, matching step 4's
+--    own hardcoded choice for tai-chi below.
 DO $$
 DECLARE
   v_home_outdoor_id BIGINT;
@@ -87,18 +107,24 @@ BEGIN
     SELECT id INTO v_home_id FROM havit.exercise_locations WHERE code = 'home';
     SELECT id INTO v_outdoor_id FROM havit.exercise_locations WHERE code = 'outdoor';
 
-    INSERT INTO havit.exercise_location_map (exercise_id, location_id, is_primary, source, mapping_reason)
-    SELECT exercise_id, v_home_id, is_primary, source, 'split from legacy home-outdoor'
-    FROM havit.exercise_location_map WHERE location_id = v_home_outdoor_id
-    ON CONFLICT (exercise_id, location_id) DO NOTHING;
-
-    INSERT INTO havit.exercise_location_map (exercise_id, location_id, is_primary, source, mapping_reason)
-    SELECT exercise_id, v_outdoor_id, false, source, 'split from legacy home-outdoor'
-    FROM havit.exercise_location_map WHERE location_id = v_home_outdoor_id
-    ON CONFLICT (exercise_id, location_id) DO NOTHING;
+    CREATE TEMP TABLE tmp_home_outdoor_split ON COMMIT DROP AS
+      SELECT exercise_id, is_primary, source
+      FROM havit.exercise_location_map
+      WHERE location_id = v_home_outdoor_id;
 
     DELETE FROM havit.exercise_location_map WHERE location_id = v_home_outdoor_id;
     DELETE FROM havit.exercise_locations WHERE id = v_home_outdoor_id;
+
+    INSERT INTO havit.exercise_location_map (exercise_id, location_id, is_primary, source, mapping_reason)
+    SELECT exercise_id, v_home_id, is_primary, source, 'split from legacy home-outdoor'
+    FROM tmp_home_outdoor_split
+    ON CONFLICT (exercise_id, location_id) DO UPDATE
+      SET is_primary = havit.exercise_location_map.is_primary OR EXCLUDED.is_primary;
+
+    INSERT INTO havit.exercise_location_map (exercise_id, location_id, is_primary, source, mapping_reason)
+    SELECT exercise_id, v_outdoor_id, false, source, 'split from legacy home-outdoor'
+    FROM tmp_home_outdoor_split
+    ON CONFLICT (exercise_id, location_id) DO NOTHING;
   END IF;
 END $$;
 
