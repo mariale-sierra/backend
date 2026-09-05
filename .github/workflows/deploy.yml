@@ -18,7 +18,7 @@ jobs:
             git checkout main
             git merge --ff-only origin/main
             cd /home/azureuser/raiz
-            docker compose up -d --build
+            docker-compose up -d --build
           '
 
       - name: Verificar que el backend responde
