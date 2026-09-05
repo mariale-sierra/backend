@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ChallengesModule } from './challenges/challenges.module';
@@ -31,6 +32,9 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
     // 500ing on the first request) when a required env var is missing. See
     // src/config/env.validation.ts.
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+
+    // Powers WorkoutPostsService's @Cron moderation batch job.
+    ScheduleModule.forRoot(),
 
     // Modest global rate limit (hardening, Fase 1): protects against basic
     // abuse/flooding without affecting normal mobile app usage patterns.

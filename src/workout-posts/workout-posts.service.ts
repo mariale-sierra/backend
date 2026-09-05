@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -70,7 +71,9 @@ interface FeedRow {
 
 @Injectable()
 export class WorkoutPostsService {
+  private readonly logger = new Logger(WorkoutPostsService.name);
   private moderationColumnsSupportPromise?: Promise<boolean>;
+  private moderationBatchRunning = false;
 
   constructor(
     @InjectRepository(WorkoutPost)
@@ -114,76 +117,109 @@ export class WorkoutPostsService {
       });
     }
 
-    const savedPost = await this.repo.save(post);
-
-    if (supportsModeration && savedPost.image_url) {
-      void this.reviewPostModeration(
-        savedPost.id,
-        savedPost.image_url,
-        savedPost.caption,
-      );
-    }
-
-    return savedPost;
+    // Moderation no longer runs inline on upload — it's picked up by
+    // processPendingModerationBatch() on its next scheduled run (every 10
+    // minutes). Uploading many photos at once used to fire one OpenAI
+    // moderation call per photo immediately, which could hit OpenAI's rate
+    // limit; those calls failed, exhausted their in-process retries, and the
+    // post was stuck as 'pending' (never shown) with nothing to retry it
+    // again. Batching on a timer smooths the request rate and gives every
+    // pending post another chance every cycle.
+    return this.repo.save(post);
   }
 
-  private async reviewPostModeration(
-    postId: string,
-    imageUrl: string,
-    caption?: string,
-  ) {
+  /**
+   * Moderates a batch of posts still stuck as 'pending', oldest first. Runs
+   * every 10 minutes instead of per-upload so photo uploads never call the
+   * OpenAI moderation API synchronously (which is what could exceed its rate
+   * limit and leave posts permanently 'pending'/invisible). Concurrency is
+   * capped at 3 in-flight calls at a time — enough to make a dent in a batch
+   * without bursting past OpenAI's rate limit the way firing them all at
+   * once would. Any post that still fails just stays 'pending' and is picked
+   * up again on the next run — no in-process retry loop needed.
+   */
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async processPendingModerationBatch(): Promise<void> {
+    if (this.moderationBatchRunning) {
+      return;
+    }
     if (!(await this.supportsModerationColumns())) {
       return;
     }
 
-    const maxAttempts = 3;
+    this.moderationBatchRunning = true;
+    try {
+      const batchSize = 20;
+      const concurrency = 3;
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      try {
-        const result = await this.moderationService.validateWorkoutImage(
-          imageUrl,
-          caption,
-        );
+      const posts = await this.repo.find({
+        where: { moderationStatus: WorkoutPostModerationStatus.PENDING },
+        order: { created_at: 'ASC' },
+        take: batchSize,
+      });
 
-        // A flagged result is a successful, definitive moderation call —
-        // apply it immediately, never retry it (retrying can't change a
-        // real moderation verdict, only real service errors below should
-        // be retried).
-        if (result.flagged) {
-          await this.repo.update(postId, {
-            moderationStatus: WorkoutPostModerationStatus.REJECTED,
-            moderationReason:
-              result.flaggedCategories.length > 0
-                ? `Contenido rechazado por moderación: ${result.flaggedCategories.join(', ')}`
-                : 'Contenido rechazado por moderación',
-            moderatedAt: new Date(),
-          });
-          return;
+      const pending = posts.filter((post) => !!post.image_url);
+      if (pending.length === 0) {
+        return;
+      }
+
+      this.logger.log(
+        `Moderating batch of ${pending.length} pending workout post(s)`,
+      );
+
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < pending.length) {
+          const post = pending[cursor];
+          cursor += 1;
+          await this.moderatePost(post.id, post.image_url!, post.caption);
         }
+      };
 
+      await Promise.all(
+        Array.from({ length: Math.min(concurrency, pending.length) }, () =>
+          worker(),
+        ),
+      );
+    } finally {
+      this.moderationBatchRunning = false;
+    }
+  }
+
+  private async moderatePost(
+    postId: string,
+    imageUrl: string,
+    caption?: string,
+  ): Promise<void> {
+    try {
+      const result = await this.moderationService.validateWorkoutImage(
+        imageUrl,
+        caption,
+      );
+
+      if (result.flagged) {
         await this.repo.update(postId, {
-          moderationStatus: WorkoutPostModerationStatus.APPROVED,
-          moderationReason: undefined,
+          moderationStatus: WorkoutPostModerationStatus.REJECTED,
+          moderationReason:
+            result.flaggedCategories.length > 0
+              ? `Contenido rechazado por moderación: ${result.flaggedCategories.join(', ')}`
+              : 'Contenido rechazado por moderación',
           moderatedAt: new Date(),
         });
         return;
-      } catch (error) {
-        // Only real service/API failures land here (validateWorkoutImage
-        // throws ServiceUnavailableException/InternalServerErrorException,
-        // it never throws for a flagged result) — retrying those is correct.
-        if (attempt < maxAttempts) {
-          await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
-          continue;
-        }
-
-        console.error('MODERATION RETRY EXHAUSTED:', error);
-        await this.repo.update(postId, {
-          moderationStatus: WorkoutPostModerationStatus.PENDING,
-          moderationReason:
-            'Pendiente de revisión por moderación no disponible en este momento',
-        });
-        return;
       }
+
+      await this.repo.update(postId, {
+        moderationStatus: WorkoutPostModerationStatus.APPROVED,
+        moderationReason: undefined,
+        moderatedAt: new Date(),
+      });
+    } catch (error) {
+      // Real service/API failure (rate limit, network, missing key, etc) —
+      // leave it 'pending', the next scheduled batch retries it.
+      this.logger.error(
+        `Moderation failed for post ${postId}, will retry next batch: ${String(error)}`,
+      );
     }
   }
 
