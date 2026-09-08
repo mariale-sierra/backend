@@ -370,4 +370,38 @@ describe('FollowsService', () => {
       );
     });
   });
+
+  describe('getFollowedUserIdsForViewer', () => {
+    it('should return an empty set without querying when candidateUserIds is empty', async () => {
+      const result = await service.getFollowedUserIdsForViewer('user-1', []);
+
+      expect(result).toEqual(new Set());
+      expect(followRepo.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('should return only the candidates the viewer actively follows, via one grouped query', async () => {
+      const qb = {
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ userId: 'user-2' }]),
+      };
+      followRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.getFollowedUserIdsForViewer('user-1', [
+        'user-2',
+        'user-3',
+      ]);
+
+      expect(followRepo.createQueryBuilder).toHaveBeenCalledTimes(1);
+      expect(qb.where).toHaveBeenCalledWith('f.follower_user_id = :viewerUserId', {
+        viewerUserId: 'user-1',
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'f.followed_user_id IN (:...candidateUserIds)',
+        { candidateUserIds: ['user-2', 'user-3'] },
+      );
+      expect(result).toEqual(new Set(['user-2']));
+    });
+  });
 });

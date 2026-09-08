@@ -219,18 +219,23 @@ export class UsersService {
     if (users.length === 0) return [];
 
     const userIds = users.map((u) => u.id);
-    const [profiles, followerCounts, followingCounts] = await Promise.all([
-      this.profileRepo.find({ where: { user_id: In(userIds) } }),
-      this.followsService.getFollowerCountsForUsers(userIds),
-      this.followsService.getFollowingCountsForUsers(userIds),
-    ]);
+    const [profiles, followerCounts, followingCounts, followedUserIds] =
+      await Promise.all([
+        this.profileRepo.find({ where: { user_id: In(userIds) } }),
+        this.followsService.getFollowerCountsForUsers(userIds),
+        this.followsService.getFollowingCountsForUsers(userIds),
+        this.followsService.getFollowedUserIdsForViewer(
+          viewerUserId,
+          userIds,
+        ),
+      ]);
     const profileByUser = new Map(profiles.map((p) => [p.user_id, p]));
 
     return users.map((u) =>
       PublicProfileResponseDto.build(
         u,
         profileByUser.get(u.id) ?? null,
-        undefined,
+        { isOwner: false, isFollower: followedUserIds.has(u.id) },
         {
           followersCount: followerCounts.get(u.id) ?? 0,
           followingCount: followingCounts.get(u.id) ?? 0,

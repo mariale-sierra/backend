@@ -234,4 +234,31 @@ export class FollowsService {
     });
     return !!relation;
   }
+
+  /**
+   * Which of `candidateUserIds` the given viewer actively follows — one
+   * grouped query instead of an isActiveFollower() call per candidate, same
+   * batching shape as getFollowerCountsForUsers/getFollowingCountsForUsers.
+   * Added to fix UsersService.searchUsers(), which previously built every
+   * result with the default "not following" viewer state regardless of the
+   * real relationship (PublicProfileResponseDto.build()'s viewer param was
+   * never passed there) — search always showed "Follow" even for users the
+   * caller already follows.
+   */
+  async getFollowedUserIdsForViewer(
+    viewerUserId: string,
+    candidateUserIds: string[],
+  ): Promise<Set<string>> {
+    if (candidateUserIds.length === 0) return new Set();
+    const rows = await this.followRepo
+      .createQueryBuilder('f')
+      .select('f.followed_user_id', 'userId')
+      .where('f.follower_user_id = :viewerUserId', { viewerUserId })
+      .andWhere('f.followed_user_id IN (:...candidateUserIds)', {
+        candidateUserIds,
+      })
+      .andWhere('f.is_active = true')
+      .getRawMany<{ userId: string }>();
+    return new Set(rows.map((r) => r.userId));
+  }
 }
