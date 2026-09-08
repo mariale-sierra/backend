@@ -590,13 +590,17 @@ export class WorkoutPostsService {
   }
 
   /**
-   * GET /feed — B2 rule, no exceptions: visibility='public' AND
-   * moderation_status='approved', newest first. 'followers'-visibility posts
-   * never appear here (for anyone, including their own author) because this
-   * feed has no per-viewer context to resolve a follow relationship against
-   * (it's one shared, unpersonalized public feed) — 'followers'-visibility
-   * posts are only resolved per-viewer in getUserPosts() (B3). 'private' and
-   * unmoderated ('pending'/'rejected') posts never appear here either. A post
+   * GET /feed — B2 rule: moderation_status='approved' always, newest first.
+   * Visibility: 'public' posts show to everyone; 'followers' posts show only
+   * to their own author and to viewers who actively follow that author (same
+   * user_follows check fetchPhotos()/getUserPosts() already apply elsewhere,
+   * now resolved per-row here too since viewerId is available on every real
+   * call — FeedController's guard is global, so it's always set in practice).
+   * 'private' posts never appear here, not even for their own author (the
+   * feed isn't the surface for private posts — the profile is); when no
+   * viewerId is given at all (defensive default) the feed degrades to
+   * 'public'-only, matching the old unpersonalized behavior. Unmoderated
+   * ('pending'/'rejected') posts never appear here either. A post
    * whose challenge is itself private never appears here either, no
    * exceptions — same rule as everything else in this method, see F8 in
    * docs/testing/PLAN-MAESTRO-PRUEBAS.md (a private challenge's posts must
@@ -618,6 +622,27 @@ export class WorkoutPostsService {
     viewerId?: string;
   }): Promise<{ posts: FeedPostContract[]; nextCursor?: string }> {
     const params: unknown[] = [];
+
+    let visibilityFilter = `p.visibility = 'public'`;
+    if (options.viewerId) {
+      params.push(options.viewerId);
+      const viewerParamIndex = params.length;
+      visibilityFilter = `(
+        p.visibility = 'public'
+        OR (
+          p.visibility = 'followers'
+          AND (
+            p.user_id = $${viewerParamIndex}
+            OR EXISTS (
+              SELECT 1 FROM havit.user_follows uf
+              WHERE uf.follower_user_id = $${viewerParamIndex}
+                AND uf.followed_user_id = p.user_id
+                AND uf.is_active = true
+            )
+          )
+        )
+      )`;
+    }
 
     let cursorFilter = '';
     if (options.cursor) {
@@ -641,7 +666,7 @@ export class WorkoutPostsService {
        LEFT JOIN havit.user_profiles up ON up.user_id = p.user_id
        LEFT JOIN havit.challenge_user_map cum
               ON cum.challenge_id = wl.challenge_id AND cum.user_id = p.user_id
-       WHERE p.visibility = 'public'
+       WHERE ${visibilityFilter}
          AND p.moderation_status = 'approved'
          AND c.visibility != 'private'
          ${cursorFilter}

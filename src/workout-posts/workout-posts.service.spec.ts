@@ -114,7 +114,11 @@ describe('WorkoutPostsService', () => {
   // GET /feed
   // ---------------------------------------------------------------------
   describe('getFeed', () => {
-    it("should filter unconditionally on visibility='public' AND moderation_status='approved' (no ternary/degradation)", async () => {
+    // No viewerId given is the defensive-default path (never hit by the real
+    // controller, which always has one from the global auth guard) — it
+    // degrades to the original public-only, unpersonalized rule. See the
+    // CP-64 tests below for the real (viewerId given) behavior.
+    it("should degrade to visibility='public' AND moderation_status='approved' with no viewerId given (no ternary/degradation)", async () => {
       postRepo.manager.query.mockResolvedValue([]);
 
       await service.getFeed({ limit: 20 });
@@ -127,7 +131,7 @@ describe('WorkoutPostsService', () => {
       expect(sql).not.toMatch(/\$\{.*moderation_status.*\}/);
     });
 
-    it('should never bypass moderation/visibility for the post owner (no OR p.user_id fragment)', async () => {
+    it('should never bypass moderation for the post owner, with no viewerId given (no OR p.user_id fragment)', async () => {
       postRepo.manager.query.mockResolvedValue([]);
 
       await service.getFeed({ limit: 20 });
@@ -315,6 +319,48 @@ describe('WorkoutPostsService', () => {
       const [sql] = postRepo.manager.query.mock.calls[0] as [string, unknown[]];
       expect(sql.toLowerCase()).not.toContain('email');
       expect(sql.toLowerCase()).not.toContain('password');
+    });
+
+    // CP-64: home feed must surface the viewer's own 'followers'-visibility
+    // posts and those of anyone they actively follow, not just 'public' ones
+    // (bug: a post created with the app's default per-post visibility never
+    // reached the feed, since only 'public' was ever considered).
+    it("should also include 'followers'-visibility posts from the viewer or accounts they actively follow, when a viewerId is given (CP-64)", async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getFeed({ limit: 20, viewerId: VIEWER_ID });
+
+      const [sql, params] = postRepo.manager.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(sql).toContain("p.visibility = 'public'");
+      expect(sql).toContain("p.visibility = 'followers'");
+      expect(sql).toMatch(/p\.user_id = \$\d+/);
+      expect(sql).toMatch(/EXISTS[\s\S]*havit\.user_follows/);
+      expect(sql).toMatch(/uf\.follower_user_id = \$\d+/);
+      expect(sql).toMatch(/uf\.followed_user_id = p\.user_id/);
+      expect(sql).toMatch(/uf\.is_active = true/);
+      expect(params).toContain(VIEWER_ID);
+    });
+
+    it("should still never surface 'private' posts in the feed, even for their own author, when a viewerId is given (CP-64)", async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getFeed({ limit: 20, viewerId: VIEWER_ID });
+
+      const [sql] = postRepo.manager.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).not.toMatch(/p\.visibility = 'private'/);
+    });
+
+    it("should still require moderation_status='approved' unconditionally, with no owner exception, even when a viewerId is given (CP-64)", async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getFeed({ limit: 20, viewerId: VIEWER_ID });
+
+      const [sql] = postRepo.manager.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain("p.moderation_status = 'approved'");
+      expect(sql).not.toMatch(/moderation_status.*OR\s+p\.user_id/i);
     });
   });
 
