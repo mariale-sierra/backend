@@ -11,6 +11,8 @@ import {
 import { WorkoutPostsService } from './workout-posts.service';
 import { CursorPaginationQueryDto } from './dto/cursor-pagination-query.dto';
 import { decodeCursor, DEFAULT_PAGE_LIMIT } from './pagination.util';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 
 @ApiTags('Feed')
 @Controller('feed')
@@ -47,6 +49,7 @@ export class FeedController {
   async getFeed(
     @Query() query: CursorPaginationQueryDto,
     @Res({ passthrough: true }) res: Response,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
     const cursor = query.cursor ? decodeCursor(query.cursor) : undefined;
@@ -54,6 +57,7 @@ export class FeedController {
     const { posts, nextCursor } = await this.workoutPostsService.getFeed({
       limit,
       cursor,
+      viewerId: user.sub,
     });
 
     if (nextCursor) {

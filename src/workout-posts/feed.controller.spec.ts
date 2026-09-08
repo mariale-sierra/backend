@@ -4,11 +4,18 @@ import { FeedController } from './feed.controller';
 import { WorkoutPostsService } from './workout-posts.service';
 import { CursorPaginationQueryDto } from './dto/cursor-pagination-query.dto';
 import { DEFAULT_PAGE_LIMIT, encodeCursor } from './pagination.util';
+import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 
 describe('FeedController', () => {
   let controller: FeedController;
   let service: { getFeed: jest.Mock };
   let res: { setHeader: jest.Mock };
+
+  const viewer: AuthenticatedUser = {
+    sub: 'viewer-1',
+    email: 'v@v.com',
+    username: 'viewer',
+  };
 
   beforeEach(() => {
     service = { getFeed: jest.fn() };
@@ -20,11 +27,12 @@ describe('FeedController', () => {
     service.getFeed.mockResolvedValue({ posts: [] });
     const query: CursorPaginationQueryDto = {};
 
-    await controller.getFeed(query, res as unknown as Response);
+    await controller.getFeed(query, res as unknown as Response, viewer);
 
     expect(service.getFeed).toHaveBeenCalledWith({
       limit: DEFAULT_PAGE_LIMIT,
       cursor: undefined,
+      viewerId: 'viewer-1',
     });
   });
 
@@ -32,7 +40,7 @@ describe('FeedController', () => {
     service.getFeed.mockResolvedValue({ posts: [] });
     const query: CursorPaginationQueryDto = { limit: 5 };
 
-    await controller.getFeed(query, res as unknown as Response);
+    await controller.getFeed(query, res as unknown as Response, viewer);
 
     expect(service.getFeed).toHaveBeenCalledWith(
       expect.objectContaining({ limit: 5 }),
@@ -44,7 +52,7 @@ describe('FeedController', () => {
     const cursor = encodeCursor(new Date('2026-08-16T10:00:00.000Z'), '5');
     const query: CursorPaginationQueryDto = { cursor };
 
-    await controller.getFeed(query, res as unknown as Response);
+    await controller.getFeed(query, res as unknown as Response, viewer);
 
     expect(service.getFeed).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -53,11 +61,21 @@ describe('FeedController', () => {
     );
   });
 
+  it('should pass the JWT-derived viewer id through as viewerId', async () => {
+    service.getFeed.mockResolvedValue({ posts: [] });
+
+    await controller.getFeed({}, res as unknown as Response, viewer);
+
+    expect(service.getFeed).toHaveBeenCalledWith(
+      expect.objectContaining({ viewerId: 'viewer-1' }),
+    );
+  });
+
   it('should reject a malformed cursor without ever calling the service', async () => {
     const query: CursorPaginationQueryDto = { cursor: 'not-a-valid-cursor' };
 
     await expect(
-      controller.getFeed(query, res as unknown as Response),
+      controller.getFeed(query, res as unknown as Response, viewer),
     ).rejects.toThrow(BadRequestException);
     expect(service.getFeed).not.toHaveBeenCalled();
   });
@@ -68,7 +86,7 @@ describe('FeedController', () => {
       nextCursor: 'abc123',
     });
 
-    await controller.getFeed({}, res as unknown as Response);
+    await controller.getFeed({}, res as unknown as Response, viewer);
 
     expect(res.setHeader).toHaveBeenCalledWith('X-Next-Cursor', 'abc123');
   });
@@ -76,7 +94,7 @@ describe('FeedController', () => {
   it('should not set X-Next-Cursor on the last page', async () => {
     service.getFeed.mockResolvedValue({ posts: [] });
 
-    await controller.getFeed({}, res as unknown as Response);
+    await controller.getFeed({}, res as unknown as Response, viewer);
 
     expect(res.setHeader).not.toHaveBeenCalled();
   });
@@ -85,7 +103,11 @@ describe('FeedController', () => {
     const posts = [{ id: '1' }];
     service.getFeed.mockResolvedValue({ posts });
 
-    const result = await controller.getFeed({}, res as unknown as Response);
+    const result = await controller.getFeed(
+      {},
+      res as unknown as Response,
+      viewer,
+    );
 
     expect(result).toBe(posts);
   });

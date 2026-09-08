@@ -12,6 +12,8 @@ import { DecodedCursor, encodeCursor } from './pagination.util';
 import { formatPrimaryMetric, MetricValueRow } from './metric-display.util';
 import { FollowsService } from '../follows/follows.service';
 import { getLocalMidnightUtc } from '../common/timezone.util';
+import { WorkoutPostReactionsService } from './workout-post-reactions.service';
+import { WorkoutPostCommentsService } from './workout-post-comments.service';
 
 /** Shape consumed by the frontend (types/challenge.ts ChallengePhoto). */
 export interface ChallengePhoto {
@@ -40,7 +42,12 @@ export interface FeedPostContract {
   image_url?: string;
   caption?: string;
   posted_at: string;
+  /** Reaction ('like') count — see WorkoutPostReactionsService (Bloque 3). */
   likes_count?: number;
+  /** Whether the requesting viewer has reacted to this post. */
+  liked_by_me?: boolean;
+  /** Comment count — see WorkoutPostCommentsService (Bloque 3). */
+  comments_count?: number;
 }
 
 interface PhotoRow {
@@ -82,6 +89,8 @@ export class WorkoutPostsService {
     private userRepo: Repository<User>,
     private moderationService: ModerationService,
     private followsService: FollowsService,
+    private reactionsService: WorkoutPostReactionsService,
+    private commentsService: WorkoutPostCommentsService,
   ) {}
 
   private async supportsModerationColumns() {
@@ -172,7 +181,7 @@ export class WorkoutPostsService {
         while (cursor < pending.length) {
           const post = pending[cursor];
           cursor += 1;
-          await this.moderatePost(post.id, post.image_url!, post.caption);
+          await this.moderatePost(post.id, post.image_url, post.caption);
         }
       };
 
@@ -498,7 +507,8 @@ export class WorkoutPostsService {
         ? `AND p.visibility IN ('public', 'followers')`
         : `AND p.visibility = 'public'`;
 
-    const challengePrivacyFilter = this.challengePrivacyFilter(viewerParamIndex);
+    const challengePrivacyFilter =
+      this.challengePrivacyFilter(viewerParamIndex);
 
     let cursorFilter = '';
     if (options.cursor) {
@@ -605,6 +615,7 @@ export class WorkoutPostsService {
   async getFeed(options: {
     limit: number;
     cursor?: DecodedCursor;
+    viewerId?: string;
   }): Promise<{ posts: FeedPostContract[]; nextCursor?: string }> {
     const params: unknown[] = [];
 
@@ -654,25 +665,48 @@ export class WorkoutPostsService {
     // it optional — this omits the field rather than guessing with a
     // deterministic-but-arbitrary tie-break that could show a category the
     // challenge isn't really about.
-    const posts: FeedPostContract[] = pageRows.map((r) => ({
-      id: String(r.id),
-      user_id: r.user_id,
-      user_name: r.user_name,
-      user_avatar_url: r.user_avatar_url ?? undefined,
-      challenge_id: r.challenge_id,
-      challenge_name: r.challenge_name,
-      // Deliberately still UTC, not the requesting viewer's timezone: the
-      // Feed is one shared, unpersonalized result set with no per-poster
-      // context — the correct timezone here would be the POST'S AUTHOR's,
-      // which isn't tracked anywhere, and using the viewer's own would be
-      // wrong for everyone else's cards. Lower-stakes than the Mine/
-      // challenge-gallery day label (a "Day N" caption here, not something
-      // driving a completion/rest-day state decision) — left as-is.
-      challenge_day: this.dayFromJoinedAt(r.joined_at, r.created_at, 'UTC'),
-      image_url: r.image_url ?? undefined,
-      caption: r.caption ?? undefined,
-      posted_at: new Date(r.created_at).toISOString(),
-    }));
+    // Reaction/comment counts (Bloque 3) are batched across the whole page —
+    // one grouped query each, same pattern as
+    // FollowsService.getFollowerCountsForUsers — instead of N calls per
+    // card. `liked_by_me` only resolves when a viewerId is given; every real
+    // caller (FeedController) always has one (auth is global), the param
+    // stays optional only so existing callers/tests that don't care about
+    // per-viewer reaction state don't need to thread one through.
+    const postIds = pageRows.map((r) => String(r.id));
+    const [likesCountByPost, commentsCountByPost, reactedPostIds] =
+      await Promise.all([
+        this.reactionsService.getCountsForPosts(postIds),
+        this.commentsService.getCountsForPosts(postIds),
+        options.viewerId
+          ? this.reactionsService.getReactedPostIds(postIds, options.viewerId)
+          : Promise.resolve(new Set<string>()),
+      ]);
+
+    const posts: FeedPostContract[] = pageRows.map((r) => {
+      const id = String(r.id);
+      return {
+        id,
+        user_id: r.user_id,
+        user_name: r.user_name,
+        user_avatar_url: r.user_avatar_url ?? undefined,
+        challenge_id: r.challenge_id,
+        challenge_name: r.challenge_name,
+        // Deliberately still UTC, not the requesting viewer's timezone: the
+        // Feed is one shared, unpersonalized result set with no per-poster
+        // context — the correct timezone here would be the POST'S AUTHOR's,
+        // which isn't tracked anywhere, and using the viewer's own would be
+        // wrong for everyone else's cards. Lower-stakes than the Mine/
+        // challenge-gallery day label (a "Day N" caption here, not something
+        // driving a completion/rest-day state decision) — left as-is.
+        challenge_day: this.dayFromJoinedAt(r.joined_at, r.created_at, 'UTC'),
+        image_url: r.image_url ?? undefined,
+        caption: r.caption ?? undefined,
+        posted_at: new Date(r.created_at).toISOString(),
+        likes_count: likesCountByPost.get(id) ?? 0,
+        liked_by_me: reactedPostIds.has(id),
+        comments_count: commentsCountByPost.get(id) ?? 0,
+      };
+    });
 
     const last = pageRows[pageRows.length - 1];
     const nextCursor = hasNextPage
