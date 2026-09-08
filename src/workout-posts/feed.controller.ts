@@ -33,9 +33,9 @@ export class FeedController {
     description: `Máximo de resultados (default ${DEFAULT_PAGE_LIMIT}, máximo 50)`,
   })
   @ApiOperation({
-    summary: 'Feed público de publicaciones',
+    summary: 'Feed de publicaciones',
     description:
-      "Publicaciones con visibility='public' AND moderation_status='approved', ordenadas por created_at DESC, id DESC. Sin excepción para el propio autor: 'private', 'followers', 'pending' y 'rejected' nunca aparecen aquí. 'followers' no se resuelve en este feed público porque no hay contexto de viewer por publicación (es un único feed compartido); esa visibilidad sí se resuelve en GET /workout-posts/user/:userId usando el módulo de seguidores. Requiere autenticación (guard global).",
+      "Publicaciones con moderation_status='approved', ordenadas por created_at DESC, id DESC. Visibilidad: visibility='public' aparece para cualquier usuario autenticado; visibility='followers' aparece solo para su propio autor y para viewers que sigan activamente a ese autor (mismo chequeo de user_follows que GET /workout-posts/user/:userId); visibility='private' nunca aparece aquí, ni siquiera para su propio autor (el feed no es la superficie para posts privados; para eso está el perfil). 'pending' y 'rejected' nunca aparecen. Requiere autenticación (guard global).",
   })
   @ApiHeader({
     name: 'X-Next-Cursor',

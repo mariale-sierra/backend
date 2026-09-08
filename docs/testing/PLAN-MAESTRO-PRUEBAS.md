@@ -229,6 +229,26 @@ Justificación: nuevo alcance sobre el módulo existente `src/workout-posts/`, s
 
 ---
 
+### Casos agregados — Feed incluye posts `'followers'` para el autor y sus seguidores activos (CP-64)
+
+Justificación: reporte de usuario probando la app localmente — una foto subida con la visibilidad por defecto de la cámara (`'followers'`, ver `app/(add)/camera.tsx` en el repo frontend) aparecía correctamente en el challenge y en el perfil propio, pero nunca en el home feed. Causa raíz: CP-18 (B2) fijó `getFeed()` a `visibility='public' AND moderation_status='approved'` sin excepción alguna, por diseño explícito ("un único feed compartido, sin contexto de viewer"). Ese diseño ya no aplica — `getFeed()` siempre recibe `viewerId` en producción (guard global), así que sí hay contexto de viewer disponible. Decisión de producto para este fix: `'public'` sigue visible para cualquiera; `'followers'` se resuelve por viewer igual que en `getUserPosts()`/`fetchPhotos()` (visible para el propio autor y para quien lo sigue activamente, vía `havit.user_follows`); `'private'` sigue sin aparecer nunca en el feed, ni para su propio autor (el feed no es la superficie para contenido privado). Esto **actualiza el comportamiento fijado en CP-18** — la moderación (`moderation_status='approved'`, sin excepción de dueño) y la exclusión de challenges privados (CP-30) no cambian.
+
+| ID | Funcionalidad | Tipo | Prueba | Condiciones/Entrada | Resultado esperado | Prioridad | Cobertura automatizada | Estado |
+|---|---|---|---|---|---|---|---|---|
+| CP-64 | Feed | Funcional | El feed también resuelve `visibility='followers'` por viewer | `GET /feed` con posts `'followers'` propios del viewer, de un autor seguido activamente, y de un autor no seguido | Con `viewerId`: aparecen los posts `'followers'` propios y los de autores seguidos activamente (`EXISTS` sobre `user_follows` con `is_active = true`); los de autores no seguidos, no. `'public'` sigue visible para cualquiera. `'private'` nunca aparece, ni para el propio autor. `moderation_status='approved'` sigue siendo obligatorio sin excepción de dueño. Sin `viewerId` (caso defensivo, no ocurre en producción), degrada a solo `'public'` — comportamiento previo a este fix | Alta | `workout-posts.service.spec.ts` → *"should also include 'followers'-visibility posts from the viewer or accounts they actively follow, when a viewerId is given (CP-64)"*, *"should still never surface 'private' posts in the feed... (CP-64)"*, *"should still require moderation_status='approved' unconditionally... (CP-64)"* | Ejecutado — Aprobado |
+
+**Resultados de ejecución:**
+
+| Casos | Archivo / comando | Resultado | Estado | Evidencia |
+|---|---|---|---|---|
+| CP-64 | `workout-posts.service.spec.ts` + `feed.controller.spec.ts` | `npx jest src/workout-posts/workout-posts.service.spec.ts src/workout-posts/feed.controller.spec.ts` | 46/46 tests pasan (3 nuevos de CP-64; el resto, preexistente, sigue pasando sin modificación de comportamiento) | Aprobado | — |
+| Suite completa | Todos los tests del backend | `npm run test` | 33 suites, 482 tests — todos pasan | Aprobado | — |
+| Lint dirigido | `eslint` sobre los archivos modificados | `npx eslint src/workout-posts/workout-posts.service.ts src/workout-posts/feed.controller.ts src/workout-posts/workout-posts.service.spec.ts` | Sin errores nuevos (1 error preexistente en `workout-posts.service.spec.ts`, ya documentado arriba, no tocado por este fix) | Aprobado | — |
+
+**No ejecutado en esta sesión:** ninguna prueba de integración/sistema contra la base real de Azure (mismo gap ya documentado en el resto de este documento); el índice usado por el `EXISTS` sobre `user_follows` (`PRIMARY KEY (follower_user_id, followed_user_id)`) ya existía desde `database/init/2026-07-07-00-init-schema.sql`, sin necesidad de migración nueva.
+
+---
+
 ## C. Resultados de pruebas ejecutadas
 
 La primera tabla corresponde al Sprint B2 (Posts/Feed) original — comandos ejecutados contra el checkpoint `dfe47cb`. La segunda tabla ("Actualización post-B2") corresponde a esta sesión: cierre de Followers, resolución de F8 y consolidación de Badges/Invitaciones. En ambos casos, todas las filas son comandos **realmente ejecutados**; ningún resultado fue inferido por lectura de código.
