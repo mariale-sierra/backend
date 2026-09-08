@@ -6,6 +6,8 @@ import { WorkoutPost } from './entities/workout-post.entity';
 import { User } from '../users/entities/user.entity';
 import { ModerationService } from '../openai/moderation.service';
 import { FollowsService } from '../follows/follows.service';
+import { WorkoutPostReactionsService } from './workout-post-reactions.service';
+import { WorkoutPostCommentsService } from './workout-post-comments.service';
 import { encodeCursor } from './pagination.util';
 
 const createMockWorkoutPostRepo = () => ({
@@ -29,6 +31,11 @@ describe('WorkoutPostsService', () => {
   let postRepo: ReturnType<typeof createMockWorkoutPostRepo>;
   let userRepo: ReturnType<typeof createMockUserRepo>;
   let followsService: { isActiveFollower: jest.Mock };
+  let reactionsService: {
+    getCountsForPosts: jest.Mock;
+    getReactedPostIds: jest.Mock;
+  };
+  let commentsService: { getCountsForPosts: jest.Mock };
 
   const VIEWER_ID = 'viewer-1';
   const OTHER_USER_ID = 'other-2';
@@ -42,6 +49,15 @@ describe('WorkoutPostsService', () => {
     // Default: viewer does not follow the target — preserves the pre-B3
     // "strangers only see public posts" behavior unless a test says otherwise.
     followsService = { isActiveFollower: jest.fn().mockResolvedValue(false) };
+    // Bloque 3 defaults: no reactions/comments on any post unless a test
+    // overrides these — matches an empty Map/Set from a real, empty table.
+    reactionsService = {
+      getCountsForPosts: jest.fn().mockResolvedValue(new Map()),
+      getReactedPostIds: jest.fn().mockResolvedValue(new Set()),
+    };
+    commentsService = {
+      getCountsForPosts: jest.fn().mockResolvedValue(new Map()),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -53,6 +69,8 @@ describe('WorkoutPostsService', () => {
           useValue: { validateWorkoutImage: jest.fn() },
         },
         { provide: FollowsService, useValue: followsService },
+        { provide: WorkoutPostReactionsService, useValue: reactionsService },
+        { provide: WorkoutPostCommentsService, useValue: commentsService },
       ],
     }).compile();
 
@@ -122,7 +140,7 @@ describe('WorkoutPostsService', () => {
     // challenge must never surface in the global Feed, even if its own
     // visibility is 'public' — this is the read-time second layer behind
     // WorkoutLogService.resolvePostVisibility() (write-time downgrade).
-    it("should exclude posts whose challenge is private, unconditionally (CP-30)", async () => {
+    it('should exclude posts whose challenge is private, unconditionally (CP-30)', async () => {
       postRepo.manager.query.mockResolvedValue([]);
 
       await service.getFeed({ limit: 20 });
@@ -160,7 +178,64 @@ describe('WorkoutPostsService', () => {
         }),
       );
       expect(posts[0].user_avatar_url).toBeUndefined();
-      expect(posts[0].likes_count).toBeUndefined();
+      // Bloque 3: no longer a placeholder — 0 with an empty reactions/comments
+      // table, not undefined (see the reactions/comments-populated test below).
+      expect(posts[0].likes_count).toBe(0);
+      expect(posts[0].liked_by_me).toBe(false);
+      expect(posts[0].comments_count).toBe(0);
+    });
+
+    it('should populate likes_count/comments_count/liked_by_me from the batched reactions/comments lookups (Bloque 3)', async () => {
+      postRepo.manager.query.mockResolvedValue([
+        feedRow({ id: '1' }),
+        feedRow({ id: '2' }),
+      ]);
+      reactionsService.getCountsForPosts.mockResolvedValue(new Map([['1', 5]]));
+      reactionsService.getReactedPostIds.mockResolvedValue(new Set(['2']));
+      commentsService.getCountsForPosts.mockResolvedValue(new Map([['2', 3]]));
+
+      const { posts } = await service.getFeed({
+        limit: 20,
+        viewerId: VIEWER_ID,
+      });
+
+      expect(posts[0]).toEqual(
+        expect.objectContaining({
+          id: '1',
+          likes_count: 5,
+          liked_by_me: false,
+          comments_count: 0,
+        }),
+      );
+      expect(posts[1]).toEqual(
+        expect.objectContaining({
+          id: '2',
+          likes_count: 0,
+          liked_by_me: true,
+          comments_count: 3,
+        }),
+      );
+      expect(reactionsService.getCountsForPosts).toHaveBeenCalledWith([
+        '1',
+        '2',
+      ]);
+      expect(reactionsService.getReactedPostIds).toHaveBeenCalledWith(
+        ['1', '2'],
+        VIEWER_ID,
+      );
+      expect(commentsService.getCountsForPosts).toHaveBeenCalledWith([
+        '1',
+        '2',
+      ]);
+    });
+
+    it('should skip the per-viewer reacted lookup (leaving liked_by_me false) when no viewerId is given', async () => {
+      postRepo.manager.query.mockResolvedValue([feedRow({ id: '1' })]);
+
+      const { posts } = await service.getFeed({ limit: 20 });
+
+      expect(posts[0].liked_by_me).toBe(false);
+      expect(reactionsService.getReactedPostIds).not.toHaveBeenCalled();
     });
 
     it('should request limit+1 rows and report a next page when more rows come back than the limit', async () => {
@@ -470,7 +545,7 @@ describe('WorkoutPostsService', () => {
     // someone else's public profile must not discover a post from a private
     // challenge, even if the post is marked 'public' — but a fellow member
     // of that same private challenge (or the post's own author) still can.
-    it("other-view: should exclude posts from a private challenge unless the viewer is a member (CP-31)", async () => {
+    it('other-view: should exclude posts from a private challenge unless the viewer is a member (CP-31)', async () => {
       userRepo.findOne.mockResolvedValue({
         id: OTHER_USER_ID,
         is_active: true,

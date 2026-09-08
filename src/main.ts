@@ -47,6 +47,8 @@ async function bootstrap() {
     .addTag('Workout Logs', 'Endpoints para registrar entrenamientos')
     .addTag('Feed', 'Feed público de publicaciones')
     .addTag('Follows', 'Endpoints para seguir/dejar de seguir usuarios')
+    .addTag('Workout Post Reactions', 'Reacciones (likes) sobre publicaciones')
+    .addTag('Workout Post Comments', 'Comentarios sobre publicaciones')
     .addTag('Badges', 'Badges de actividad calculados al vuelo')
     .addBearerAuth()
     .build();
