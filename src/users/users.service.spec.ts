@@ -97,6 +97,7 @@ describe('UsersService', () => {
     getCounts: jest.Mock;
     getFollowerCountsForUsers: jest.Mock;
     getFollowingCountsForUsers: jest.Mock;
+    getFollowedUserIdsForViewer: jest.Mock;
   };
 
   const baseUser = () => ({
@@ -130,6 +131,7 @@ describe('UsersService', () => {
         .mockResolvedValue({ followersCount: 0, followingCount: 0 }),
       getFollowerCountsForUsers: jest.fn().mockResolvedValue(new Map()),
       getFollowingCountsForUsers: jest.fn().mockResolvedValue(new Map()),
+      getFollowedUserIdsForViewer: jest.fn().mockResolvedValue(new Set()),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -531,6 +533,30 @@ describe('UsersService', () => {
       expect(result.find((u) => u.id === 'user-3')).toMatchObject({
         followers_count: 0,
         following_count: 0,
+      });
+    });
+
+    it('should mark a result as is_following when the viewer already follows them (real bug: used to always show "Follow")', async () => {
+      userRepo.find.mockResolvedValue([
+        { id: 'user-2', username: 'bob' },
+        { id: 'user-3', username: 'carol' },
+      ]);
+      profileRepo.find.mockResolvedValue([]);
+      followsService.getFollowedUserIdsForViewer.mockResolvedValue(
+        new Set(['user-2']),
+      );
+
+      const result = await service.searchUsers('bo', 'user-1');
+
+      expect(followsService.getFollowedUserIdsForViewer).toHaveBeenCalledWith(
+        'user-1',
+        ['user-2', 'user-3'],
+      );
+      expect(result.find((u) => u.id === 'user-2')).toMatchObject({
+        is_following: true,
+      });
+      expect(result.find((u) => u.id === 'user-3')).toMatchObject({
+        is_following: false,
       });
     });
   });

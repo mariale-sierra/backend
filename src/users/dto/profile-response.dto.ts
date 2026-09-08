@@ -97,9 +97,12 @@ export class PublicProfileResponseDto {
   is_following!: boolean;
 
   /**
-   * @param viewer Defaults to "a stranger" (not the owner, not a follower) —
-   * every existing call site that doesn't pass it (e.g. searchUsers, which
-   * lists many users at once) keeps the original, stricter behavior.
+   * @param viewer Defaults to "a stranger" (not the owner, not a follower)
+   * for call sites that don't pass it. `searchUsers` used to be one of
+   * those — always showing "Follow" even for someone the caller already
+   * follows — fixed by resolving `isFollower` per result via
+   * FollowsService.getFollowedUserIdsForViewer (one batched query for the
+   * whole result page, not one isActiveFollower() call per row).
    * @param counts Defaults to 0/0 for call sites that don't look them up.
    * Counts are never gated by privacy — same as username/display name/photo,
    * they're always visible (only `bio` is privacy-gated, see `canSeeFullProfile`).
