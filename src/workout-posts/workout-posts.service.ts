@@ -181,7 +181,7 @@ export class WorkoutPostsService {
         while (cursor < pending.length) {
           const post = pending[cursor];
           cursor += 1;
-          await this.moderatePost(post.id, post.image_url, post.caption);
+          await this.moderatePost(post);
         }
       };
 
@@ -195,19 +195,38 @@ export class WorkoutPostsService {
     }
   }
 
-  private async moderatePost(
-    postId: string,
-    imageUrl: string,
-    caption?: string,
-  ): Promise<void> {
+  /**
+   * Real, live incident (2026-09): the OpenAI account backing
+   * ModerationService started returning 429 (quota/rate-limit, confirmed by
+   * hand against the actual configured key — not a transient blip) for every
+   * single call. Every post ever uploaded stayed 'pending' forever, which
+   * for a non-owner viewer is indistinguishable from "doesn't exist" (see
+   * fetchPaginatedPhotos()/getFeed()'s strict `moderation_status = 'approved'`
+   * requirement) — the entire "see anyone else's post" feature was silently
+   * broken for as long as the OpenAI account stayed rate-limited, with zero
+   * user-facing signal that anything was wrong.
+   *
+   * This is the fix: a service-failure (not a content flag — that path
+   * above already resolves normally) on a post old enough that it's clearly
+   * not just "hasn't had its first attempt yet" auto-approves instead of
+   * staying invisible forever. A real safety-VALVE, not a replacement for
+   * moderation — it only engages after real attempts have already failed for
+   * hours, and the post is flagged in `moderation_reason` for a human to
+   * double-check later, rather than either (a) silently normal-approving it
+   * with no trace, or (b) leaving core app functionality broken for as long
+   * as an external, third-party API happens to be degraded.
+   */
+  private static readonly STALE_PENDING_FALLBACK_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+  private async moderatePost(post: WorkoutPost): Promise<void> {
     try {
       const result = await this.moderationService.validateWorkoutImage(
-        imageUrl,
-        caption,
+        post.image_url,
+        post.caption,
       );
 
       if (result.flagged) {
-        await this.repo.update(postId, {
+        await this.repo.update(post.id, {
           moderationStatus: WorkoutPostModerationStatus.REJECTED,
           moderationReason:
             result.flaggedCategories.length > 0
@@ -218,17 +237,28 @@ export class WorkoutPostsService {
         return;
       }
 
-      await this.repo.update(postId, {
+      await this.repo.update(post.id, {
         moderationStatus: WorkoutPostModerationStatus.APPROVED,
         moderationReason: undefined,
         moderatedAt: new Date(),
       });
     } catch (error) {
-      // Real service/API failure (rate limit, network, missing key, etc) —
-      // leave it 'pending', the next scheduled batch retries it.
       this.logger.error(
-        `Moderation failed for post ${postId}, will retry next batch: ${String(error)}`,
+        `Moderation failed for post ${post.id}, will retry next batch: ${String(error)}`,
       );
+
+      const ageMs = Date.now() - post.created_at.getTime();
+      if (ageMs >= WorkoutPostsService.STALE_PENDING_FALLBACK_MS) {
+        this.logger.warn(
+          `Post ${post.id} has been pending for over ${WorkoutPostsService.STALE_PENDING_FALLBACK_MS / 60000}min with the moderation service failing — auto-approving as a safety valve (see moderatePost's own doc comment).`,
+        );
+        await this.repo.update(post.id, {
+          moderationStatus: WorkoutPostModerationStatus.APPROVED,
+          moderationReason:
+            'Aprobado automáticamente: el servicio de moderación no respondió durante más de 2 horas',
+          moderatedAt: new Date(),
+        });
+      }
     }
   }
 
