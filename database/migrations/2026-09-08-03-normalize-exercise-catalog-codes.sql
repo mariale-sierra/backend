@@ -71,7 +71,7 @@ SELECT DISTINCT
   legacy.exercise_id,
   canonical.id,
   false,
-  'manual_override',
+  'manual_override'::havit.mapping_source_enum,
   'normalized from legacy location ' || legacy.legacy_code
 FROM tmp_legacy_exercise_locations AS legacy
 JOIN (
