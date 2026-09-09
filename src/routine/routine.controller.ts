@@ -39,11 +39,11 @@ export class RoutineController {
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Obtener todas las rutinas',
-    description: 'Lista todas las rutinas disponibles',
+    description: 'Lista las rutinas activas del usuario autenticado',
   })
   @ApiResponse({ status: 200, description: 'Lista de rutinas' })
-  findAll() {
-    return this.routineService.findAll();
+  findAll(@CurrentUser() user: AuthenticatedUser) {
+    return this.routineService.findAll(user.sub);
   }
 
   @Get(':id')
@@ -51,12 +51,13 @@ export class RoutineController {
   @ApiParam({ name: 'id', description: 'ID de la rutina' })
   @ApiOperation({
     summary: 'Obtener detalles de una rutina',
-    description: 'Devuelve la información completa de una rutina específica',
+    description:
+      'Devuelve la información completa de una rutina propia y activa',
   })
   @ApiResponse({ status: 200, description: 'Detalles de la rutina' })
   @ApiResponse({ status: 404, description: 'Rutina no encontrada' })
-  findOne(@Param('id') id: string) {
-    return this.routineService.findOne(Number(id));
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.routineService.findOne(Number(id), user.sub);
   }
 
   @Post(':id/exercises')

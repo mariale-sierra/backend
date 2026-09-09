@@ -139,6 +139,29 @@ describe('RoutineService.addExerciseToRoutine', () => {
     routineExerciseRepo.count.mockResolvedValue(0);
   }
 
+  it('lists only active routines owned by the authenticated user', async () => {
+    routineRepo.find.mockResolvedValue([]);
+
+    await service.findAll(OWNER_ID);
+
+    expect(routineRepo.find).toHaveBeenCalledWith({
+      where: { createdByUserId: OWNER_ID, is_active: true },
+      relations: [
+        'routine_exercises',
+        'routine_exercises.exercise',
+        'routine_exercises.exercise.category_maps',
+        'routine_exercises.exercise.category_maps.category',
+        'routine_exercises.exercise.location_maps',
+        'routine_exercises.exercise.location_maps.location',
+        'routine_exercises.sets',
+        'routine_exercises.sets.targets',
+        'routine_exercises.sets.targets.metricType',
+        'routine_exercises.targets',
+        'routine_exercises.targets.metricType',
+      ],
+    });
+  });
+
   it('should throw NotFoundException when the routine does not exist', async () => {
     routineRepo.findOneBy.mockResolvedValue(null);
 

@@ -54,16 +54,41 @@ export class RoutineService {
     return this.routineRepo.save(routine);
   }
 
-  async findAll() {
+  async findAll(userId: string) {
     return this.routineRepo.find({
-      relations: ['routine_exercises', 'routine_exercises.exercise'],
+      where: { createdByUserId: userId, is_active: true },
+      relations: [
+        'routine_exercises',
+        'routine_exercises.exercise',
+        'routine_exercises.exercise.category_maps',
+        'routine_exercises.exercise.category_maps.category',
+        'routine_exercises.exercise.location_maps',
+        'routine_exercises.exercise.location_maps.location',
+        'routine_exercises.sets',
+        'routine_exercises.sets.targets',
+        'routine_exercises.sets.targets.metricType',
+        'routine_exercises.targets',
+        'routine_exercises.targets.metricType',
+      ],
     });
   }
 
-  async findOne(id: number) {
+  async findOne(id: number, userId: string) {
     return this.routineRepo.findOne({
-      where: { id },
-      relations: ['routine_exercises', 'routine_exercises.exercise'],
+      where: { id, createdByUserId: userId, is_active: true },
+      relations: [
+        'routine_exercises',
+        'routine_exercises.exercise',
+        'routine_exercises.exercise.category_maps',
+        'routine_exercises.exercise.category_maps.category',
+        'routine_exercises.exercise.location_maps',
+        'routine_exercises.exercise.location_maps.location',
+        'routine_exercises.sets',
+        'routine_exercises.sets.targets',
+        'routine_exercises.sets.targets.metricType',
+        'routine_exercises.targets',
+        'routine_exercises.targets.metricType',
+      ],
     });
   }
 
