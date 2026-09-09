@@ -91,6 +91,18 @@ POST /challenges/:id/join
 GET  /challenges/progress
 ```
 
+### 🧩 Rutinas
+
+```http
+GET  /routine
+GET  /routine/:id
+POST /routine
+POST /routine/:id/exercises
+```
+
+Las rutas de lectura devuelven únicamente rutinas activas cuyo dueño es el
+usuario autenticado; las rutinas y sus ejercicios se consultan con JWT.
+
 ### 📈 Progreso
 
 ```http
@@ -156,5 +168,3 @@ Authorization: Bearer <TOKEN>
 - [ ] Métricas avanzadas de progreso
 
 ---
-
-
