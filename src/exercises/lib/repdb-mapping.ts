@@ -170,7 +170,17 @@ export function inferCategories(ex: RepDbExerciseForMapping): CategoryResult[] {
       tags.some((t) => t === 'mobility' || t === 'yoga') || ex.met < 3;
     return [
       {
-        code: isMindBody ? 'mind_body' : 'flexibility',
+        // Real, confirmed bug (2026-09): havit.exercise_categories.code uses
+        // HYPHENS ('mind-body', 'cardio-intense', 'cardio-low' — verified
+        // live against GET /exercises/categories), not the underscored codes
+        // this function used to emit. The importer's own JOIN against
+        // exercise_categories.code matched zero rows for any of these three,
+        // so every RepDB-imported cardio/flexibility/mind-body exercise
+        // silently ended up with NO category at all (falling through to
+        // "strength"/"functional" only, or fully uncategorized) — confirmed
+        // live: 0 exercises in any of these 3 categories despite hundreds
+        // being tagged 'stretching'/'cardio' in the source dataset.
+        code: isMindBody ? 'mind-body' : 'flexibility',
         isPrimary: true,
         reason: isMindBody ? 'low-intensity/mobility stretching' : 'stretching',
       },
@@ -182,7 +192,7 @@ export function inferCategories(ex: RepDbExerciseForMapping): CategoryResult[] {
     const intense = ex.met >= 7;
     return [
       {
-        code: intense ? 'cardio_intense' : 'cardio_low',
+        code: intense ? 'cardio-intense' : 'cardio-low',
         isPrimary: true,
         reason: `cardio, met=${ex.met}`,
       },

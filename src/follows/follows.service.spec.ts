@@ -19,8 +19,7 @@ import {
 // per followed user) is workout-log-streak.util's job and is covered by
 // workout-log-streak.util.spec.ts — mocked here so this file only exercises
 // FollowsService's own wiring (which users, whose streak/profile goes with
-// whom). toStreakPoints is left as the real implementation since it's pure
-// and its divisor is exactly what getFriendStreaks must get right.
+// whom).
 jest.mock('../workout-log/workout-log-streak.util', () => ({
   ...jest.requireActual<
     typeof import('../workout-log/workout-log-streak.util')
@@ -275,7 +274,7 @@ describe('FollowsService', () => {
       ]);
     });
 
-    it('should map each followed user to their own avatar/streak/loggedToday, applying the /3 streak-points divisor', async () => {
+    it('should map each followed user to their own avatar/streak/loggedToday, passing the real day count through unscaled', async () => {
       followRepo.find.mockResolvedValue([
         { followed: { id: 'user-2', username: 'alice' } },
         { followed: { id: 'user-3', username: 'bob' } },
@@ -288,8 +287,8 @@ describe('FollowsService', () => {
       ]);
       mockGetCurrentStreakDaysForUsers.mockResolvedValue(
         new Map([
-          ['user-2', 7], // 7 consecutive days -> floor(7/3) = 2 streak points
-          ['user-3', 2], // 2 consecutive days -> floor(2/3) = 0 streak points
+          ['user-2', 7],
+          ['user-3', 2],
         ]),
       );
       mockGetLoggedTodayUserIds.mockResolvedValue(new Set(['user-2']));
@@ -301,20 +300,47 @@ describe('FollowsService', () => {
           userId: 'user-2',
           username: 'alice',
           avatarUrl: 'https://cdn.example.com/a.jpg',
-          streakDays: 2,
+          streakDays: 7,
           loggedToday: true,
         },
         {
           userId: 'user-3',
           username: 'bob',
           avatarUrl: null,
-          streakDays: 0,
+          streakDays: 2,
           loggedToday: false,
         },
       ]);
     });
 
-    it('should default to 0 streak points and no avatar for a followed user with no workout/profile rows at all', async () => {
+    it('real bug, fixed 2026-09: a fresh 1-day streak (logged today for the first time) shows streakDays: 1, not 0', async () => {
+      // This is the exact case that used to look broken: toStreakPoints()
+      // (floor(days / 3)) made a 1-day-old streak display as "0" even
+      // though loggedToday correctly flipped the badge to active — a fresh
+      // streak looked indistinguishable from no streak at all.
+      followRepo.find.mockResolvedValue([
+        { followed: { id: 'user-2', username: 'alice' } },
+      ]);
+      profileRepo.find.mockResolvedValue([]);
+      mockGetCurrentStreakDaysForUsers.mockResolvedValue(
+        new Map([['user-2', 1]]),
+      );
+      mockGetLoggedTodayUserIds.mockResolvedValue(new Set(['user-2']));
+
+      const result = await service.getFriendStreaks('user-1');
+
+      expect(result).toEqual([
+        {
+          userId: 'user-2',
+          username: 'alice',
+          avatarUrl: null,
+          streakDays: 1,
+          loggedToday: true,
+        },
+      ]);
+    });
+
+    it('should default to 0 streak days and no avatar for a followed user with no workout/profile rows at all', async () => {
       followRepo.find.mockResolvedValue([
         { followed: { id: 'user-2', username: 'alice' } },
       ]);

@@ -141,18 +141,23 @@ describe('inferCategories', () => {
     ]);
   });
 
-  it('stretching + mobility tag -> mind_body', () => {
+  it('stretching + mobility tag -> mind-body', () => {
     const result = inferCategories(
       baseExercise({ category: 'stretching', tags: ['mobility'] }),
     );
-    expect(result[0].code).toBe('mind_body');
+    // Real, confirmed bug fix (2026-09): havit.exercise_categories.code uses
+    // hyphens ('mind-body'), not underscores — verified live against
+    // GET /exercises/categories. The old underscored code matched zero rows
+    // on insert, so every imported exercise meant for this category silently
+    // ended up with none at all.
+    expect(result[0].code).toBe('mind-body');
   });
 
-  it('stretching + low MET -> mind_body even without a mobility/yoga tag', () => {
+  it('stretching + low MET -> mind-body even without a mobility/yoga tag', () => {
     const result = inferCategories(
       baseExercise({ category: 'stretching', met: 2 }),
     );
-    expect(result[0].code).toBe('mind_body');
+    expect(result[0].code).toBe('mind-body');
   });
 
   it('stretching, no mobility signal -> flexibility', () => {
@@ -162,20 +167,20 @@ describe('inferCategories', () => {
     expect(result[0].code).toBe('flexibility');
   });
 
-  it('cardio + met>=7 -> cardio_intense', () => {
+  it('cardio + met>=7 -> cardio-intense', () => {
     const result = inferCategories(
       baseExercise({ category: 'cardio', met: 8 }),
     );
     expect(result).toEqual([
-      { code: 'cardio_intense', isPrimary: true, reason: 'cardio, met=8' },
+      { code: 'cardio-intense', isPrimary: true, reason: 'cardio, met=8' },
     ]);
   });
 
-  it('cardio + met<7 -> cardio_low', () => {
+  it('cardio + met<7 -> cardio-low', () => {
     const result = inferCategories(
       baseExercise({ category: 'cardio', met: 6 }),
     );
-    expect(result[0].code).toBe('cardio_low');
+    expect(result[0].code).toBe('cardio-low');
   });
 
   it('strength + bodyweight endurance -> functional primary, strength secondary', () => {
@@ -207,13 +212,13 @@ describe('inferCategories', () => {
     ]);
   });
 
-  it('regression: a high-MET strength exercise never becomes cardio_low (the removed global MET rule)', () => {
+  it('regression: a high-MET strength exercise never becomes cardio-low (the removed global MET rule)', () => {
     // A heavy squat/deadlift/circuit can have a high metabolic cost without being cardio.
     const result = inferCategories(
       baseExercise({ category: 'strength', met: 9, mechanic: 'compound' }),
     );
-    expect(result.map((r) => r.code)).not.toContain('cardio_low');
-    expect(result.map((r) => r.code)).not.toContain('cardio_intense');
+    expect(result.map((r) => r.code)).not.toContain('cardio-low');
+    expect(result.map((r) => r.code)).not.toContain('cardio-intense');
     expect(result).toEqual([
       { code: 'strength', isPrimary: true, reason: 'strength' },
     ]);

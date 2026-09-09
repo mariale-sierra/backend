@@ -15,7 +15,6 @@ import { FriendStreakDto } from './dto/friend-streak.dto';
 import {
   getCurrentStreakDaysForUsers,
   getLoggedTodayUserIds,
-  toStreakPoints,
 } from '../workout-log/workout-log-streak.util';
 
 @Injectable()
@@ -131,6 +130,15 @@ export class FollowsService {
    * streaks" row. Batches the profile + workout_log lookups across all
    * followed users (one grouped query each) instead of one query per
    * followed user, same batching pattern as getFollowerCountsForUsers.
+   *
+   * Real bug, fixed 2026-09: this used to run the raw day count through
+   * toStreakPoints() (floor(days / 3)) before handing it to
+   * FriendStreakDto.streakDays — so a 1 or 2-day-old streak displayed as 0,
+   * even though `loggedToday` correctly showed the badge as active (a fresh
+   * streak reads as "logged today, but counter still says 0"). The field is
+   * literally named `streakDays`, and the frontend badge shows it as a plain
+   * day count — there's no other place in the app treating it as
+   * "points"/badge-tiers, so this passes the real value straight through.
    */
   async getFriendStreaks(userId: string): Promise<FriendStreakDto[]> {
     const rows = await this.followRepo.find({
@@ -159,7 +167,7 @@ export class FollowsService {
       FriendStreakDto.build(
         user,
         profileByUserId.get(user.id) ?? null,
-        toStreakPoints(streakDaysByUser.get(user.id) ?? 0),
+        streakDaysByUser.get(user.id) ?? 0,
         loggedTodayIds.has(user.id),
       ),
     );

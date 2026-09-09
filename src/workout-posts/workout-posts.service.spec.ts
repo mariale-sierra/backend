@@ -2,7 +2,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { NotFoundException } from '@nestjs/common';
 import { WorkoutPostsService } from './workout-posts.service';
-import { WorkoutPost } from './entities/workout-post.entity';
+import {
+  WorkoutPost,
+  WorkoutPostModerationStatus,
+} from './entities/workout-post.entity';
 import { User } from '../users/entities/user.entity';
 import { ModerationService } from '../openai/moderation.service';
 import { FollowsService } from '../follows/follows.service';
@@ -14,6 +17,8 @@ const createMockWorkoutPostRepo = () => ({
   create: jest.fn(),
   save: jest.fn(),
   update: jest.fn(),
+  // processPendingModerationBatch()'s own lookup of still-pending posts.
+  find: jest.fn().mockResolvedValue([]),
   createQueryBuilder: jest.fn(),
   // supportsModerationColumns() calls this directly on the repo.
   query: jest.fn(),
@@ -36,6 +41,7 @@ describe('WorkoutPostsService', () => {
     getReactedPostIds: jest.Mock;
   };
   let commentsService: { getCountsForPosts: jest.Mock };
+  let moderationService: { validateWorkoutImage: jest.Mock };
 
   const VIEWER_ID = 'viewer-1';
   const OTHER_USER_ID = 'other-2';
@@ -58,16 +64,14 @@ describe('WorkoutPostsService', () => {
     commentsService = {
       getCountsForPosts: jest.fn().mockResolvedValue(new Map()),
     };
+    moderationService = { validateWorkoutImage: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WorkoutPostsService,
         { provide: getRepositoryToken(WorkoutPost), useValue: postRepo },
         { provide: getRepositoryToken(User), useValue: userRepo },
-        {
-          provide: ModerationService,
-          useValue: { validateWorkoutImage: jest.fn() },
-        },
+        { provide: ModerationService, useValue: moderationService },
         { provide: FollowsService, useValue: followsService },
         { provide: WorkoutPostReactionsService, useValue: reactionsService },
         { provide: WorkoutPostCommentsService, useValue: commentsService },
@@ -109,6 +113,84 @@ describe('WorkoutPostsService', () => {
       ...overrides,
     };
   }
+
+  // ---------------------------------------------------------------------
+  // Moderation batch — real incident (2026-09): the OpenAI account backing
+  // ModerationService started returning 429 for every call, so every post
+  // ever uploaded stayed 'pending' forever — invisible to anyone but its
+  // own author (getFeed/getUserPosts both require moderation_status =
+  // 'approved' for a non-owner viewer). These tests cover the fix: a
+  // service failure on a post old enough to be clearly stuck (not just
+  // "hasn't had its first attempt yet") auto-approves as a safety valve.
+  // ---------------------------------------------------------------------
+  describe('processPendingModerationBatch', () => {
+    function pendingPost(overrides: Partial<WorkoutPost> = {}): WorkoutPost {
+      return {
+        id: 'post-1',
+        workout_log_id: 10,
+        user_id: 'author-1',
+        image_url: 'https://example.com/a.jpg',
+        caption: 'day 1',
+        visibility: 'public',
+        moderationStatus: WorkoutPostModerationStatus.PENDING,
+        created_at: new Date(),
+        ...overrides,
+      } as WorkoutPost;
+    }
+
+    it('should auto-approve a post that has been pending for over 2 hours when the moderation service keeps failing', async () => {
+      const staleDate = new Date(Date.now() - 3 * 60 * 60 * 1000); // 3h old
+      postRepo.find.mockResolvedValue([
+        pendingPost({ id: 'stale-1', created_at: staleDate }),
+      ]);
+      moderationService.validateWorkoutImage.mockRejectedValue(
+        new Error('429 Too Many Requests'),
+      );
+
+      await service.processPendingModerationBatch();
+
+      expect(postRepo.update).toHaveBeenCalledWith(
+        'stale-1',
+        expect.objectContaining({
+          moderationStatus: WorkoutPostModerationStatus.APPROVED,
+          moderationReason: expect.stringContaining('Aprobado automáticamente'),
+        }),
+      );
+    });
+
+    it('should NOT auto-approve a recently-uploaded post on its first failed attempt', async () => {
+      postRepo.find.mockResolvedValue([
+        pendingPost({ id: 'fresh-1', created_at: new Date() }),
+      ]);
+      moderationService.validateWorkoutImage.mockRejectedValue(
+        new Error('429 Too Many Requests'),
+      );
+
+      await service.processPendingModerationBatch();
+
+      expect(postRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('should still reject genuinely flagged content normally, regardless of age', async () => {
+      const staleDate = new Date(Date.now() - 3 * 60 * 60 * 1000);
+      postRepo.find.mockResolvedValue([
+        pendingPost({ id: 'flagged-1', created_at: staleDate }),
+      ]);
+      moderationService.validateWorkoutImage.mockResolvedValue({
+        flagged: true,
+        flaggedCategories: ['violence'],
+      });
+
+      await service.processPendingModerationBatch();
+
+      expect(postRepo.update).toHaveBeenCalledWith(
+        'flagged-1',
+        expect.objectContaining({
+          moderationStatus: WorkoutPostModerationStatus.REJECTED,
+        }),
+      );
+    });
+  });
 
   // ---------------------------------------------------------------------
   // GET /feed
