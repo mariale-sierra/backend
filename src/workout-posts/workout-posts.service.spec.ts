@@ -123,6 +123,30 @@ describe('WorkoutPostsService', () => {
   // service failure on a post old enough to be clearly stuck (not just
   // "hasn't had its first attempt yet") auto-approves as a safety valve.
   // ---------------------------------------------------------------------
+  describe('create', () => {
+    it('should create posts already approved, with no OpenAI call, while the moderation gate is disabled', async () => {
+      postRepo.create.mockReturnValue({} as WorkoutPost);
+      postRepo.save.mockImplementation((post: WorkoutPost) =>
+        Promise.resolve(post),
+      );
+
+      const saved = await service.create({
+        user_id: 'author-1',
+        image_url: 'https://example.com/a.jpg',
+      });
+
+      expect(moderationService.validateWorkoutImage).not.toHaveBeenCalled();
+      expect(saved).toEqual(
+        expect.objectContaining({
+          moderationStatus: WorkoutPostModerationStatus.APPROVED,
+          moderationReason: expect.stringContaining(
+            'desactivada temporalmente',
+          ),
+        }),
+      );
+    });
+  });
+
   describe('processPendingModerationBatch', () => {
     function pendingPost(overrides: Partial<WorkoutPost> = {}): WorkoutPost {
       return {
@@ -138,57 +162,95 @@ describe('WorkoutPostsService', () => {
       } as WorkoutPost;
     }
 
-    it('should auto-approve a post that has been pending for over 2 hours when the moderation service keeps failing', async () => {
-      const staleDate = new Date(Date.now() - 3 * 60 * 60 * 1000); // 3h old
+    // MODERATION_GATE_ENABLED is currently false (team decision, 2026-09:
+    // OpenAI quota exhausted — see the service's own doc comment), so the
+    // real per-post entry point auto-approves everything unconditionally,
+    // with no OpenAI call, regardless of content or age.
+    it('should auto-approve every pending post directly, with no OpenAI call, while the moderation gate is disabled', async () => {
       postRepo.find.mockResolvedValue([
-        pendingPost({ id: 'stale-1', created_at: staleDate }),
+        pendingPost({ id: 'post-1', created_at: new Date() }),
       ]);
-      moderationService.validateWorkoutImage.mockRejectedValue(
-        new Error('429 Too Many Requests'),
-      );
 
       await service.processPendingModerationBatch();
 
+      expect(moderationService.validateWorkoutImage).not.toHaveBeenCalled();
       expect(postRepo.update).toHaveBeenCalledWith(
-        'stale-1',
+        'post-1',
         expect.objectContaining({
           moderationStatus: WorkoutPostModerationStatus.APPROVED,
-          moderationReason: expect.stringContaining('Aprobado automáticamente'),
+          moderationReason: expect.stringContaining(
+            'desactivada temporalmente',
+          ),
         }),
       );
     });
 
-    it('should NOT auto-approve a recently-uploaded post on its first failed attempt', async () => {
-      postRepo.find.mockResolvedValue([
-        pendingPost({ id: 'fresh-1', created_at: new Date() }),
-      ]);
-      moderationService.validateWorkoutImage.mockRejectedValue(
-        new Error('429 Too Many Requests'),
-      );
+    // The real OpenAI-backed logic (moderatePostViaAi) is preserved, not
+    // deleted, for when the gate gets flipped back on — but it's no longer
+    // reachable through the public processPendingModerationBatch() entry
+    // point while the gate is off, so these call it directly to keep it
+    // covered.
+    describe('moderatePostViaAi (preserved for when the gate is re-enabled)', () => {
+      it('should auto-approve a post that has been pending for over 2 hours when the moderation service keeps failing', async () => {
+        const staleDate = new Date(Date.now() - 3 * 60 * 60 * 1000); // 3h old
+        const post = pendingPost({ id: 'stale-1', created_at: staleDate });
+        moderationService.validateWorkoutImage.mockRejectedValue(
+          new Error('429 Too Many Requests'),
+        );
 
-      await service.processPendingModerationBatch();
+        await (
+          service as unknown as {
+            moderatePostViaAi: (post: WorkoutPost) => Promise<void>;
+          }
+        ).moderatePostViaAi(post);
 
-      expect(postRepo.update).not.toHaveBeenCalled();
-    });
-
-    it('should still reject genuinely flagged content normally, regardless of age', async () => {
-      const staleDate = new Date(Date.now() - 3 * 60 * 60 * 1000);
-      postRepo.find.mockResolvedValue([
-        pendingPost({ id: 'flagged-1', created_at: staleDate }),
-      ]);
-      moderationService.validateWorkoutImage.mockResolvedValue({
-        flagged: true,
-        flaggedCategories: ['violence'],
+        expect(postRepo.update).toHaveBeenCalledWith(
+          'stale-1',
+          expect.objectContaining({
+            moderationStatus: WorkoutPostModerationStatus.APPROVED,
+            moderationReason: expect.stringContaining(
+              'Aprobado automáticamente',
+            ),
+          }),
+        );
       });
 
-      await service.processPendingModerationBatch();
+      it('should NOT auto-approve a recently-uploaded post on its first failed attempt', async () => {
+        const post = pendingPost({ id: 'fresh-1', created_at: new Date() });
+        moderationService.validateWorkoutImage.mockRejectedValue(
+          new Error('429 Too Many Requests'),
+        );
 
-      expect(postRepo.update).toHaveBeenCalledWith(
-        'flagged-1',
-        expect.objectContaining({
-          moderationStatus: WorkoutPostModerationStatus.REJECTED,
-        }),
-      );
+        await (
+          service as unknown as {
+            moderatePostViaAi: (post: WorkoutPost) => Promise<void>;
+          }
+        ).moderatePostViaAi(post);
+
+        expect(postRepo.update).not.toHaveBeenCalled();
+      });
+
+      it('should still reject genuinely flagged content normally, regardless of age', async () => {
+        const staleDate = new Date(Date.now() - 3 * 60 * 60 * 1000);
+        const post = pendingPost({ id: 'flagged-1', created_at: staleDate });
+        moderationService.validateWorkoutImage.mockResolvedValue({
+          flagged: true,
+          flaggedCategories: ['violence'],
+        });
+
+        await (
+          service as unknown as {
+            moderatePostViaAi: (post: WorkoutPost) => Promise<void>;
+          }
+        ).moderatePostViaAi(post);
+
+        expect(postRepo.update).toHaveBeenCalledWith(
+          'flagged-1',
+          expect.objectContaining({
+            moderationStatus: WorkoutPostModerationStatus.REJECTED,
+          }),
+        );
+      });
     });
   });
 

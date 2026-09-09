@@ -82,6 +82,19 @@ export class WorkoutPostsService {
   private moderationColumnsSupportPromise?: Promise<boolean>;
   private moderationBatchRunning = false;
 
+  /**
+   * Team decision (2026-09), while the OpenAI account backing
+   * ModerationService stays quota-exhausted (see moderatePost's doc comment
+   * for the full incident): flag the AI moderation gate off entirely rather
+   * than rip it out, so posts are visible again immediately and the feature
+   * can be switched back on later just by flipping this back to `true` — no
+   * code to resurrect. Read only through `create()`/`moderatePost()` below;
+   * flip this one constant to re-enable real moderation.
+   */
+  private static readonly MODERATION_GATE_ENABLED = false;
+  private static readonly MODERATION_DISABLED_REASON =
+    'Aprobado automáticamente: moderación por IA desactivada temporalmente por el equipo';
+
   constructor(
     @InjectRepository(WorkoutPost)
     private repo: Repository<WorkoutPost>,
@@ -119,11 +132,17 @@ export class WorkoutPostsService {
     Object.assign(post, data);
 
     if (supportsModeration) {
-      Object.assign(post, {
-        moderationStatus: WorkoutPostModerationStatus.PENDING,
-        moderationReason: undefined,
-        moderatedAt: undefined,
-      });
+      Object.assign(post, WorkoutPostsService.MODERATION_GATE_ENABLED
+        ? {
+            moderationStatus: WorkoutPostModerationStatus.PENDING,
+            moderationReason: undefined,
+            moderatedAt: undefined,
+          }
+        : {
+            moderationStatus: WorkoutPostModerationStatus.APPROVED,
+            moderationReason: WorkoutPostsService.MODERATION_DISABLED_REASON,
+            moderatedAt: new Date(),
+          });
     }
 
     // Moderation no longer runs inline on upload — it's picked up by
@@ -146,6 +165,11 @@ export class WorkoutPostsService {
    * without bursting past OpenAI's rate limit the way firing them all at
    * once would. Any post that still fails just stays 'pending' and is picked
    * up again on the next run — no in-process retry loop needed.
+   *
+   * While MODERATION_GATE_ENABLED is false (see its own doc comment), this
+   * still runs on schedule but every post it finds gets approved directly by
+   * moderatePost() with no OpenAI call — it's what clears any pre-existing
+   * backlog for a deploy that lands between the one-time migration and now.
    */
   @Cron(CronExpression.EVERY_10_MINUTES)
   async processPendingModerationBatch(): Promise<void> {
@@ -219,6 +243,29 @@ export class WorkoutPostsService {
   private static readonly STALE_PENDING_FALLBACK_MS = 2 * 60 * 60 * 1000; // 2 hours
 
   private async moderatePost(post: WorkoutPost): Promise<void> {
+    if (!WorkoutPostsService.MODERATION_GATE_ENABLED) {
+      // Gate flagged off (see MODERATION_GATE_ENABLED) — clears both new
+      // uploads (already approved at create()) and any backlog left over
+      // from while the gate was on, without spending an OpenAI call on it.
+      await this.repo.update(post.id, {
+        moderationStatus: WorkoutPostModerationStatus.APPROVED,
+        moderationReason: WorkoutPostsService.MODERATION_DISABLED_REASON,
+        moderatedAt: new Date(),
+      });
+      return;
+    }
+
+    return this.moderatePostViaAi(post);
+  }
+
+  /**
+   * The real OpenAI-backed moderation + stale-pending fallback logic,
+   * unreachable from moderatePost()'s public entry point while
+   * MODERATION_GATE_ENABLED is false — kept intact (not deleted) so it's
+   * ready to go the moment the gate is flipped back on, and still covered
+   * by its own tests below (called directly, bypassing the gate check).
+   */
+  private async moderatePostViaAi(post: WorkoutPost): Promise<void> {
     try {
       const result = await this.moderationService.validateWorkoutImage(
         post.image_url,
