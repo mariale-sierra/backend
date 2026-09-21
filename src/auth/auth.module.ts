@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { AdminGuard } from './guards/admin.guard';
 import { User } from '../users/entities/user.entity';
 import { UserProfile } from '../users/entities/user-profile.entity';
 import { UsersModule } from '../users/users.module';
@@ -14,8 +15,8 @@ import { UsersModule } from '../users/users.module';
     TypeOrmModule.forFeature([User, UserProfile]),
     JwtModule.register({}),
   ],
-  providers: [AuthService, JwtAuthGuard],
+  providers: [AuthService, JwtAuthGuard, AdminGuard],
   controllers: [AuthController],
-  exports: [JwtAuthGuard, JwtModule],
+  exports: [JwtAuthGuard, AdminGuard, JwtModule],
 })
 export class AuthModule {}

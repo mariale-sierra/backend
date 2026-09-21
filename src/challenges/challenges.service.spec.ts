@@ -1,6 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Between, DataSource } from 'typeorm';
 import { ChallengesService } from './challenges.service';
 import { Challenge } from './entities/challenge.entity';
@@ -13,6 +18,7 @@ import { ChallengeCategoryMap } from './entities/challenge-category-map.entity';
 import { ChallengeLocationMap } from './entities/challenge-location-map.entity';
 import { ExerciseCategory } from '../exercises/entities/exercise-category.entity';
 import { ExerciseLocation } from '../exercises/entities/exercise-location.entity';
+import { ChallengeJoinRequest } from './entities/challenge-join-request.entity';
 import { getDominantActivityCategories } from './dominant-activity-category.util';
 import { CreateChallengeDto } from './dto/create-challenge.dto';
 
@@ -58,6 +64,7 @@ describe('ChallengesService', () => {
   let challengeCategoryMapRepo: MockRepo;
   let challengeLocationMapRepo: MockRepo;
   let workoutRepo: MockRepo;
+  let challengeJoinRequestRepo: MockRepo;
   let dataSource: { transaction: jest.Mock };
 
   const OWNER_ID = 'owner-1';
@@ -80,6 +87,7 @@ describe('ChallengesService', () => {
     challengeCategoryMapRepo = createMockRepo();
     challengeLocationMapRepo = createMockRepo();
     workoutRepo = createMockRepo();
+    challengeJoinRequestRepo = createMockRepo();
     // attachCategoriesAndLocations runs on every findAll()/findOne() call —
     // default to none unless a test cares about them.
     challengeCategoryMapRepo.find.mockResolvedValue([]);
@@ -117,6 +125,10 @@ describe('ChallengesService', () => {
         {
           provide: getRepositoryToken(ExerciseLocation),
           useValue: createMockRepo(),
+        },
+        {
+          provide: getRepositoryToken(ChallengeJoinRequest),
+          useValue: challengeJoinRequestRepo,
         },
         { provide: DataSource, useValue: dataSource },
       ],
@@ -287,6 +299,549 @@ describe('ChallengesService', () => {
 
       await expect(
         service.joinChallenge(OTHER_USER_ID, CHALLENGE_ID),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should reject joining a closed challenge instead of joining or requesting', async () => {
+      userRepo.findOne.mockResolvedValue({ id: OTHER_USER_ID });
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        status: 'closed',
+      });
+
+      await expect(
+        service.joinChallenge(OTHER_USER_ID, CHALLENGE_ID),
+      ).rejects.toThrow('This challenge is closed');
+      expect(challengeUserMapRepo.save).not.toHaveBeenCalled();
+    });
+
+    // The actual reported bug: joining a private challenge used to fall
+    // through to the same direct-join path as a public one — nothing was
+    // ever left for the owner to approve.
+    describe('private challenges — join requests instead of joining directly', () => {
+      it('should file a pending join request instead of joining directly', async () => {
+        userRepo.findOne.mockResolvedValue({ id: OTHER_USER_ID });
+        challengeRepo.findOne.mockResolvedValue({
+          ...baseChallenge(),
+          visibility: 'private',
+        });
+        challengeUserMapRepo.findOne.mockResolvedValue(null); // not already a member
+        challengeJoinRequestRepo.findOne.mockResolvedValue(null); // no existing pending request
+        challengeJoinRequestRepo.create.mockImplementation((data: object) => ({
+          ...data,
+        }));
+        challengeJoinRequestRepo.save.mockImplementation((r: object) =>
+          Promise.resolve({ id: 'request-1', ...r }),
+        );
+
+        const result = await service.joinChallenge(
+          OTHER_USER_ID,
+          CHALLENGE_ID,
+        );
+
+        expect(result.status).toBe('requested');
+        expect(challengeJoinRequestRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            challenge_id: CHALLENGE_ID,
+            user_id: OTHER_USER_ID,
+            status: 'pending',
+          }),
+        );
+        expect(challengeUserMapRepo.save).not.toHaveBeenCalled();
+      });
+
+      it('should reject a second request while one is already pending', async () => {
+        userRepo.findOne.mockResolvedValue({ id: OTHER_USER_ID });
+        challengeRepo.findOne.mockResolvedValue({
+          ...baseChallenge(),
+          visibility: 'private',
+        });
+        challengeUserMapRepo.findOne.mockResolvedValue(null);
+        challengeJoinRequestRepo.findOne.mockResolvedValue({
+          id: 'request-1',
+          status: 'pending',
+        });
+
+        await expect(
+          service.joinChallenge(OTHER_USER_ID, CHALLENGE_ID),
+        ).rejects.toThrow(ConflictException);
+        expect(challengeJoinRequestRepo.save).not.toHaveBeenCalled();
+      });
+
+      it('should translate a DB unique-constraint race into the same Conflict response', async () => {
+        userRepo.findOne.mockResolvedValue({ id: OTHER_USER_ID });
+        challengeRepo.findOne.mockResolvedValue({
+          ...baseChallenge(),
+          visibility: 'private',
+        });
+        challengeUserMapRepo.findOne.mockResolvedValue(null);
+        challengeJoinRequestRepo.findOne.mockResolvedValue(null); // pre-check passes...
+        challengeJoinRequestRepo.create.mockImplementation((data: object) => ({
+          ...data,
+        }));
+        // ...but the partial unique index (uq_challenge_join_request_pending)
+        // catches a concurrent duplicate at insert time.
+        challengeJoinRequestRepo.save.mockRejectedValue({ code: '23505' });
+
+        await expect(
+          service.joinChallenge(OTHER_USER_ID, CHALLENGE_ID),
+        ).rejects.toThrow(ConflictException);
+      });
+    });
+  });
+
+  describe('getChallengeJoinRequests', () => {
+    it("should return the private challenge's pending requests for its owner", async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      challengeJoinRequestRepo.find.mockResolvedValue([
+        {
+          id: 'request-1',
+          status: 'pending',
+          user_id: OTHER_USER_ID,
+          requested_at: new Date('2026-09-01T00:00:00.000Z'),
+          responded_at: null,
+          user: {
+            id: OTHER_USER_ID,
+            username: 'other',
+            profile: { display_name: 'Other', profile_image_url: null },
+          },
+        },
+      ]);
+
+      const result = await service.getChallengeJoinRequests(
+        OWNER_ID,
+        CHALLENGE_ID,
+      );
+
+      expect(challengeJoinRequestRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { challenge_id: CHALLENGE_ID, status: 'pending' },
+        }),
+      );
+      expect(result).toHaveLength(1);
+      expect(result[0].user.id).toBe(OTHER_USER_ID);
+    });
+
+    it('should reject a caller who is not the challenge owner', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+
+      await expect(
+        service.getChallengeJoinRequests(OTHER_USER_ID, CHALLENGE_ID),
+      ).rejects.toThrow(ForbiddenException);
+      expect(challengeJoinRequestRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('should throw NotFoundException when the challenge does not exist', async () => {
+      challengeRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.getChallengeJoinRequests(OWNER_ID, CHALLENGE_ID),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('respondToChallengeJoinRequest', () => {
+    const PENDING_REQUEST = {
+      id: 'request-1',
+      challenge_id: CHALLENGE_ID,
+      user_id: OTHER_USER_ID,
+      status: 'pending',
+    };
+
+    // The service reaches into `manager.getRepository(...)` for both entities
+    // inside `dataSource.transaction(...)` — this stubs that manager the same
+    // way for every test in this block, with independent mocks per entity so
+    // each test can shape the request lookup and the resulting participant
+    // relation separately.
+    function mockTransaction(opts: {
+      request?: object | null;
+      requestAfterResponse?: object;
+      userMapFindOne?: object | null;
+    }) {
+      const requestRepo = {
+        createQueryBuilder: jest.fn(() => ({
+          setLock: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          getOne: jest.fn().mockResolvedValue(opts.request ?? null),
+        })),
+        save: jest.fn((r: object) => Promise.resolve(r)),
+        findOne: jest
+          .fn()
+          .mockResolvedValue(
+            opts.requestAfterResponse ?? {
+              ...PENDING_REQUEST,
+              user: {
+                id: OTHER_USER_ID,
+                username: 'other',
+                profile: { display_name: 'Other', profile_image_url: null },
+              },
+              requested_at: new Date('2026-09-01T00:00:00.000Z'),
+              responded_at: new Date('2026-09-02T00:00:00.000Z'),
+            },
+          ),
+      };
+      const userMapRepo = {
+        findOne: jest.fn().mockResolvedValue(opts.userMapFindOne ?? null),
+        save: jest.fn((r: object) => Promise.resolve(r)),
+        create: jest.fn((d: object) => d),
+      };
+      dataSource.transaction.mockImplementation(
+        async (cb: (manager: unknown) => unknown) =>
+          cb({
+            getRepository: (entity: unknown) =>
+              entity === ChallengeJoinRequest ? requestRepo : userMapRepo,
+          }),
+      );
+      return { requestRepo, userMapRepo };
+    }
+
+    it('should approve a pending request and create a new active participant relation', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      const { requestRepo, userMapRepo } = mockTransaction({
+        request: { ...PENDING_REQUEST },
+        userMapFindOne: null, // never joined/left before
+      });
+
+      const result = await service.respondToChallengeJoinRequest(
+        OWNER_ID,
+        CHALLENGE_ID,
+        'request-1',
+        true,
+      );
+
+      expect(requestRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'approved' }),
+      );
+      expect(userMapRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          challenge_id: CHALLENGE_ID,
+          user_id: OTHER_USER_ID,
+          status: 'active',
+        }),
+      );
+      expect(result.status).toBe('pending'); // from the default requestAfterResponse fixture above
+    });
+
+    it('should re-activate an existing (e.g. previously left) relation instead of duplicating it on approve', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      const existingRelation = {
+        challenge_id: CHALLENGE_ID,
+        user_id: OTHER_USER_ID,
+        status: 'left',
+      };
+      const { userMapRepo } = mockTransaction({
+        request: { ...PENDING_REQUEST },
+        userMapFindOne: existingRelation,
+      });
+
+      await service.respondToChallengeJoinRequest(
+        OWNER_ID,
+        CHALLENGE_ID,
+        'request-1',
+        true,
+      );
+
+      expect(userMapRepo.create).not.toHaveBeenCalled();
+      expect(userMapRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'active' }),
+      );
+    });
+
+    it('should reject a request without creating any participant relation', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      const { requestRepo, userMapRepo } = mockTransaction({
+        request: { ...PENDING_REQUEST },
+      });
+
+      await service.respondToChallengeJoinRequest(
+        OWNER_ID,
+        CHALLENGE_ID,
+        'request-1',
+        false,
+      );
+
+      expect(requestRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'rejected' }),
+      );
+      expect(userMapRepo.save).not.toHaveBeenCalled();
+      expect(userMapRepo.create).not.toHaveBeenCalled();
+    });
+
+    it('should throw ConflictException when the request has already been responded to', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      mockTransaction({
+        request: { ...PENDING_REQUEST, status: 'approved' },
+      });
+
+      await expect(
+        service.respondToChallengeJoinRequest(
+          OWNER_ID,
+          CHALLENGE_ID,
+          'request-1',
+          true,
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('should throw NotFoundException when the request does not exist', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      mockTransaction({ request: null });
+
+      await expect(
+        service.respondToChallengeJoinRequest(
+          OWNER_ID,
+          CHALLENGE_ID,
+          'missing-request',
+          true,
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should reject a caller who is not the challenge owner', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+
+      await expect(
+        service.respondToChallengeJoinRequest(
+          OTHER_USER_ID,
+          CHALLENGE_ID,
+          'request-1',
+          true,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('removeChallengeParticipant', () => {
+    it('should let the owner remove a participant from a public challenge', async () => {
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        visibility: 'public',
+      });
+      challengeUserMapRepo.findOne.mockResolvedValue({
+        challenge_id: CHALLENGE_ID,
+        user_id: OTHER_USER_ID,
+        status: 'active',
+      });
+
+      const result = await service.removeChallengeParticipant(
+        OWNER_ID,
+        CHALLENGE_ID,
+        OTHER_USER_ID,
+      );
+
+      expect(challengeUserMapRepo.remove).toHaveBeenCalled();
+      expect(result.message).toBe('Participant removed successfully');
+    });
+
+    it('should reject removing a participant from a private challenge', async () => {
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        visibility: 'private',
+      });
+
+      await expect(
+        service.removeChallengeParticipant(
+          OWNER_ID,
+          CHALLENGE_ID,
+          OTHER_USER_ID,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(challengeUserMapRepo.remove).not.toHaveBeenCalled();
+    });
+
+    it('should reject the owner trying to remove themselves', async () => {
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        visibility: 'public',
+      });
+
+      await expect(
+        service.removeChallengeParticipant(OWNER_ID, CHALLENGE_ID, OWNER_ID),
+      ).rejects.toThrow(BadRequestException);
+      expect(challengeUserMapRepo.remove).not.toHaveBeenCalled();
+    });
+
+    it('should throw NotFoundException when the target user is not part of the challenge', async () => {
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        visibility: 'public',
+      });
+      challengeUserMapRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.removeChallengeParticipant(
+          OWNER_ID,
+          CHALLENGE_ID,
+          OTHER_USER_ID,
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should reject a caller who is not the challenge owner', async () => {
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        visibility: 'public',
+      });
+
+      await expect(
+        service.removeChallengeParticipant(
+          OTHER_USER_ID,
+          CHALLENGE_ID,
+          'some-third-user',
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(challengeUserMapRepo.findOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('closeChallenge', () => {
+    it('should close an open challenge', async () => {
+      const challenge = { ...baseChallenge(), status: 'open' };
+      challengeRepo.findOne.mockResolvedValue(challenge);
+      challengeRepo.save.mockImplementation((c: object) => Promise.resolve(c));
+
+      const result = await service.closeChallenge(CHALLENGE_ID);
+
+      expect(challengeRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'closed' }),
+      );
+      expect(result.message).toBe('Challenge closed successfully');
+    });
+
+    it('should reject closing a challenge that is already closed', async () => {
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        status: 'closed',
+      });
+
+      await expect(service.closeChallenge(CHALLENGE_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(challengeRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should throw NotFoundException when the challenge does not exist', async () => {
+      challengeRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.closeChallenge(CHALLENGE_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('leaveChallenge / completeChallenge', () => {
+    it('should let an active participant leave', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      const relation = {
+        user_id: OTHER_USER_ID,
+        challenge_id: CHALLENGE_ID,
+        status: 'active',
+      };
+      challengeUserMapRepo.findOne.mockResolvedValue(relation);
+      challengeUserMapRepo.save.mockImplementation((r: object) =>
+        Promise.resolve(r),
+      );
+
+      const result = await service.leaveChallenge(OTHER_USER_ID, CHALLENGE_ID);
+
+      expect(challengeUserMapRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'left' }),
+      );
+      expect(result.message).toBe('Challenge left successfully');
+    });
+
+    it('should reject leaving a challenge already marked left', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      challengeUserMapRepo.findOne.mockResolvedValue({
+        user_id: OTHER_USER_ID,
+        challenge_id: CHALLENGE_ID,
+        status: 'left',
+      });
+
+      await expect(
+        service.leaveChallenge(OTHER_USER_ID, CHALLENGE_ID),
+      ).rejects.toThrow(BadRequestException);
+      expect(challengeUserMapRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should throw NotFoundException when the caller is not part of the challenge', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      challengeUserMapRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.leaveChallenge(OTHER_USER_ID, CHALLENGE_ID),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should mark an active participant completed', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      const relation = {
+        user_id: OTHER_USER_ID,
+        challenge_id: CHALLENGE_ID,
+        status: 'active',
+      };
+      challengeUserMapRepo.findOne.mockResolvedValue(relation);
+      challengeUserMapRepo.save.mockImplementation((r: object) =>
+        Promise.resolve(r),
+      );
+
+      const result = await service.completeChallenge(
+        OTHER_USER_ID,
+        CHALLENGE_ID,
+      );
+
+      expect(challengeUserMapRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'completed' }),
+      );
+      expect(result.message).toBe('Challenge completed successfully');
+    });
+
+    // The actual regression this guards: WorkoutLogService's own server-side
+    // auto-complete (completeChallengeIfThisWasTheLastDay) now routinely
+    // completes the relation BEFORE the frontend's own "was that the last
+    // day?" round trip (progressLoggedFeedback.ts) gets a chance to call
+    // this same endpoint — that second call must succeed, not throw, or the
+    // "Challenge complete!" popup silently never shows.
+    it('should succeed (idempotently, not error) when the relation is already completed', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      const relation = {
+        user_id: OTHER_USER_ID,
+        challenge_id: CHALLENGE_ID,
+        status: 'completed',
+      };
+      challengeUserMapRepo.findOne.mockResolvedValue(relation);
+
+      const result = await service.completeChallenge(
+        OTHER_USER_ID,
+        CHALLENGE_ID,
+      );
+
+      expect(challengeUserMapRepo.save).not.toHaveBeenCalled();
+      expect(result.message).toBe('Challenge completed successfully');
+      expect(result.data).toBe(relation);
+    });
+
+    it('should still reject completing a challenge the caller already left', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      challengeUserMapRepo.findOne.mockResolvedValue({
+        user_id: OTHER_USER_ID,
+        challenge_id: CHALLENGE_ID,
+        status: 'left',
+      });
+
+      await expect(
+        service.completeChallenge(OTHER_USER_ID, CHALLENGE_ID),
+      ).rejects.toThrow(BadRequestException);
+      expect(challengeUserMapRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should throw NotFoundException when the challenge does not exist', async () => {
+      challengeRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.completeChallenge(OTHER_USER_ID, CHALLENGE_ID),
       ).rejects.toThrow(NotFoundException);
     });
   });
@@ -1013,6 +1568,29 @@ describe('ChallengesService', () => {
 
     afterEach(() => {
       jest.useRealTimers();
+    });
+
+    // The Consistency/progress screen's own bug: it had no way to tell a
+    // finished or left challenge apart from an active one, because it only
+    // ever saw the raw Challenge entity's own 'open'/'closed' admin field —
+    // never the caller's actual challenge_user_map.status. Exposed here,
+    // separately named, so the frontend can finally read it.
+    it("includes the caller's own relation status, distinct from the challenge's own open/closed status", async () => {
+      challengeUserMapRepo.findOne.mockResolvedValue({
+        user_id: OWNER_ID,
+        challenge_id: CHALLENGE_ID,
+        status: 'completed',
+        joined_at: JOINED_AT,
+      });
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        status: 'open',
+      });
+
+      const result = await service.getProgress(OWNER_ID, CHALLENGE_ID, 'UTC');
+
+      expect(result!.relationStatus).toBe('completed');
+      expect(result!.challenge.status).toBe('open');
     });
 
     // The bug: a user behind UTC saw the challenge day (and "completed

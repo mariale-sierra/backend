@@ -105,6 +105,7 @@ describe('UsersService', () => {
     username: 'alice',
     email: 'alice@example.com',
     is_active: true,
+    is_admin: false,
   });
 
   beforeEach(async () => {
@@ -197,6 +198,52 @@ describe('UsersService', () => {
       await expect(service.findById('missing-id')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('banUser / unbanUser (admin-only, gated by AdminGuard at the controller)', () => {
+    it('should deactivate the target account', async () => {
+      const user = baseUser();
+      userRepo.findOne.mockResolvedValue(user);
+      userRepo.save.mockImplementation((u: object) => Promise.resolve(u));
+
+      const result = await service.banUser('user-1');
+
+      expect(userRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ is_active: false }),
+      );
+      expect(result.message).toBe('User banned successfully');
+    });
+
+    it('should throw NotFoundException when banning a user that does not exist', async () => {
+      userRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.banUser('missing-id')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(userRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should reactivate the target account', async () => {
+      const user = { ...baseUser(), is_active: false };
+      userRepo.findOne.mockResolvedValue(user);
+      userRepo.save.mockImplementation((u: object) => Promise.resolve(u));
+
+      const result = await service.unbanUser('user-1');
+
+      expect(userRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ is_active: true }),
+      );
+      expect(result.message).toBe('User unbanned successfully');
+    });
+
+    it('should throw NotFoundException when unbanning a user that does not exist', async () => {
+      userRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.unbanUser('missing-id')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(userRepo.save).not.toHaveBeenCalled();
     });
   });
 

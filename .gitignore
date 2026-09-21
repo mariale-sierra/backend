@@ -41,6 +41,10 @@ lerna-debug.log*
 .env.test.local
 .env.production.local
 .env.local
+# bare `env` (no dot) — this is the file raiz/docker-compose.yml's `env_file:`
+# actually points at locally; holds real secrets (DB password, JWT_SECRET),
+# never commit it.
+env
 
 # temp directory
 .temp

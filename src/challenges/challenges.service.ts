@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -13,6 +14,8 @@ import { CreateChallengeCycleDayDto } from './dto/create-challenge-cycle-day.dto
 import { UpdateChallengeDto } from './dto/update-challenge.dto';
 import { User } from '../users/entities/user.entity';
 import { ChallengeUserMap } from './entities/challenge-user-map.entity';
+import { ChallengeJoinRequest } from './entities/challenge-join-request.entity';
+import { ChallengeJoinRequestResponseDto } from './dto/challenge-join-request-response.dto';
 import { DataSource } from 'typeorm';
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengeCycleDay } from './entities/challenge-cycle-days.entity';
@@ -69,6 +72,8 @@ export class ChallengesService {
     private exerciseCategoryRepo: Repository<ExerciseCategory>,
     @InjectRepository(ExerciseLocation)
     private exerciseLocationRepo: Repository<ExerciseLocation>,
+    @InjectRepository(ChallengeJoinRequest)
+    private challengeJoinRequestRepo: Repository<ChallengeJoinRequest>,
   ) {}
 
   async create(createChallengeDto: CreateChallengeDto, userId: string) {
@@ -756,6 +761,15 @@ export class ChallengesService {
     return { message: 'Challenge deleted successfully' };
   }
 
+  /**
+   * Public challenge: joins immediately, exactly as before. Private challenge: files a
+   * join request pending owner approval instead — never inserts directly into
+   * `challenge_user_map` for a private one. Same branch `SpacesService.join` already
+   * makes for spaces (see its own doc comment); challenges never had it, which is the
+   * real, confirmed bug this fixes (reported live: joining a private challenge from a
+   * second account joined it immediately, no request, nothing for the owner to
+   * approve).
+   */
   async joinChallenge(userId: string, challengeId: string) {
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
@@ -770,11 +784,50 @@ export class ChallengesService {
       throw new BadRequestException('You cannot join a challenge you created');
     }
 
+    if (challenge.status === 'closed') {
+      throw new BadRequestException('This challenge is closed');
+    }
+
     const alreadyJoined = await this.challengeUserMapRepo.findOne({
       where: { user_id: userId, challenge_id: challengeId },
     });
     if (alreadyJoined)
       throw new BadRequestException('Already joined this challenge');
+
+    if (challenge.visibility === 'private') {
+      const existingPending = await this.challengeJoinRequestRepo.findOne({
+        where: { challenge_id: challengeId, user_id: userId, status: 'pending' },
+      });
+      if (existingPending) {
+        throw new ConflictException(
+          'You already have a pending request for this challenge',
+        );
+      }
+
+      try {
+        const request = await this.challengeJoinRequestRepo.save(
+          this.challengeJoinRequestRepo.create({
+            challenge_id: challengeId,
+            user_id: userId,
+            status: 'pending',
+          }),
+        );
+        return {
+          status: 'requested' as const,
+          message: 'Join request sent',
+          data: request,
+        };
+      } catch (error) {
+        // uq_challenge_join_request_pending backs this up at the DB level — translate
+        // the race-condition duplicate into the same 409 the pre-check above gives.
+        if ((error as { code?: string })?.code === '23505') {
+          throw new ConflictException(
+            'You already have a pending request for this challenge',
+          );
+        }
+        throw error;
+      }
+    }
 
     const join = this.challengeUserMapRepo.create({
       user_id: userId,
@@ -786,9 +839,170 @@ export class ChallengesService {
     await this.challengeUserMapRepo.save(join);
 
     return {
+      status: 'joined' as const,
       message: 'Joined successfully',
       data: join,
     };
+  }
+
+  /** Owner-only — pending join requests for a private challenge. */
+  async getChallengeJoinRequests(
+    userId: string,
+    challengeId: string,
+  ): Promise<ChallengeJoinRequestResponseDto[]> {
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId },
+    });
+    if (!challenge) throw new NotFoundException('Challenge not found');
+    assertOwnership(
+      challenge.created_by_user_id,
+      userId,
+      'Only the owner can view join requests',
+    );
+
+    const requests = await this.challengeJoinRequestRepo.find({
+      where: { challenge_id: challengeId, status: 'pending' },
+      relations: { user: { profile: true } },
+      order: { requested_at: 'ASC' },
+    });
+    return ChallengeJoinRequestResponseDto.fromEntities(requests);
+  }
+
+  /**
+   * Approve/reject a pending join request. Runs in a transaction with a row lock on the
+   * request, same shape as `SpacesService.respondToJoinRequest`, to avoid
+   * double-processing under concurrent approve/reject calls.
+   */
+  async respondToChallengeJoinRequest(
+    userId: string,
+    challengeId: string,
+    requestId: string,
+    approve: boolean,
+  ): Promise<ChallengeJoinRequestResponseDto> {
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId },
+    });
+    if (!challenge) throw new NotFoundException('Challenge not found');
+    assertOwnership(
+      challenge.created_by_user_id,
+      userId,
+      'Only the owner can respond to join requests',
+    );
+
+    return this.dataSource.transaction(async (manager) => {
+      const requestRepo = manager.getRepository(ChallengeJoinRequest);
+      const request = await requestRepo
+        .createQueryBuilder('r')
+        .setLock('pessimistic_write')
+        .where('r.id = :id', { id: requestId })
+        .andWhere('r.challenge_id = :challengeId', { challengeId })
+        .getOne();
+
+      if (!request) throw new NotFoundException('Join request not found');
+      if (request.status !== 'pending') {
+        throw new ConflictException(
+          `Request has already been ${request.status}`,
+        );
+      }
+
+      request.status = approve ? 'approved' : 'rejected';
+      request.responded_at = new Date();
+      request.responded_by_user_id = userId;
+      await requestRepo.save(request);
+
+      if (approve) {
+        const userMapRepo = manager.getRepository(ChallengeUserMap);
+        const existing = await userMapRepo.findOne({
+          where: { challenge_id: challengeId, user_id: request.user_id },
+        });
+        if (existing) {
+          existing.status = 'active';
+          await userMapRepo.save(existing);
+        } else {
+          await userMapRepo.save(
+            userMapRepo.create({
+              challenge_id: challengeId,
+              user_id: request.user_id,
+              role: 'participant',
+              status: 'active',
+            }),
+          );
+        }
+      }
+
+      const withUser = await requestRepo.findOne({
+        where: { id: request.id },
+        relations: { user: { profile: true } },
+      });
+      return ChallengeJoinRequestResponseDto.fromEntity(withUser!);
+    });
+  }
+
+  /**
+   * Owner-only, PUBLIC challenges only (a private challenge is admitted to via
+   * approve/reject, not removed from afterwards — matching what Manage-challenge's own
+   * UI offers per challenge type). Deletes the row outright rather than a soft
+   * 'removed' status: there's no other place in the app that cares about a past
+   * removal, and challenge_user_map.status is a real Postgres enum
+   * ('active'/'completed'/'left') that a new value would need its own migration for —
+   * unnecessary for what is simply "this person is no longer in the challenge".
+   */
+  async removeChallengeParticipant(
+    userId: string,
+    challengeId: string,
+    targetUserId: string,
+  ): Promise<{ message: string }> {
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId },
+    });
+    if (!challenge) throw new NotFoundException('Challenge not found');
+    assertOwnership(
+      challenge.created_by_user_id,
+      userId,
+      'Only the owner can remove a participant',
+    );
+
+    if (challenge.visibility === 'private') {
+      throw new BadRequestException(
+        'Participants can only be removed from a public challenge',
+      );
+    }
+    if (targetUserId === userId) {
+      throw new BadRequestException(
+        'The owner cannot remove themselves — delete the challenge instead',
+      );
+    }
+
+    const relation = await this.challengeUserMapRepo.findOne({
+      where: { challenge_id: challengeId, user_id: targetUserId },
+    });
+    if (!relation) {
+      throw new NotFoundException('User is not part of this challenge');
+    }
+
+    await this.challengeUserMapRepo.remove(relation);
+    return { message: 'Participant removed successfully' };
+  }
+
+  /**
+   * Admin-only (global, `users.is_admin` — checked by `AdminGuard` at the controller,
+   * not here) — closes ANY challenge, regardless of who owns it. "No one will be able
+   * to join or log new progress once it is closed" (the confirmation popup's own copy)
+   * is enforced server-side too: see `joinChallenge` above and
+   * `WorkoutLogService.createWorkout`'s own closed-challenge guard.
+   */
+  async closeChallenge(challengeId: string): Promise<{ message: string }> {
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId },
+    });
+    if (!challenge) throw new NotFoundException('Challenge not found');
+    if (challenge.status === 'closed') {
+      throw new BadRequestException('Challenge is already closed');
+    }
+
+    challenge.status = 'closed';
+    await this.challengeRepo.save(challenge);
+    return { message: 'Challenge closed successfully' };
   }
 
   async leaveChallenge(userId: string, challengeId: string) {
@@ -903,6 +1117,21 @@ export class ChallengesService {
     }
 
     if (relation.status === status) {
+      // 'completed' specifically is now idempotent, not an error: since
+      // WorkoutLogService.createWorkout()'s own server-side auto-complete
+      // (completeChallengeIfThisWasTheLastDay), THIS endpoint is no longer
+      // the sole way a challenge becomes completed — the frontend's own
+      // "was that the last day?" round trip (progressLoggedFeedback.ts)
+      // still calls it right after logging progress, and now routinely
+      // arrives second. It must succeed anyway so that flow's "Challenge
+      // complete!" popup still shows, instead of silently swallowing a
+      // BadRequestException and never celebrating a genuinely finished
+      // challenge. 'left' keeps the old behavior — nothing else in the app
+      // calls leaveChallenge() a "second" time the way this one is now
+      // routinely raced.
+      if (status === 'completed') {
+        return { message, data: relation };
+      }
       throw new BadRequestException(`Challenge already marked as ${status}`);
     }
 
@@ -967,11 +1196,17 @@ export class ChallengesService {
       challengeId = mostRecent.challenge_id;
     }
 
+    // Real, confirmed bug (reported live: a finished challenge's own progress screen
+    // showed completely empty — no title, no photos, an empty tick ring): this used to
+    // require `status: 'active'`, so the moment a challenge is marked `completed` this
+    // returned null for it — every caller (the Consistency/progress screen chief among
+    // them) then had nothing to show. A `left` challenge still returns null on purpose:
+    // there's genuinely nothing to show progress on once you've left one.
     const relation = await this.challengeUserMapRepo.findOne({
       where: {
         user_id: String(userId),
         challenge_id: challengeId,
-        status: 'active',
+        status: In(['active', 'completed']),
       },
     });
 
@@ -1022,6 +1257,14 @@ export class ChallengesService {
       totalDays: challenge.duration_days,
       completedToday: !!todayWorkout,
       hoursLeftToday: hoursLeft,
+      // The CALLER's own challenge_user_map.status ('active'/'completed'/'left') —
+      // deliberately separate from `challenge.status` above, which is the
+      // challenge's own, unrelated 'open'/'closed' admin field (Bloque 1). Real,
+      // confirmed bug this fixes: the Consistency/progress screen used to have no
+      // way to tell a finished or left challenge apart from an active one at all
+      // (it only ever saw the raw Challenge entity, which never carried this),
+      // so a genuinely 20/20-day-completed challenge kept rendering as "active".
+      relationStatus: relation.status,
     };
   }
 
@@ -1134,12 +1377,13 @@ export class ChallengesService {
     userId: string,
     timezone: string = 'UTC',
   ) {
-    // validar relación usuario-challenge
+    // validar relación usuario-challenge — 'completed' included too, same reasoning as
+    // getProgress() just above: this must still answer for a finished challenge.
     const relation = await this.challengeUserMapRepo.findOne({
       where: {
         challenge_id: challengeId,
         user_id: userId,
-        status: 'active',
+        status: In(['active', 'completed']),
       },
     });
 

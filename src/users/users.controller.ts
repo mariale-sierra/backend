@@ -7,6 +7,7 @@ import {
   Patch,
   Query,
   Req,
+  UseGuards,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import {
@@ -16,6 +17,7 @@ import {
   ApiBearerAuth,
   ApiOkResponse,
   ApiNotFoundResponse,
+  ApiForbiddenResponse,
   ApiParam,
   ApiQuery,
 } from '@nestjs/swagger';
@@ -30,6 +32,7 @@ import {
 } from './dto/profile-response.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
+import { AdminGuard } from '../auth/guards/admin.guard';
 import { resolveRequestTimezone } from '../common/timezone.util';
 
 @ApiTags('Users')
@@ -165,5 +168,36 @@ export class UsersController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<PublicProfileResponseDto> {
     return this.usersService.getPublicProfile(id, user.sub);
+  }
+
+  @Patch(':id/ban')
+  @UseGuards(AdminGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Banear usuario (admin)',
+    description:
+      'Desactiva la cuenta (reutiliza is_active) e impide futuros inicios de sesión. Solo administradores.',
+  })
+  @ApiParam({ name: 'id', description: 'ID (UUID) del usuario' })
+  @ApiOkResponse({ description: 'Usuario baneado' })
+  @ApiForbiddenResponse({ description: 'Solo administradores' })
+  @ApiNotFoundResponse({ description: 'Usuario no encontrado' })
+  banUser(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.usersService.banUser(id);
+  }
+
+  @Patch(':id/unban')
+  @UseGuards(AdminGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Revertir baneo (admin)',
+    description: 'Reactiva la cuenta. Solo administradores.',
+  })
+  @ApiParam({ name: 'id', description: 'ID (UUID) del usuario' })
+  @ApiOkResponse({ description: 'Usuario reactivado' })
+  @ApiForbiddenResponse({ description: 'Solo administradores' })
+  @ApiNotFoundResponse({ description: 'Usuario no encontrado' })
+  unbanUser(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.usersService.unbanUser(id);
   }
 }

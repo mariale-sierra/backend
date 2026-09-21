@@ -41,12 +41,40 @@ export class UsersService {
 
   async findById(id: string): Promise<UserResponseDto> {
     // select explicitly — never pull password_hash off the DB for a response path.
+    // `is_admin` included here (GET /users/me) ONLY — every other `select` in this file
+    // deliberately leaves it off, matching those callers' own "public-ish" shapes.
     const user = await this.userRepo.findOne({
       where: { id },
-      select: ['id', 'username', 'email', 'is_active'],
+      select: ['id', 'username', 'email', 'is_active', 'is_admin'],
     });
     if (!user) throw new NotFoundException('User not found');
     return UserResponseDto.fromEntity(user);
+  }
+
+  /**
+   * Bloque 1, admin-only — deactivates the target account (reuses the existing
+   * `is_active` flag; never a hard delete, same convention `SpacesService.remove`'s
+   * soft-delete already uses). Blocks future logins (see AuthService.login); an
+   * already-issued JWT for this user stays valid until it naturally expires — there is
+   * no per-request DB lookup of the caller in JwtAuthGuard to revoke it earlier than
+   * that (a deliberate, existing perf tradeoff, not something this feature changes).
+   */
+  async banUser(targetUserId: string): Promise<{ message: string }> {
+    const user = await this.userRepo.findOne({ where: { id: targetUserId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    user.is_active = false;
+    await this.userRepo.save(user);
+    return { message: 'User banned successfully' };
+  }
+
+  async unbanUser(targetUserId: string): Promise<{ message: string }> {
+    const user = await this.userRepo.findOne({ where: { id: targetUserId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    user.is_active = true;
+    await this.userRepo.save(user);
+    return { message: 'User unbanned successfully' };
   }
 
   async findByEmail(email: string) {
@@ -270,7 +298,17 @@ export class UsersService {
       }
     >
   > {
-    const activeRelations = relations.filter((r) => r.status === 'active');
+    // Real, confirmed bug (reported live: a finished challenge's Mine card showed
+    // "0/n days" and no activity color): this used to require `status === 'active'`, so
+    // a `completed` challenge's current_day/dominant_activity_category were never
+    // computed at all, and the caller's `...(progress ?? {})` spread left those fields
+    // entirely absent on the response — the frontend adapters then read `current_day` as
+    // undefined and defaulted the progress fraction to 0. `left` challenges are still
+    // excluded on purpose: there's nothing to show progress on once you've left one, and
+    // Mine already drops them from view entirely elsewhere.
+    const countableRelations = relations.filter(
+      (r) => r.status === 'active' || r.status === 'completed',
+    );
     const result = new Map<
       string,
       {
@@ -283,9 +321,9 @@ export class UsersService {
       }
     >();
 
-    if (activeRelations.length === 0) return result;
+    if (countableRelations.length === 0) return result;
 
-    const challengeIds = activeRelations.map((r) => r.challenge_id);
+    const challengeIds = countableRelations.map((r) => r.challenge_id);
     // Day boundaries local to the caller's timezone (from the `X-Timezone`
     // request header, defaulted to 'UTC' by the controller) so "today" here
     // agrees with the day the user actually sees on their device, not
@@ -359,7 +397,7 @@ export class UsersService {
       );
     }
 
-    for (const relation of activeRelations) {
+    for (const relation of countableRelations) {
       const durationDays = relation.challenge?.duration_days ?? 0;
 
       // Shared with ChallengesService.getToday()/getProgress()/

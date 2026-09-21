@@ -32,6 +32,16 @@ export class AuthService {
     const isMatch = await bcrypt.compare(password, user.password_hash);
     if (!isMatch) throw new UnauthorizedException('Invalid email or password');
 
+    // Bloque 1 — a banned account (UsersService.banUser, admin-only) cannot log back
+    // in. Real effect this gives the ban button: it was previously purely cosmetic —
+    // is_active existed (and already gated a banned user's public profile/search
+    // visibility) but nothing checked it here, so a banned user could keep logging in
+    // freely. An already-issued token from before the ban still works until it expires
+    // — see UsersService.banUser's own doc comment for why that's an accepted gap here.
+    if (!user.is_active) {
+      throw new UnauthorizedException('This account has been deactivated');
+    }
+
     return {
       accessToken: await this.signToken(user),
       user: { id: user.id, email: user.email, username: user.username },
