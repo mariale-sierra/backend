@@ -25,4 +25,7 @@ export class Challenge {
 
   @Column('int')
   cycle_length_days!: number;
+
+  @Column({ default: 'open' })
+  status!: string;
 }

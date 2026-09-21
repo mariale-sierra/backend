@@ -36,6 +36,17 @@ describe('WorkoutLogService', () => {
     dataSource = { transaction: jest.fn() };
     workoutPostsService = { create: jest.fn() };
     challengeRepo = createMockRepo();
+    // Bloque 1 — createWorkout() now always fetches the challenge (to check
+    // status === 'closed' and, when tagging, ownership) whenever a
+    // challengeId is given. Sane open/public default here; individual tests
+    // override with their own mockResolvedValue when the scenario cares
+    // about specific fields (closed status, private visibility, ownership).
+    challengeRepo.findOne.mockResolvedValue({
+      id: 'challenge-1',
+      status: 'open',
+      visibility: 'public',
+      created_by_user_id: OWNER_ID,
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -261,7 +272,7 @@ describe('WorkoutLogService', () => {
         );
       });
 
-      it('should not downgrade or query the challenge when the requested visibility is not public', async () => {
+      it('should not downgrade, and resolvePostVisibility should not re-query the challenge, when the requested visibility is not public', async () => {
         await service.createWorkout({
           userId: OWNER_ID,
           challengeId: 'challenge-1',
@@ -269,7 +280,12 @@ describe('WorkoutLogService', () => {
           visibility: 'followers',
         });
 
-        expect(challengeRepo.findOne).not.toHaveBeenCalled();
+        // Bloque 1 — createWorkout() itself always fetches the challenge
+        // once now (open/closed check), regardless of visibility. The one
+        // call here is that check, not resolvePostVisibility's own
+        // (still-skipped) lookup — exactly one call, not two, is what this
+        // test actually guards.
+        expect(challengeRepo.findOne).toHaveBeenCalledTimes(1);
         expect(workoutPostsService.create).toHaveBeenCalledWith(
           expect.objectContaining({ visibility: 'followers' }),
         );

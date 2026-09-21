@@ -5,7 +5,9 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Challenge } from './entities/challenge.entity';
 import { User } from '../users/entities/user.entity';
 import { ChallengeUserMap } from './entities/challenge-user-map.entity';
+import { ChallengeJoinRequest } from './entities/challenge-join-request.entity';
 import { AuthModule } from '../auth/auth.module';
+import { AdminGuard } from '../auth/guards/admin.guard';
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { WorkoutLogModule } from '../workout-log/workout-log.module';
 import { ChallengeCycleDay } from './entities/challenge-cycle-days.entity';
@@ -32,6 +34,7 @@ import { RoutineExerciseSetTarget } from '../routine/entities/routine-exercise-s
       Challenge,
       User,
       ChallengeUserMap,
+      ChallengeJoinRequest,
       WorkoutLog,
       ChallengeCycleDay,
       Routine,
@@ -55,7 +58,7 @@ import { RoutineExerciseSetTarget } from '../routine/entities/routine-exercise-s
     WorkoutLogModule,
   ],
   controllers: [ChallengesController],
-  providers: [ChallengesService],
+  providers: [ChallengesService, AdminGuard],
   exports: [ChallengesService],
 })
 export class ChallengesModule {}

@@ -29,6 +29,21 @@ import { resolveRequestTimezone } from '../common/timezone.util';
 export class WorkoutPostsController {
   constructor(private readonly workoutPostsService: WorkoutPostsService) {}
 
+  @Get(':id/tagged-users')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID (UUID) del post' })
+  @ApiOperation({
+    summary: 'Usuarios taggeados en un post conjunto',
+    description:
+      'Lista los usuarios taggeados por el dueño del challenge al crear un post conjunto (Bloque 1). Vacío para un post normal.',
+  })
+  @ApiResponse({ status: 200, description: 'Lista de usuarios taggeados' })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({ status: 404, description: 'Post no encontrado' })
+  getTaggedUsers(@Param('id', ParseUUIDPipe) id: string) {
+    return this.workoutPostsService.getTaggedUsers(id);
+  }
+
   @Get('mine')
   @ApiBearerAuth()
   @ApiOperation({

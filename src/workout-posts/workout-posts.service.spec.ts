@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { NotFoundException } from '@nestjs/common';
+import { DataSource } from 'typeorm';
 import { WorkoutPostsService } from './workout-posts.service';
 import {
   WorkoutPost,
@@ -75,6 +76,11 @@ describe('WorkoutPostsService', () => {
         { provide: FollowsService, useValue: followsService },
         { provide: WorkoutPostReactionsService, useValue: reactionsService },
         { provide: WorkoutPostCommentsService, useValue: commentsService },
+        // Bloque 1 — create() now takes an optional taggedUserIds param and
+        // wraps the save in a transaction only when tags are present; no
+        // existing test tags a post, so this is never actually exercised,
+        // just needed to satisfy the constructor.
+        { provide: DataSource, useValue: { transaction: jest.fn() } },
       ],
     }).compile();
 
@@ -124,7 +130,11 @@ describe('WorkoutPostsService', () => {
   // "hasn't had its first attempt yet") auto-approves as a safety valve.
   // ---------------------------------------------------------------------
   describe('create', () => {
-    it('should create posts already approved, with no OpenAI call, while the moderation gate is disabled', async () => {
+    // MODERATION_GATE_ENABLED is currently true (re-enabled 2026-09 once the
+    // OpenAI account's rate-limit was resolved — see the service's own doc
+    // comment) — a new post stays 'pending' until the next
+    // processPendingModerationBatch() cycle, no OpenAI call at creation time.
+    it("should create posts as 'pending', with no OpenAI call, while the moderation gate is enabled", async () => {
       postRepo.create.mockReturnValue({} as WorkoutPost);
       postRepo.save.mockImplementation((post: WorkoutPost) =>
         Promise.resolve(post),
@@ -138,10 +148,7 @@ describe('WorkoutPostsService', () => {
       expect(moderationService.validateWorkoutImage).not.toHaveBeenCalled();
       expect(saved).toEqual(
         expect.objectContaining({
-          moderationStatus: WorkoutPostModerationStatus.APPROVED,
-          moderationReason: expect.stringContaining(
-            'desactivada temporalmente',
-          ),
+          moderationStatus: WorkoutPostModerationStatus.PENDING,
         }),
       );
     });
@@ -162,35 +169,30 @@ describe('WorkoutPostsService', () => {
       } as WorkoutPost;
     }
 
-    // MODERATION_GATE_ENABLED is currently false (team decision, 2026-09:
-    // OpenAI quota exhausted — see the service's own doc comment), so the
-    // real per-post entry point auto-approves everything unconditionally,
-    // with no OpenAI call, regardless of content or age.
-    it('should auto-approve every pending post directly, with no OpenAI call, while the moderation gate is disabled', async () => {
+    // MODERATION_GATE_ENABLED is currently true — the real per-post entry
+    // point calls OpenAI for each pending post and acts on the result.
+    it('should call OpenAI and approve a clean pending post, while the moderation gate is enabled', async () => {
       postRepo.find.mockResolvedValue([
         pendingPost({ id: 'post-1', created_at: new Date() }),
       ]);
+      moderationService.validateWorkoutImage.mockResolvedValue({
+        flagged: false,
+        flaggedCategories: [],
+      });
 
       await service.processPendingModerationBatch();
 
-      expect(moderationService.validateWorkoutImage).not.toHaveBeenCalled();
+      expect(moderationService.validateWorkoutImage).toHaveBeenCalled();
       expect(postRepo.update).toHaveBeenCalledWith(
         'post-1',
         expect.objectContaining({
           moderationStatus: WorkoutPostModerationStatus.APPROVED,
-          moderationReason: expect.stringContaining(
-            'desactivada temporalmente',
-          ),
+          moderationReason: undefined,
         }),
       );
     });
 
-    // The real OpenAI-backed logic (moderatePostViaAi) is preserved, not
-    // deleted, for when the gate gets flipped back on — but it's no longer
-    // reachable through the public processPendingModerationBatch() entry
-    // point while the gate is off, so these call it directly to keep it
-    // covered.
-    describe('moderatePostViaAi (preserved for when the gate is re-enabled)', () => {
+    describe('moderatePostViaAi', () => {
       it('should auto-approve a post that has been pending for over 2 hours when the moderation service keeps failing', async () => {
         const staleDate = new Date(Date.now() - 3 * 60 * 60 * 1000); // 3h old
         const post = pendingPost({ id: 'stale-1', created_at: staleDate });

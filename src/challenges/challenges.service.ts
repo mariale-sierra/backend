@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -13,6 +14,8 @@ import { CreateChallengeCycleDayDto } from './dto/create-challenge-cycle-day.dto
 import { UpdateChallengeDto } from './dto/update-challenge.dto';
 import { User } from '../users/entities/user.entity';
 import { ChallengeUserMap } from './entities/challenge-user-map.entity';
+import { ChallengeJoinRequest } from './entities/challenge-join-request.entity';
+import { ChallengeJoinRequestResponseDto } from './dto/challenge-join-request-response.dto';
 import { DataSource } from 'typeorm';
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengeCycleDay } from './entities/challenge-cycle-days.entity';
@@ -54,6 +57,8 @@ export class ChallengesService {
     private userRepo: Repository<User>,
     @InjectRepository(ChallengeUserMap)
     private challengeUserMapRepo: Repository<ChallengeUserMap>,
+    @InjectRepository(ChallengeJoinRequest)
+    private challengeJoinRequestRepo: Repository<ChallengeJoinRequest>,
     private dataSource: DataSource,
     @InjectRepository(WorkoutLog)
     private workoutRepo: Repository<WorkoutLog>,
@@ -756,6 +761,12 @@ export class ChallengesService {
     return { message: 'Challenge deleted successfully' };
   }
 
+  /**
+   * Public challenge: joins immediately (original behavior, unchanged).
+   * Private challenge: files a ChallengeJoinRequest pending the owner's
+   * approval instead — never inserts directly into challenge_user_map for a
+   * private challenge. Same branching as SpacesService.join().
+   */
   async joinChallenge(userId: string, challengeId: string) {
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
@@ -764,6 +775,10 @@ export class ChallengesService {
       where: { id: challengeId },
     });
     if (!challenge) throw new NotFoundException('Challenge not found');
+
+    if (challenge.status === 'closed') {
+      throw new BadRequestException('This challenge is closed');
+    }
 
     // no puede unirse el creador
     if (challenge.created_by_user_id === userId) {
@@ -776,19 +791,202 @@ export class ChallengesService {
     if (alreadyJoined)
       throw new BadRequestException('Already joined this challenge');
 
-    const join = this.challengeUserMapRepo.create({
-      user_id: userId,
-      challenge_id: challengeId,
-      role: 'participant',
-      status: 'active',
+    if (challenge.visibility !== 'private') {
+      const join = this.challengeUserMapRepo.create({
+        user_id: userId,
+        challenge_id: challengeId,
+        role: 'participant',
+        status: 'active',
+      });
+      await this.challengeUserMapRepo.save(join);
+
+      return {
+        message: 'Joined successfully',
+        data: join,
+      };
+    }
+
+    const existingPending = await this.challengeJoinRequestRepo.findOne({
+      where: { challenge_id: challengeId, user_id: userId, status: 'pending' },
     });
+    if (existingPending) {
+      throw new ConflictException(
+        'You already have a pending request for this challenge',
+      );
+    }
 
-    await this.challengeUserMapRepo.save(join);
+    try {
+      const request = await this.challengeJoinRequestRepo.save(
+        this.challengeJoinRequestRepo.create({
+          challenge_id: challengeId,
+          user_id: userId,
+          status: 'pending',
+        }),
+      );
+      return {
+        message: 'Join request submitted, pending owner approval',
+        data: request,
+      };
+    } catch (error) {
+      // uq_challenge_join_request_pending backs this up at the DB level —
+      // translate a race-condition duplicate into a 409, same pattern as
+      // SpacesService.join.
+      if ((error as { code?: string })?.code === '23505') {
+        throw new ConflictException(
+          'You already have a pending request for this challenge',
+        );
+      }
+      throw error;
+    }
+  }
 
-    return {
-      message: 'Joined successfully',
-      data: join,
-    };
+  async closeChallenge(challengeId: string) {
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId },
+    });
+    if (!challenge) throw new NotFoundException('Challenge not found');
+
+    challenge.status = 'closed';
+    await this.challengeRepo.save(challenge);
+
+    return { message: 'Challenge closed successfully', challenge };
+  }
+
+  async listJoinRequests(
+    userId: string,
+    challengeId: string,
+  ): Promise<ChallengeJoinRequestResponseDto[]> {
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId },
+    });
+    if (!challenge) throw new NotFoundException('Challenge not found');
+    assertOwnership(
+      challenge.created_by_user_id,
+      userId,
+      'Only the owner can view join requests',
+    );
+
+    const requests = await this.challengeJoinRequestRepo.find({
+      where: { challenge_id: challengeId, status: 'pending' },
+      relations: { user: { profile: true } },
+      order: { requested_at: 'ASC' },
+    });
+    return ChallengeJoinRequestResponseDto.fromEntities(requests);
+  }
+
+  /**
+   * Approve/reject a pending join request. Runs in a transaction with a row
+   * lock on the request, same shape as SpacesService.respondToJoinRequest,
+   * to avoid double-processing under concurrent approve/reject calls.
+   */
+  async respondToJoinRequest(
+    userId: string,
+    challengeId: string,
+    requestId: string,
+    approve: boolean,
+  ): Promise<ChallengeJoinRequestResponseDto> {
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId },
+    });
+    if (!challenge) throw new NotFoundException('Challenge not found');
+    assertOwnership(
+      challenge.created_by_user_id,
+      userId,
+      'Only the owner can respond to join requests',
+    );
+
+    return this.dataSource.transaction(async (manager) => {
+      const requestRepo = manager.getRepository(ChallengeJoinRequest);
+      const request = await requestRepo
+        .createQueryBuilder('r')
+        .setLock('pessimistic_write')
+        .where('r.id = :id', { id: requestId })
+        .andWhere('r.challenge_id = :challengeId', { challengeId })
+        .getOne();
+
+      if (!request) throw new NotFoundException('Join request not found');
+      if (request.status !== 'pending') {
+        throw new ConflictException(
+          `Request has already been ${request.status}`,
+        );
+      }
+
+      request.status = approve ? 'approved' : 'rejected';
+      request.responded_at = new Date();
+      request.responded_by_user_id = userId;
+      await requestRepo.save(request);
+
+      if (approve) {
+        const memberRepo = manager.getRepository(ChallengeUserMap);
+        const existing = await memberRepo.findOne({
+          where: { challenge_id: challengeId, user_id: request.user_id },
+        });
+        if (existing) {
+          existing.status = 'active';
+          await memberRepo.save(existing);
+        } else {
+          await memberRepo.save(
+            memberRepo.create({
+              challenge_id: challengeId,
+              user_id: request.user_id,
+              role: 'participant',
+              status: 'active',
+            }),
+          );
+        }
+      }
+
+      const withUser = await requestRepo.findOne({
+        where: { id: request.id },
+        relations: { user: { profile: true } },
+      });
+      return ChallengeJoinRequestResponseDto.fromEntity(withUser!);
+    });
+  }
+
+  /**
+   * Owner-only, public challenges only (a private challenge's lever is
+   * admission control via join requests, not unilateral removal — see the
+   * ticket's own scope). Soft-removes via challenge_user_map.status =
+   * 'removed', never a DELETE.
+   */
+  async removeParticipant(
+    ownerId: string,
+    challengeId: string,
+    targetUserId: string,
+  ) {
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId },
+    });
+    if (!challenge) throw new NotFoundException('Challenge not found');
+    assertOwnership(
+      challenge.created_by_user_id,
+      ownerId,
+      'Only the owner can remove participants',
+    );
+
+    if (challenge.visibility === 'private') {
+      throw new BadRequestException(
+        'Participants can only be removed from a public challenge',
+      );
+    }
+
+    const relation = await this.challengeUserMapRepo.findOne({
+      where: { challenge_id: challengeId, user_id: targetUserId },
+    });
+    if (!relation) {
+      throw new NotFoundException('User is not part of this challenge');
+    }
+    if (relation.status !== 'active') {
+      throw new BadRequestException(
+        `Cannot remove a participant with status ${relation.status}`,
+      );
+    }
+
+    relation.status = 'removed';
+    await this.challengeUserMapRepo.save(relation);
+
+    return { message: 'Participant removed successfully' };
   }
 
   async leaveChallenge(userId: string, challengeId: string) {

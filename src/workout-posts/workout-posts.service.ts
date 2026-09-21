@@ -1,11 +1,12 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import {
   WorkoutPost,
   WorkoutPostModerationStatus,
 } from './entities/workout-post.entity';
+import { WorkoutPostTaggedUser } from './entities/workout-post-tagged-user.entity';
 import { ModerationService } from '../openai/moderation.service';
 import { User } from '../users/entities/user.entity';
 import { DecodedCursor, encodeCursor } from './pagination.util';
@@ -104,6 +105,7 @@ export class WorkoutPostsService {
     private followsService: FollowsService,
     private reactionsService: WorkoutPostReactionsService,
     private commentsService: WorkoutPostCommentsService,
+    private dataSource: DataSource,
   ) {}
 
   private async supportsModerationColumns() {
@@ -126,7 +128,14 @@ export class WorkoutPostsService {
     return this.moderationColumnsSupportPromise;
   }
 
-  async create(data: Partial<WorkoutPost>) {
+  /**
+   * `taggedUserIds` (Bloque 1, joint owner posts): tagged directly, no
+   * confirmation step from the tagged user (product decision) — inserted
+   * alongside the post in the same transaction, mirroring how
+   * ChallengesService.create() saves the owner's ChallengeUserMap row
+   * alongside the Challenge itself.
+   */
+  async create(data: Partial<WorkoutPost>, taggedUserIds?: string[]) {
     const supportsModeration = await this.supportsModerationColumns();
     const post = this.repo.create();
     Object.assign(post, data);
@@ -153,7 +162,54 @@ export class WorkoutPostsService {
     // post was stuck as 'pending' (never shown) with nothing to retry it
     // again. Batching on a timer smooths the request rate and gives every
     // pending post another chance every cycle.
-    return this.repo.save(post);
+    if (!taggedUserIds?.length) {
+      return this.repo.save(post);
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const savedPost = await manager.save(WorkoutPost, post);
+
+      const taggedRepo = manager.getRepository(WorkoutPostTaggedUser);
+      const uniqueTaggedIds = [...new Set(taggedUserIds)];
+      await taggedRepo.save(
+        uniqueTaggedIds.map((userId) =>
+          taggedRepo.create({
+            workout_post_id: savedPost.id,
+            user_id: userId,
+            tagged_by_user_id: data.user_id!,
+          }),
+        ),
+      );
+
+      return savedPost;
+    });
+  }
+
+  /**
+   * Users tagged in a joint post (Bloque 1), public-profile fields only.
+   * Kept as its own lightweight read instead of threading taggedUsers
+   * through every existing feed/gallery query builder (getFeed,
+   * getChallengePhotos, fetchPaginatedPhotos) — those already have their own
+   * test coverage for their exact row shape, and this is additive info a
+   * caller can fetch per-post on demand.
+   */
+  async getTaggedUsers(postId: string) {
+    const post = await this.repo.findOne({ where: { id: postId } });
+    if (!post) throw new NotFoundException('Post not found');
+
+    return this.repo.manager
+      .getRepository(WorkoutPostTaggedUser)
+      .createQueryBuilder('tag')
+      .innerJoin('tag.user', 'user')
+      .leftJoin('user.profile', 'profile')
+      .where('tag.workout_post_id = :postId', { postId })
+      .select([
+        'user.id AS id',
+        'user.username AS username',
+        'profile.display_name AS "displayName"',
+        'profile.profile_image_url AS "profileImageUrl"',
+      ])
+      .getRawMany();
   }
 
   /**

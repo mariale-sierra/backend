@@ -43,7 +43,7 @@ export class UsersService {
     // select explicitly — never pull password_hash off the DB for a response path.
     const user = await this.userRepo.findOne({
       where: { id },
-      select: ['id', 'username', 'email', 'is_active'],
+      select: ['id', 'username', 'email', 'is_active', 'is_admin'],
     });
     if (!user) throw new NotFoundException('User not found');
     return UserResponseDto.fromEntity(user);
@@ -53,6 +53,29 @@ export class UsersService {
     const user = await this.userRepo.findOne({ where: { email } });
     if (!user) throw new NotFoundException('User not found');
     return user;
+  }
+
+  /**
+   * Admin action: reuses the existing is_active soft-deactivate field —
+   * same mechanism the rest of the backend already filters on — never a
+   * DELETE FROM users.
+   */
+  async ban(userId: string): Promise<{ message: string }> {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    user.is_active = false;
+    await this.userRepo.save(user);
+    return { message: 'User banned successfully' };
+  }
+
+  async unban(userId: string): Promise<{ message: string }> {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    user.is_active = true;
+    await this.userRepo.save(user);
+    return { message: 'User unbanned successfully' };
   }
 
   /**

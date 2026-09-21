@@ -12,6 +12,7 @@ import { ChallengeCategoryMap } from '../challenges/entities/challenge-category-
 import { ChallengeLocationMap } from '../challenges/entities/challenge-location-map.entity';
 import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
 import { FollowsModule } from '../follows/follows.module';
+import { AdminGuard } from '../auth/guards/admin.guard';
 
 @Module({
   imports: [
@@ -29,7 +30,7 @@ import { FollowsModule } from '../follows/follows.module';
     FollowsModule,
   ],
   controllers: [UsersController],
-  providers: [UsersService],
+  providers: [UsersService, AdminGuard],
   exports: [UsersService],
 })
 export class UsersModule {}

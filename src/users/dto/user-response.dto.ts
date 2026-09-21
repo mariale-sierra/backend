@@ -19,12 +19,16 @@ export class UserResponseDto {
   @ApiProperty()
   is_active!: boolean;
 
+  @ApiProperty()
+  is_admin!: boolean;
+
   static fromEntity(user: User): UserResponseDto {
     const dto = new UserResponseDto();
     dto.id = user.id;
     dto.username = user.username;
     dto.email = user.email;
     dto.is_active = user.is_active;
+    dto.is_admin = user.is_admin;
     return dto;
   }
 }

@@ -17,6 +17,7 @@ import { Between } from 'typeorm';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { getLocalDayBoundsUtc } from '../common/timezone.util';
+import { assertOwnership } from '../auth/utils/assert-ownership';
 
 @Injectable()
 export class WorkoutLogService {
@@ -51,6 +52,9 @@ export class WorkoutLogService {
      * create() path never reaches the day-check block below, so it's fine
      * to omit there. */
     timezone?: string;
+    /** Bloque 1 — joint owner posts: only the challenge's owner may tag
+     * other users. Empty/omitted for a normal solo post, unchanged. */
+    taggedUserIds?: string[];
   }) {
     if (!dto.isRestDay && !dto.imageUrl) {
       throw new BadRequestException(
@@ -59,6 +63,23 @@ export class WorkoutLogService {
     }
 
     if (dto.challengeId) {
+      const challenge = await this.challengeRepo.findOne({
+        where: { id: dto.challengeId },
+      });
+      if (!challenge) throw new NotFoundException('Challenge not found');
+
+      if (challenge.status === 'closed') {
+        throw new BadRequestException('This challenge is closed');
+      }
+
+      if (dto.taggedUserIds?.length) {
+        assertOwnership(
+          challenge.created_by_user_id,
+          dto.userId,
+          'Only the challenge owner can tag users in a post',
+        );
+      }
+
       // Bounded by the user's local calendar day, not the server's UTC
       // clock, so the one-log-per-day gate agrees with the "completed
       // today" display logic elsewhere (ChallengesService, UsersService) —
@@ -185,7 +206,7 @@ export class WorkoutLogService {
     });
 
     if (!dto.isRestDay) {
-      await this.workoutPostsService.create({
+      const postData = {
         workout_log_id: savedWorkout.id,
         user_id: dto.userId,
         image_url: dto.imageUrl,
@@ -194,7 +215,16 @@ export class WorkoutLogService {
           dto.challengeId,
           dto.visibility,
         ),
-      });
+      };
+
+      // Only pass a second argument when there's actually something to tag
+      // — keeps the common (no-tag) call shape identical to before this
+      // feature existed, rather than always passing an explicit `undefined`.
+      if (dto.taggedUserIds?.length) {
+        await this.workoutPostsService.create(postData, dto.taggedUserIds);
+      } else {
+        await this.workoutPostsService.create(postData);
+      }
     }
 
     return this.findOne(savedWorkout.id);

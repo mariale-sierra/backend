@@ -1,5 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsIn, IsOptional, IsString, IsUUID } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from 'class-validator';
 
 export class CreateWorkoutProgressDto {
   @ApiProperty({
@@ -48,4 +55,14 @@ export class CreateWorkoutProgressDto {
   @IsOptional()
   @IsBoolean()
   isRestDay?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'IDs de usuarios taggeados en un post conjunto. Solo el dueño del challenge puede taggear — sin tag, comportamiento normal sin cambios.',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  taggedUserIds?: string[];
 }

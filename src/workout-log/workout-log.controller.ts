@@ -93,6 +93,7 @@ export class WorkoutLogController {
       visibility: body.visibility,
       isRestDay: body.isRestDay,
       timezone: resolveRequestTimezone(req),
+      taggedUserIds: body.taggedUserIds,
     });
   }
 

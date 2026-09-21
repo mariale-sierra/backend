@@ -4,6 +4,7 @@ import { WorkoutPostsService } from './workout-posts.service';
 import { WorkoutPost } from './entities/workout-post.entity';
 import { WorkoutPostLike } from './entities/workout-post-like.entity';
 import { WorkoutPostComment } from './entities/workout-post-comment.entity';
+import { WorkoutPostTaggedUser } from './entities/workout-post-tagged-user.entity';
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { User } from '../users/entities/user.entity';
 import { WorkoutPostsController } from './workout-posts.controller';
@@ -21,6 +22,7 @@ import { FollowsModule } from '../follows/follows.module';
       WorkoutPost,
       WorkoutPostLike,
       WorkoutPostComment,
+      WorkoutPostTaggedUser,
       WorkoutLog,
       User,
     ]),

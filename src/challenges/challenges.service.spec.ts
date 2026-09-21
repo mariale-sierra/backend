@@ -6,6 +6,7 @@ import { ChallengesService } from './challenges.service';
 import { Challenge } from './entities/challenge.entity';
 import { User } from '../users/entities/user.entity';
 import { ChallengeUserMap } from './entities/challenge-user-map.entity';
+import { ChallengeJoinRequest } from './entities/challenge-join-request.entity';
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengeCycleDay } from './entities/challenge-cycle-days.entity';
 import { Routine } from '../routine/entities/routine.entity';
@@ -55,6 +56,7 @@ describe('ChallengesService', () => {
   let challengeCycleDaysRepo: MockRepo;
   let userRepo: MockRepo;
   let challengeUserMapRepo: MockRepo;
+  let challengeJoinRequestRepo: MockRepo;
   let challengeCategoryMapRepo: MockRepo;
   let challengeLocationMapRepo: MockRepo;
   let workoutRepo: MockRepo;
@@ -77,6 +79,7 @@ describe('ChallengesService', () => {
     challengeCycleDaysRepo = createMockRepo();
     userRepo = createMockRepo();
     challengeUserMapRepo = createMockRepo();
+    challengeJoinRequestRepo = createMockRepo();
     challengeCategoryMapRepo = createMockRepo();
     challengeLocationMapRepo = createMockRepo();
     workoutRepo = createMockRepo();
@@ -95,6 +98,10 @@ describe('ChallengesService', () => {
         {
           provide: getRepositoryToken(ChallengeUserMap),
           useValue: challengeUserMapRepo,
+        },
+        {
+          provide: getRepositoryToken(ChallengeJoinRequest),
+          useValue: challengeJoinRequestRepo,
         },
         { provide: getRepositoryToken(WorkoutLog), useValue: workoutRepo },
         {

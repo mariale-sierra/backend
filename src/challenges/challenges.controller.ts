@@ -32,6 +32,8 @@ import { Public } from '../auth/decorators/public.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { resolveRequestTimezone } from '../common/timezone.util';
+import { AdminGuard } from '../auth/guards/admin.guard';
+import { ChallengeJoinRequestResponseDto } from './dto/challenge-join-request-response.dto';
 
 @ApiTags('Challenges')
 @Controller('challenges')
@@ -221,6 +223,130 @@ export class ChallengesController {
   @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
   findUsers(@Param('id', ParseUUIDPipe) id: string) {
     return this.challengesService.findUsersByChallenge(id);
+  }
+
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @Patch(':id/close')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiOperation({
+    summary: 'Cerrar un desafío (admin)',
+    description:
+      'Marca el desafío como cerrado — bloquea nuevas uniones y nuevo progreso. Solo un administrador de la plataforma puede hacerlo.',
+  })
+  @ApiResponse({ status: 200, description: 'Desafío cerrado exitosamente' })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({ status: 403, description: 'Se requiere ser administrador' })
+  @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
+  closeChallenge(@Param('id', ParseUUIDPipe) id: string) {
+    return this.challengesService.closeChallenge(id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/join-requests')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiOperation({
+    summary: 'Listar solicitudes de ingreso pendientes',
+    description:
+      'Solo el dueño del desafío privado puede ver sus solicitudes pendientes.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Lista de solicitudes pendientes',
+    type: ChallengeJoinRequestResponseDto,
+    isArray: true,
+  })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({ status: 403, description: 'No eres el dueño de este desafío' })
+  @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
+  listJoinRequests(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.challengesService.listJoinRequests(user.sub, id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/join-requests/:requestId/approve')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiParam({ name: 'requestId', description: 'ID de la solicitud' })
+  @ApiOperation({ summary: 'Aprobar una solicitud de ingreso' })
+  @ApiResponse({
+    status: 200,
+    description: 'Solicitud aprobada',
+    type: ChallengeJoinRequestResponseDto,
+  })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({ status: 403, description: 'No eres el dueño de este desafío' })
+  @ApiResponse({ status: 404, description: 'Desafío o solicitud no encontrados' })
+  @ApiResponse({ status: 409, description: 'La solicitud ya fue procesada' })
+  approveJoinRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('requestId') requestId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.challengesService.respondToJoinRequest(
+      user.sub,
+      id,
+      requestId,
+      true,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/join-requests/:requestId/reject')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiParam({ name: 'requestId', description: 'ID de la solicitud' })
+  @ApiOperation({ summary: 'Rechazar una solicitud de ingreso' })
+  @ApiResponse({
+    status: 200,
+    description: 'Solicitud rechazada',
+    type: ChallengeJoinRequestResponseDto,
+  })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({ status: 403, description: 'No eres el dueño de este desafío' })
+  @ApiResponse({ status: 404, description: 'Desafío o solicitud no encontrados' })
+  @ApiResponse({ status: 409, description: 'La solicitud ya fue procesada' })
+  rejectJoinRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('requestId') requestId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.challengesService.respondToJoinRequest(
+      user.sub,
+      id,
+      requestId,
+      false,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/users/:userId/remove')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiParam({ name: 'userId', description: 'ID del usuario a remover' })
+  @ApiOperation({
+    summary: 'Remover un participante (solo desafíos públicos)',
+    description:
+      'Solo el dueño del desafío puede remover participantes, y solo si el desafío es público. Nunca borra la fila — marca challenge_user_map.status = "removed".',
+  })
+  @ApiResponse({ status: 200, description: 'Participante removido exitosamente' })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({
+    status: 400,
+    description: 'El desafío es privado, o el participante ya no está activo',
+  })
+  @ApiResponse({ status: 403, description: 'No eres el dueño de este desafío' })
+  @ApiResponse({ status: 404, description: 'Desafío o participante no encontrados' })
+  removeParticipant(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.challengesService.removeParticipant(user.sub, id, userId);
   }
 
   @Public()

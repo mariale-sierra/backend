@@ -7,7 +7,9 @@ import {
   Patch,
   Query,
   Req,
+  UseGuards,
 } from '@nestjs/common';
+import { AdminGuard } from '../auth/guards/admin.guard';
 import { UsersService } from './users.service';
 import {
   ApiTags,
@@ -165,5 +167,37 @@ export class UsersController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<PublicProfileResponseDto> {
     return this.usersService.getPublicProfile(id, user.sub);
+  }
+
+  @UseGuards(AdminGuard)
+  @Patch(':id/ban')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID (UUID) del usuario a banear' })
+  @ApiOperation({
+    summary: 'Banear usuario (admin)',
+    description:
+      'Marca al usuario como inactivo (is_active = false). Solo un administrador de la plataforma puede hacerlo. Nunca borra el registro.',
+  })
+  @ApiOkResponse({ description: 'Usuario baneado exitosamente' })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({ status: 403, description: 'Se requiere ser administrador' })
+  @ApiNotFoundResponse({ description: 'Usuario no encontrado' })
+  banUser(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.usersService.ban(id);
+  }
+
+  @UseGuards(AdminGuard)
+  @Patch(':id/unban')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID (UUID) del usuario a reactivar' })
+  @ApiOperation({
+    summary: 'Reactivar usuario baneado (admin)',
+  })
+  @ApiOkResponse({ description: 'Usuario reactivado exitosamente' })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({ status: 403, description: 'Se requiere ser administrador' })
+  @ApiNotFoundResponse({ description: 'Usuario no encontrado' })
+  unbanUser(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.usersService.unban(id);
   }
 }
