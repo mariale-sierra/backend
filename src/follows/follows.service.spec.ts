@@ -314,7 +314,7 @@ describe('FollowsService', () => {
     });
 
     it('real bug, fixed 2026-09: a fresh 1-day streak (logged today for the first time) shows streakDays: 1, not 0', async () => {
-      // This is the exact case that used to look broken: toStreakPoints()
+      // This is the exact case that used to look broken: dividing by 3
       // (floor(days / 3)) made a 1-day-old streak display as "0" even
       // though loggedToday correctly flipped the badge to active — a fresh
       // streak looked indistinguishable from no streak at all.

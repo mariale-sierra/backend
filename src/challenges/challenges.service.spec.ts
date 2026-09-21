@@ -88,6 +88,9 @@ describe('ChallengesService', () => {
     challengeLocationMapRepo = createMockRepo();
     workoutRepo = createMockRepo();
     challengeJoinRequestRepo = createMockRepo();
+    // findAll()/findOne() also look up each challenge's author (userRepo.find) —
+    // default to none unless a test cares about it.
+    userRepo.find.mockResolvedValue([]);
     // attachCategoriesAndLocations runs on every findAll()/findOne() call —
     // default to none unless a test cares about them.
     challengeCategoryMapRepo.find.mockResolvedValue([]);
@@ -334,10 +337,7 @@ describe('ChallengesService', () => {
           Promise.resolve({ id: 'request-1', ...r }),
         );
 
-        const result = await service.joinChallenge(
-          OTHER_USER_ID,
-          CHALLENGE_ID,
-        );
+        const result = await service.joinChallenge(OTHER_USER_ID, CHALLENGE_ID);
 
         expect(result.status).toBe('requested');
         expect(challengeJoinRequestRepo.save).toHaveBeenCalledWith(
@@ -386,6 +386,184 @@ describe('ChallengesService', () => {
         await expect(
           service.joinChallenge(OTHER_USER_ID, CHALLENGE_ID),
         ).rejects.toThrow(ConflictException);
+      });
+    });
+  });
+
+  // Explore cards show who made each challenge. One batched lookup for the whole list — never a
+  // request per card — and only public-profile fields, never anything else from the user row.
+  describe('the challenge author', () => {
+    const author = (id: string, username: string, displayName?: string) => ({
+      id,
+      username,
+      email: `${username}@example.com`,
+      password_hash: 'hash',
+      profile: displayName
+        ? {
+            display_name: displayName,
+            profile_image_url: `https://cdn/${id}.jpg`,
+          }
+        : undefined,
+    });
+
+    const mockNoMembers = () =>
+      challengeUserMapRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      });
+
+    it('findAll attaches each challenge its own author from ONE user query', async () => {
+      challengeRepo.find.mockResolvedValue([
+        { ...baseChallenge(), id: 'c1', created_by_user_id: 'u1' },
+        { ...baseChallenge(), id: 'c2', created_by_user_id: 'u2' },
+        { ...baseChallenge(), id: 'c3', created_by_user_id: 'u1' },
+      ]);
+      mockNoMembers();
+      userRepo.find.mockResolvedValue([
+        author('u1', 'ana', 'Ana'),
+        author('u2', 'bruno'),
+      ]);
+
+      const { data } = await service.findAll();
+
+      expect(userRepo.find).toHaveBeenCalledTimes(1);
+      const query = userRepo.find.mock.calls[0][0] as {
+        where: { id: { value: string[] } };
+      };
+      // u1 appears twice among the challenges but is asked for once.
+      expect(query.where.id.value).toEqual(['u1', 'u2']);
+      const ana = {
+        id: 'u1',
+        username: 'ana',
+        displayName: 'Ana',
+        profileImageUrl: 'https://cdn/u1.jpg',
+      };
+      expect(data.map((c) => c.author)).toEqual([
+        ana,
+        {
+          id: 'u2',
+          username: 'bruno',
+          displayName: null,
+          profileImageUrl: null,
+        },
+        ana,
+      ]);
+    });
+
+    it('never exposes an email or password hash on the author', async () => {
+      challengeRepo.find.mockResolvedValue([
+        { ...baseChallenge(), created_by_user_id: 'u1' },
+      ]);
+      mockNoMembers();
+      userRepo.find.mockResolvedValue([author('u1', 'ana', 'Ana')]);
+
+      const { data } = await service.findAll();
+
+      expect(Object.keys(data[0].author!).sort()).toEqual([
+        'displayName',
+        'id',
+        'profileImageUrl',
+        'username',
+      ]);
+    });
+
+    it('findAll gives a challenge whose creator no longer exists a null author, not a crash', async () => {
+      challengeRepo.find.mockResolvedValue([
+        { ...baseChallenge(), created_by_user_id: 'gone' },
+      ]);
+      mockNoMembers();
+      userRepo.find.mockResolvedValue([]);
+
+      const { data } = await service.findAll();
+
+      expect(data[0].author).toBeNull();
+    });
+
+    it('findAll makes no user query at all when there are no challenges', async () => {
+      challengeRepo.find.mockResolvedValue([]);
+
+      await service.findAll();
+
+      expect(userRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('findOne includes the author too', async () => {
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        created_by_user_id: 'u1',
+      });
+      challengeCycleDaysRepo.createQueryBuilder.mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      });
+      challengeUserMapRepo.count.mockResolvedValue(0);
+      userRepo.find.mockResolvedValue([author('u1', 'ana', 'Ana')]);
+
+      const result = await service.findOne(CHALLENGE_ID);
+
+      expect(result.author).toMatchObject({ id: 'u1', username: 'ana' });
+    });
+
+    describe('getChallengeAuthor', () => {
+      it('returns the creator as a public author card', async () => {
+        challengeRepo.findOne.mockResolvedValue({
+          ...baseChallenge(),
+          created_by_user_id: 'u1',
+        });
+        userRepo.find.mockResolvedValue([author('u1', 'ana', 'Ana')]);
+
+        await expect(service.getChallengeAuthor(CHALLENGE_ID)).resolves.toEqual(
+          {
+            id: 'u1',
+            username: 'ana',
+            displayName: 'Ana',
+            profileImageUrl: 'https://cdn/u1.jpg',
+          },
+        );
+      });
+
+      it('falls back to a null display name and photo for a user with no profile row', async () => {
+        challengeRepo.findOne.mockResolvedValue({
+          ...baseChallenge(),
+          created_by_user_id: 'u2',
+        });
+        userRepo.find.mockResolvedValue([author('u2', 'bruno')]);
+
+        await expect(
+          service.getChallengeAuthor(CHALLENGE_ID),
+        ).resolves.toMatchObject({
+          username: 'bruno',
+          displayName: null,
+          profileImageUrl: null,
+        });
+      });
+
+      it('throws NotFoundException when the challenge does not exist', async () => {
+        challengeRepo.findOne.mockResolvedValue(null);
+
+        await expect(service.getChallengeAuthor('missing')).rejects.toThrow(
+          NotFoundException,
+        );
+        expect(userRepo.find).not.toHaveBeenCalled();
+      });
+
+      it('throws NotFoundException when the creator account no longer exists', async () => {
+        challengeRepo.findOne.mockResolvedValue({
+          ...baseChallenge(),
+          created_by_user_id: 'gone',
+        });
+        userRepo.find.mockResolvedValue([]);
+
+        await expect(service.getChallengeAuthor(CHALLENGE_ID)).rejects.toThrow(
+          NotFoundException,
+        );
       });
     });
   });
@@ -466,20 +644,18 @@ describe('ChallengesService', () => {
           getOne: jest.fn().mockResolvedValue(opts.request ?? null),
         })),
         save: jest.fn((r: object) => Promise.resolve(r)),
-        findOne: jest
-          .fn()
-          .mockResolvedValue(
-            opts.requestAfterResponse ?? {
-              ...PENDING_REQUEST,
-              user: {
-                id: OTHER_USER_ID,
-                username: 'other',
-                profile: { display_name: 'Other', profile_image_url: null },
-              },
-              requested_at: new Date('2026-09-01T00:00:00.000Z'),
-              responded_at: new Date('2026-09-02T00:00:00.000Z'),
+        findOne: jest.fn().mockResolvedValue(
+          opts.requestAfterResponse ?? {
+            ...PENDING_REQUEST,
+            user: {
+              id: OTHER_USER_ID,
+              username: 'other',
+              profile: { display_name: 'Other', profile_image_url: null },
             },
-          ),
+            requested_at: new Date('2026-09-01T00:00:00.000Z'),
+            responded_at: new Date('2026-09-02T00:00:00.000Z'),
+          },
+        ),
       };
       const userMapRepo = {
         findOne: jest.fn().mockResolvedValue(opts.userMapFindOne ?? null),

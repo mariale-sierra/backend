@@ -15,6 +15,7 @@ import { CreateChallengeDto } from './dto/create-challenge.dto';
 import { UpdateChallengeDto } from './dto/update-challenge.dto';
 import { ChallengeProgressDto } from './dto/challenge-progress.dto';
 import { ChallengeJoinRequestResponseDto } from './dto/challenge-join-request-response.dto';
+import { ChallengeAuthorDto } from './dto/challenge-author.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import {
@@ -237,7 +238,10 @@ export class ChallengesController {
   })
   @ApiOkResponse({ description: 'Participante removido' })
   @ApiForbiddenResponse({ description: 'Solo el creador del desafío' })
-  @ApiResponse({ status: 404, description: 'Desafío o participante no encontrado' })
+  @ApiResponse({
+    status: 404,
+    description: 'Desafío o participante no encontrado',
+  })
   removeParticipant(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('userId', ParseUUIDPipe) userId: string,
@@ -319,6 +323,20 @@ export class ChallengesController {
   @ApiForbiddenResponse({ description: 'Solo administradores' })
   closeChallenge(@Param('id', ParseUUIDPipe) id: string) {
     return this.challengesService.closeChallenge(id);
+  }
+
+  @Public()
+  @Get(':id/author')
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiOperation({
+    summary: 'Obtener el autor de un desafío',
+    description:
+      'Quién creó el desafío: su username, nombre para mostrar y foto (campos públicos, nunca el email). GET /challenges y GET /challenges/:id ya incluyen el mismo `author`.',
+  })
+  @ApiResponse({ status: 200, type: ChallengeAuthorDto })
+  @ApiResponse({ status: 404, description: 'Desafío o autor no encontrado' })
+  getAuthor(@Param('id', ParseUUIDPipe) id: string) {
+    return this.challengesService.getChallengeAuthor(id);
   }
 
   @Public()

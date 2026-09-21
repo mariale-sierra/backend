@@ -2,16 +2,14 @@ import { Repository } from 'typeorm';
 import { WorkoutLog, WorkoutStatus } from './entities/workout-log.entity';
 
 /**
- * A "streak" shown anywhere in the app is 1 point per this many consecutive
- * days of completed activity — e.g. 3 days in a row = streak 1, 6 = streak
- * 2 — not the raw day count. See UsersService.attachProgress, which this
- * mirrors, for the original comment.
+ * A "streak" shown anywhere in the app is the plain count of consecutive days with a
+ * completed log, ending today — one day logged = streak 1.
+ *
+ * (It used to be 1 point per 3 days — floor(days / 3) — which made a brand-new streak read
+ * as 0 right after the first photo. Fixed in FollowsService.getFriendStreaks first, then here
+ * everywhere else it was still divided: UsersService.attachProgress, and the profile/search
+ * endpoints, which now report it too.)
  */
-export const STREAK_DAYS_PER_POINT = 3;
-
-export function toStreakPoints(consecutiveDays: number): number {
-  return Math.floor(consecutiveDays / STREAK_DAYS_PER_POINT);
-}
 
 /**
  * Consecutive calendar days (UTC, 'YYYY-MM-DD' keys) ending today, tolerating

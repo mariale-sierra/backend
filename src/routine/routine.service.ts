@@ -262,6 +262,14 @@ export class RoutineService {
 
       .leftJoinAndSelect('re.exercise', 'exercise')
 
+      // The exercise's own reviewed metrics (reps/weight/time/distance — see
+      // exercises/lib/exercise-metric-profiles.ts): what the Log Metrics screen builds an
+      // exercise's fields from, instead of guessing them from whichever targets happened to
+      // be saved (a farmer's walk has time + weight targets, which the old guess read as strength).
+      .leftJoinAndSelect('exercise.exercise_metrics', 'exerciseMetric')
+
+      .leftJoinAndSelect('exerciseMetric.metricType', 'exerciseMetricType')
+
       .leftJoinAndSelect('re.sets', 'sets')
 
       .leftJoinAndSelect('sets.targets', 'setTargets')

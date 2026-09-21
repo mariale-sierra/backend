@@ -23,8 +23,9 @@ import {
   normalizeMuscleCodes,
   inferLocations,
   inferCategories,
-  inferTrackingMode,
+  resolveTrackingMode,
 } from '../../../src/exercises/lib/repdb-mapping';
+import { getMetricProfile } from '../../../src/exercises/lib/exercise-metric-profiles';
 
 // Reused as-is from the existing migration runner — same env loading / SSL / connect-with-retry
 // convention as every other database/scripts/*.js tool in this repo. loadEnvFile() is called
@@ -245,7 +246,7 @@ async function main() {
 
         const instructionsEn = ex.instructions_en ?? [];
         const descriptionFallback = ex.description_en;
-        const trackingMode = inferTrackingMode(ex);
+        const trackingMode = resolveTrackingMode(ex);
         const sourceMetadata = {
           category: ex.category,
           force_type: ex.force_type,
@@ -430,6 +431,27 @@ async function main() {
                ON CONFLICT (exercise_id, category_id) DO UPDATE
                  SET is_primary = EXCLUDED.is_primary, source = 'inferred', mapping_reason = EXCLUDED.mapping_reason`,
               [exerciseId, categoryId, cat.isPrimary, cat.reason],
+            );
+          }
+        }
+
+        // Metrics — the exercise's own reviewed set (exercise-metric-profiles.ts), replacing
+        // whatever was there. Without these rows the backend rejects every logged metric for the
+        // exercise ("Metric 'x' is not allowed for this exercise"). An exercise nobody has reviewed
+        // yet is reported, not guessed at: exercise-metric-profiles.spec.ts fails on it too.
+        const metricProfile = getMetricProfile(ex.id);
+        if (!metricProfile) {
+          notes.push(`no reviewed metric profile for ${ex.id}, exercise_metrics left untouched`);
+        } else {
+          await client.query('DELETE FROM havit.exercise_metrics WHERE exercise_id = $1', [exerciseId]);
+          for (const metric of metricProfile.metrics) {
+            await client.query(
+              `INSERT INTO havit.exercise_metrics (exercise_id, metric_type_id, is_required, is_primary, default_unit)
+               SELECT $1, mt.id, $3, $4, mt.default_unit FROM havit.metric_types mt WHERE mt.code = $2
+               ON CONFLICT (exercise_id, metric_type_id) DO UPDATE
+                 SET is_required = EXCLUDED.is_required, is_primary = EXCLUDED.is_primary,
+                     default_unit = EXCLUDED.default_unit`,
+              [exerciseId, metric.code, metric.isRequired, metric.isPrimary],
             );
           }
         }

@@ -11,6 +11,10 @@ import { ChallengeLocationMap } from '../challenges/entities/challenge-location-
 import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
 import { FollowsService } from '../follows/follows.service';
 import { getDominantActivityCategories } from '../challenges/dominant-activity-category.util';
+import {
+  getCurrentStreakDays,
+  getCurrentStreakDaysForUsers,
+} from '../workout-log/workout-log-streak.util';
 
 // attachProgress() delegates the dominant-category computation entirely to
 // this util — its own SQL/tie-break logic is covered by
@@ -23,6 +27,16 @@ jest.mock('../challenges/dominant-activity-category.util', () => ({
 }));
 const mockGetDominantActivityCategories =
   getDominantActivityCategories as jest.Mock;
+
+// The profile/search endpoints report each user's current streak; its own SQL/day-counting is
+// covered by workout-log-streak.util.spec.ts, so this file only checks how UsersService uses it.
+jest.mock('../workout-log/workout-log-streak.util', () => ({
+  getCurrentStreakDays: jest.fn(),
+  getCurrentStreakDaysForUsers: jest.fn(),
+}));
+const mockGetCurrentStreakDays = getCurrentStreakDays as jest.Mock;
+const mockGetCurrentStreakDaysForUsers =
+  getCurrentStreakDaysForUsers as jest.Mock;
 
 const createMockRepo = () => ({
   find: jest.fn(),
@@ -122,6 +136,8 @@ describe('UsersService', () => {
     challengeLocationMapRepo.find.mockResolvedValue([]);
     challengeCycleDayRepo.find.mockResolvedValue([]);
     mockGetDominantActivityCategories.mockReset().mockResolvedValue(new Map());
+    mockGetCurrentStreakDays.mockReset().mockResolvedValue(0);
+    mockGetCurrentStreakDaysForUsers.mockReset().mockResolvedValue(new Map());
     // Default: viewer does not follow the target — preserves the pre-B3
     // "strangers only see what a private profile allows" behavior unless a
     // test explicitly sets this to true.
@@ -397,6 +413,114 @@ describe('UsersService', () => {
         expect.objectContaining({ profile_image_url: url }),
       );
       expect(result.profile_image_url).toBe(url);
+    });
+  });
+
+  // Real gap: the profile header, the search rows and the follower lists all have a streak badge
+  // that hides itself when the field is absent — and no endpoint ever sent it, so a user who had
+  // just uploaded a photo never saw their streak at all (and where one was computed it read 0).
+  describe('streak_days on the profile endpoints', () => {
+    const profileOf = (isPrivate = false) => ({
+      user_id: 'user-2',
+      display_name: 'Bob',
+      bio: 'bio',
+      is_private: isPrivate,
+    });
+
+    it("getMyProfile reports the user's own streak — 1 right after the first photo", async () => {
+      userRepo.findOne.mockResolvedValue(baseUser());
+      profileRepo.findOne.mockResolvedValue(null);
+      followsService.getCounts.mockResolvedValue({
+        followersCount: 0,
+        followingCount: 0,
+      });
+      mockGetCurrentStreakDays.mockResolvedValue(1);
+
+      const result = await service.getMyProfile('user-1');
+
+      expect(result.streak_days).toBe(1);
+      expect(mockGetCurrentStreakDays).toHaveBeenCalledWith(
+        workoutRepo,
+        'user-1',
+      );
+    });
+
+    it('a user who has never logged anything has a streak of 0, not an absent field', async () => {
+      userRepo.findOne.mockResolvedValue(baseUser());
+      profileRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.getMyProfile('user-1');
+
+      expect(result.streak_days).toBe(0);
+    });
+
+    it('updating the profile keeps reporting the streak (the app replaces its copy with this response)', async () => {
+      userRepo.findOne.mockResolvedValue(baseUser());
+      profileRepo.findOne.mockResolvedValue(profileOf());
+      profileRepo.save.mockImplementation((p: object) => Promise.resolve(p));
+      mockGetCurrentStreakDays.mockResolvedValue(4);
+
+      const result = await service.updateProfile('user-1', { bio: 'new' });
+
+      expect(result.streak_days).toBe(4);
+    });
+
+    it("getPublicProfile shows another user's streak on a public profile", async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'user-2', username: 'bob' });
+      profileRepo.findOne.mockResolvedValue(profileOf(false));
+      mockGetCurrentStreakDays.mockResolvedValue(1);
+
+      const result = await service.getPublicProfile('user-2', 'user-1');
+
+      expect(result.streak_days).toBe(1);
+      expect(mockGetCurrentStreakDays).toHaveBeenCalledWith(
+        workoutRepo,
+        'user-2',
+      );
+    });
+
+    it('withholds the streak of a private profile from a stranger, like the bio', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'user-2', username: 'bob' });
+      profileRepo.findOne.mockResolvedValue(profileOf(true));
+      mockGetCurrentStreakDays.mockResolvedValue(9);
+
+      const result = await service.getPublicProfile('user-2', 'user-1');
+
+      expect(result.streak_days).toBeUndefined();
+    });
+
+    it('shows the streak of a private profile to an active follower', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'user-2', username: 'bob' });
+      profileRepo.findOne.mockResolvedValue(profileOf(true));
+      followsService.isActiveFollower.mockResolvedValue(true);
+      mockGetCurrentStreakDays.mockResolvedValue(9);
+
+      const result = await service.getPublicProfile('user-2', 'user-1');
+
+      expect(result.streak_days).toBe(9);
+    });
+
+    it('searchUsers attaches each result its own streak from one batched lookup', async () => {
+      userRepo.find.mockResolvedValue([
+        { id: 'user-2', username: 'bob' },
+        { id: 'user-3', username: 'bo' },
+      ]);
+      profileRepo.find.mockResolvedValue([
+        { user_id: 'user-2', display_name: 'Bob', is_private: false },
+        { user_id: 'user-3', display_name: 'Bo', is_private: false },
+      ]);
+      mockGetCurrentStreakDaysForUsers.mockResolvedValue(
+        new Map([['user-2', 3]]),
+      );
+
+      const result = await service.searchUsers('bo', 'user-1');
+
+      expect(mockGetCurrentStreakDaysForUsers).toHaveBeenCalledTimes(1);
+      expect(mockGetCurrentStreakDaysForUsers).toHaveBeenCalledWith(
+        workoutRepo,
+        ['user-2', 'user-3'],
+      );
+      expect(result.map((r) => r.streak_days)).toEqual([3, 0]);
     });
   });
 
@@ -734,6 +858,42 @@ describe('UsersService', () => {
       expect(byId.get('challenge-1')?.is_rest_day).toBe(true);
       expect(byId.get('challenge-2')?.is_rest_day).toBe(false);
     });
+
+    // A streak is the plain count of consecutive completed days — one photo logged = 1. It used to
+    // be floor(days / 3), so the first two days read as 0.
+    it.each([
+      [1, 1],
+      [2, 2],
+      [3, 3],
+      [7, 7],
+    ])(
+      'reports a streak of %i for %i consecutive completed days ending today, not days / 3',
+      async (days, expectedStreak) => {
+        mockChallengeUserQueryBuilder(challengeUserRepo, [
+          activeRelation('challenge-1'),
+        ]);
+        const completedDayRows = Array.from({ length: days }, (_, offset) => {
+          const d = new Date();
+          d.setUTCDate(d.getUTCDate() - offset);
+          return {
+            challengeId: 'challenge-1',
+            day: d.toISOString().slice(0, 10),
+          };
+        });
+        mockWorkoutQueries(workoutRepo, {
+          todayWorkouts: [{ challengeId: 'challenge-1' }],
+          completedCounts: [
+            { challengeId: 'challenge-1', count: String(days) },
+          ],
+          completedDayRows,
+        });
+        challengeCycleDayRepo.find.mockResolvedValue([]);
+
+        const result = await service.getUserChallenges('user-1');
+
+        expect(result.active[0].streak).toBe(expectedStreak);
+      },
+    );
 
     it('should leave current_day/today_completed/progress_percent/streak unaffected', async () => {
       mockChallengeUserQueryBuilder(challengeUserRepo, [

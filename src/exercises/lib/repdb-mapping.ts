@@ -1,3 +1,5 @@
+import { getMetricProfile } from './exercise-metric-profiles';
+
 /**
  * Pure RepDB -> Havit mapping rules, extracted out of the importer script
  * (backend/database/importers/repdb/import-repdb.ts, which lives outside src/ and outside
@@ -220,7 +222,8 @@ export function inferCategories(ex: RepDbExerciseForMapping): CategoryResult[] {
         {
           code: 'functional',
           isPrimary: true,
-          reason: 'bodyweight interval/conditioning drill, not distance-trackable',
+          reason:
+            'bodyweight interval/conditioning drill, not distance-trackable',
         },
       ];
     }
@@ -257,6 +260,12 @@ export function inferCategories(ex: RepDbExerciseForMapping): CategoryResult[] {
 // tracking_mode
 // ---------------------------------------------------------------------------
 
+/**
+ * A category-level GUESS at how an exercise is tracked — only the fallback now, for an exercise
+ * with no reviewed entry in `exercise-metric-profiles.ts`. It is too coarse to be the source of
+ * truth: it sends every static hold (plank, wall sit, dead hang) and every loaded carry to the
+ * sets x reps editor, and every stretch to a time field, including the dynamic rep-based ones.
+ */
 export function inferTrackingMode(
   ex: Pick<RepDbExerciseForMapping, 'category' | 'tags' | 'met'>,
 ): 'single' | 'sets' | 'interval' | 'mixed' {
@@ -266,4 +275,14 @@ export function inferTrackingMode(
     return ex.tags?.includes('warm_up') || ex.met < 5 ? 'single' : 'interval';
   }
   return 'sets';
+}
+
+/**
+ * The tracking mode the importer writes: the exercise's own reviewed profile
+ * (`exercise-metric-profiles.ts`) when it has one, otherwise the category-level guess above.
+ */
+export function resolveTrackingMode(
+  ex: Pick<RepDbExerciseForMapping, 'id' | 'category' | 'tags' | 'met'>,
+): 'single' | 'sets' | 'interval' | 'mixed' {
+  return getMetricProfile(ex.id)?.trackingMode ?? inferTrackingMode(ex);
 }

@@ -347,12 +347,14 @@ describe('RoutineService.addExerciseToRoutine', () => {
 describe('RoutineService.getTodayRoutine', () => {
   let service: RoutineService;
   let challengeService: { getToday: jest.Mock };
+  let routineExerciseRepo: ReturnType<typeof createMockRepo>;
 
   const CHALLENGE_ID = 'challenge-1';
   const USER_ID = 'user-1';
 
   beforeEach(async () => {
     challengeService = { getToday: jest.fn() };
+    routineExerciseRepo = createMockRepo();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -362,7 +364,7 @@ describe('RoutineService.getTodayRoutine', () => {
         { provide: getRepositoryToken(Routine), useValue: createMockRepo() },
         {
           provide: getRepositoryToken(RoutineExercise),
-          useValue: createMockRepo(),
+          useValue: routineExerciseRepo,
         },
         { provide: getRepositoryToken(Exercise), useValue: createMockRepo() },
         { provide: getRepositoryToken(Challenge), useValue: createMockRepo() },
@@ -371,6 +373,40 @@ describe('RoutineService.getTodayRoutine', () => {
     }).compile();
 
     service = module.get(RoutineService);
+  });
+
+  // The Log Metrics screen builds an exercise's fields from the exercise's OWN reviewed metrics
+  // (reps/weight/time/distance), not from whichever targets happened to be saved — so today's
+  // routine has to carry them.
+  it("loads each exercise's own metrics (with their metric types) alongside its sets and targets", async () => {
+    challengeService.getToday.mockResolvedValue({
+      hasWorkout: true,
+      routine_id: 9,
+      currentDay: 3,
+      currentDayInCycle: 3,
+    });
+    const joins: Array<[string, string]> = [];
+    const builder: Record<string, jest.Mock> = {};
+    builder.leftJoinAndSelect = jest.fn((path: string, alias: string) => {
+      joins.push([path, alias]);
+      return builder;
+    });
+    for (const method of ['where', 'orderBy', 'addOrderBy']) {
+      builder[method] = jest.fn(() => builder);
+    }
+    builder.getMany = jest.fn().mockResolvedValue([]);
+    routineExerciseRepo.createQueryBuilder = jest.fn(() => builder);
+
+    await service.getTodayRoutine(CHALLENGE_ID, USER_ID);
+
+    expect(joins).toEqual(
+      expect.arrayContaining([
+        ['exercise.exercise_metrics', 'exerciseMetric'],
+        ['exerciseMetric.metricType', 'exerciseMetricType'],
+        ['re.sets', 'sets'],
+        ['re.targets', 'targets'],
+      ]),
+    );
   });
 
   // Real bug: this was the one remaining call site still silently defaulting

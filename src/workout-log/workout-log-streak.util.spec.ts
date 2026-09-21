@@ -3,7 +3,6 @@ import {
   getCurrentStreakDays,
   getCurrentStreakDaysForUsers,
   getLoggedTodayUserIds,
-  toStreakPoints,
 } from './workout-log-streak.util';
 import { WorkoutLog } from './entities/workout-log.entity';
 import { Repository } from 'typeorm';
@@ -17,16 +16,6 @@ function dayKey(offset: number, from = new Date()): string {
   d.setUTCDate(d.getUTCDate() - offset);
   return d.toISOString().slice(0, 10);
 }
-
-describe('toStreakPoints', () => {
-  it('should award 1 point per 3 consecutive days, flooring the remainder', () => {
-    expect(toStreakPoints(0)).toBe(0);
-    expect(toStreakPoints(2)).toBe(0);
-    expect(toStreakPoints(3)).toBe(1);
-    expect(toStreakPoints(5)).toBe(1);
-    expect(toStreakPoints(6)).toBe(2);
-  });
-});
 
 describe('currentStreakDaysFromCompletedDays', () => {
   it('should count back consecutive days from today', () => {

@@ -131,8 +131,8 @@ export class FollowsService {
    * followed users (one grouped query each) instead of one query per
    * followed user, same batching pattern as getFollowerCountsForUsers.
    *
-   * Real bug, fixed 2026-09: this used to run the raw day count through
-   * toStreakPoints() (floor(days / 3)) before handing it to
+   * Real bug, fixed 2026-09: this used to divide the raw day count by 3
+   * (floor(days / 3)) before handing it to
    * FriendStreakDto.streakDays — so a 1 or 2-day-old streak displayed as 0,
    * even though `loggedToday` correctly showed the badge as active (a fresh
    * streak reads as "logged today, but counter still says 0"). The field is

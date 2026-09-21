@@ -37,6 +37,12 @@ export class ProfileResponseDto {
   @ApiProperty()
   following_count!: number;
 
+  @ApiProperty({
+    description:
+      'Consecutive days with a completed log, ending today (0 when none) — one day logged is a streak of 1.',
+  })
+  streak_days!: number;
+
   static build(
     user: User,
     profile: UserProfile | null,
@@ -44,6 +50,7 @@ export class ProfileResponseDto {
       followersCount: 0,
       followingCount: 0,
     },
+    streakDays = 0,
   ): ProfileResponseDto {
     const dto = new ProfileResponseDto();
     dto.id = user.id;
@@ -56,6 +63,7 @@ export class ProfileResponseDto {
     dto.is_private = profile?.is_private ?? false;
     dto.followers_count = counts.followersCount;
     dto.following_count = counts.followingCount;
+    dto.streak_days = streakDays;
     return dto;
   }
 }
@@ -96,6 +104,12 @@ export class PublicProfileResponseDto {
   })
   is_following!: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Consecutive days with a completed log, ending today. Withheld (absent) on a private profile the viewer cannot see in full, same rule as `bio`.',
+  })
+  streak_days?: number;
+
   /**
    * @param viewer Defaults to "a stranger" (not the owner, not a follower)
    * for call sites that don't pass it. `searchUsers` used to be one of
@@ -105,7 +119,10 @@ export class PublicProfileResponseDto {
    * whole result page, not one isActiveFollower() call per row).
    * @param counts Defaults to 0/0 for call sites that don't look them up.
    * Counts are never gated by privacy — same as username/display name/photo,
-   * they're always visible (only `bio` is privacy-gated, see `canSeeFullProfile`).
+   * they're always visible (only `bio` and `streak_days` are privacy-gated, see
+   * `canSeeFullProfile`).
+   * @param streakDays The user's current streak, when the caller looked it up; only
+   * exposed to a viewer who can see the full profile.
    */
   static build(
     user: User,
@@ -118,6 +135,7 @@ export class PublicProfileResponseDto {
       followersCount: 0,
       followingCount: 0,
     },
+    streakDays?: number,
   ): PublicProfileResponseDto {
     const dto = new PublicProfileResponseDto();
     const isPrivate = profile?.is_private ?? false;
@@ -133,6 +151,9 @@ export class PublicProfileResponseDto {
     dto.followers_count = counts.followersCount;
     dto.following_count = counts.followingCount;
     dto.is_following = viewer.isFollower;
+    if (canSeeFullProfile && streakDays !== undefined) {
+      dto.streak_days = streakDays;
+    }
     return dto;
   }
 }

@@ -16,6 +16,7 @@ import { User } from '../users/entities/user.entity';
 import { ChallengeUserMap } from './entities/challenge-user-map.entity';
 import { ChallengeJoinRequest } from './entities/challenge-join-request.entity';
 import { ChallengeJoinRequestResponseDto } from './dto/challenge-join-request-response.dto';
+import { ChallengeAuthorDto } from './dto/challenge-author.dto';
 import { DataSource } from 'typeorm';
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengeCycleDay } from './entities/challenge-cycle-days.entity';
@@ -667,10 +668,12 @@ export class ChallengesService {
     const enriched = await this.attachCategoriesAndLocations(challenges);
     const ids = challenges.map((c) => c.id);
 
-    const [memberCountByChallenge, dominantActivityByChallenge] =
+    const [memberCountByChallenge, dominantActivityByChallenge, authorsById] =
       await Promise.all([
         this.getMemberCountsByChallenge(ids),
         getDominantActivityCategories(this.challengeCycleDaysRepo.manager, ids),
+        // One batched lookup for every card's author, not one request per card.
+        this.loadAuthors(challenges.map((c) => c.created_by_user_id)),
       ]);
 
     // Same field name findOne() already returns (members_joined) so the
@@ -680,6 +683,7 @@ export class ChallengesService {
       ...c,
       members_joined: memberCountByChallenge.get(c.id) ?? 0,
       dominant_activity_category: dominantActivityByChallenge.get(c.id) ?? null,
+      author: authorsById.get(c.created_by_user_id) ?? null,
     }));
 
     return {
@@ -719,19 +723,56 @@ export class ChallengesService {
 
     const [enriched] = await this.attachCategoriesAndLocations([challenge]);
     const cycleDays = await this.getCycleDaySummaries(id);
-    const [membersJoined, dominantActivityByChallenge] = await Promise.all([
-      this.challengeUserMapRepo.count({
-        where: { challenge_id: id, status: 'active' },
-      }),
-      getDominantActivityCategories(this.challengeCycleDaysRepo.manager, [id]),
-    ]);
+    const [membersJoined, dominantActivityByChallenge, authorsById] =
+      await Promise.all([
+        this.challengeUserMapRepo.count({
+          where: { challenge_id: id, status: 'active' },
+        }),
+        getDominantActivityCategories(this.challengeCycleDaysRepo.manager, [
+          id,
+        ]),
+        this.loadAuthors([challenge.created_by_user_id]),
+      ]);
 
     return {
       ...enriched,
       cycle_days: cycleDays,
       members_joined: membersJoined,
       dominant_activity_category: dominantActivityByChallenge.get(id) ?? null,
+      author: authorsById.get(challenge.created_by_user_id) ?? null,
     };
+  }
+
+  /**
+   * The creator of a challenge, as its public author card (username, display name, photo).
+   * Public, like the challenge itself — `findAll()`/`findOne()` already embed the same
+   * `author` (batched, so the Explore list needs no request per card); this is for asking about
+   * one challenge on its own.
+   */
+  async getChallengeAuthor(challengeId: string): Promise<ChallengeAuthorDto> {
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId },
+    });
+    if (!challenge) throw new NotFoundException('Challenge not found');
+
+    const authors = await this.loadAuthors([challenge.created_by_user_id]);
+    const author = authors.get(challenge.created_by_user_id);
+    if (!author) throw new NotFoundException('Author not found');
+    return author;
+  }
+
+  /** Public author cards for a set of user ids, in ONE query (a user with no profile row is fine). */
+  private async loadAuthors(
+    userIds: Array<string | null | undefined>,
+  ): Promise<Map<string, ChallengeAuthorDto>> {
+    const unique = [...new Set(userIds.filter((id): id is string => !!id))];
+    if (unique.length === 0) return new Map();
+
+    const users = await this.userRepo.find({
+      where: { id: In(unique) },
+      relations: { profile: true },
+    });
+    return new Map(users.map((u) => [u.id, ChallengeAuthorDto.fromUser(u)]));
   }
 
   async update(
@@ -796,7 +837,11 @@ export class ChallengesService {
 
     if (challenge.visibility === 'private') {
       const existingPending = await this.challengeJoinRequestRepo.findOne({
-        where: { challenge_id: challengeId, user_id: userId, status: 'pending' },
+        where: {
+          challenge_id: challengeId,
+          user_id: userId,
+          status: 'pending',
+        },
       });
       if (existingPending) {
         throw new ConflictException(

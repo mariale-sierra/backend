@@ -18,6 +18,10 @@ import {
 import { FollowsService } from '../follows/follows.service';
 import { getLocalDayBoundsUtc } from '../common/timezone.util';
 import { getCycleDayInfo } from '../common/cycle-day.util';
+import {
+  getCurrentStreakDays,
+  getCurrentStreakDaysForUsers,
+} from '../workout-log/workout-log-streak.util';
 
 @Injectable()
 export class UsersService {
@@ -95,14 +99,20 @@ export class UsersService {
     });
     if (!user) throw new NotFoundException('User not found');
 
-    const [profile, counts] = await Promise.all([
+    const [profile, counts, streakDays] = await Promise.all([
       this.profileRepo.findOne({ where: { user_id: userId } }),
       this.followsService.getCounts(userId),
+      getCurrentStreakDays(this.workoutRepo, userId),
     ]);
-    return ProfileResponseDto.build(user, profile ?? null, {
-      followersCount: counts.followersCount,
-      followingCount: counts.followingCount,
-    });
+    return ProfileResponseDto.build(
+      user,
+      profile ?? null,
+      {
+        followersCount: counts.followersCount,
+        followingCount: counts.followingCount,
+      },
+      streakDays,
+    );
   }
 
   /**
@@ -148,8 +158,11 @@ export class UsersService {
     }
 
     await this.profileRepo.save(profile);
-    const counts = await this.followsService.getCounts(userId);
-    return ProfileResponseDto.build(user, profile, counts);
+    const [counts, streakDays] = await Promise.all([
+      this.followsService.getCounts(userId),
+      getCurrentStreakDays(this.workoutRepo, userId),
+    ]);
+    return ProfileResponseDto.build(user, profile, counts, streakDays);
   }
 
   /**
@@ -181,8 +194,11 @@ export class UsersService {
 
     profile.profile_image_url = profileImageUrl;
     await this.profileRepo.save(profile);
-    const counts = await this.followsService.getCounts(userId);
-    return ProfileResponseDto.build(user, profile, counts);
+    const [counts, streakDays] = await Promise.all([
+      this.followsService.getCounts(userId),
+      getCurrentStreakDays(this.workoutRepo, userId),
+    ]);
+    return ProfileResponseDto.build(user, profile, counts, streakDays);
   }
 
   /**
@@ -207,11 +223,12 @@ export class UsersService {
     });
 
     const isOwner = targetUserId === viewerUserId;
-    const [isFollower, counts] = await Promise.all([
+    const [isFollower, counts, streakDays] = await Promise.all([
       isOwner
         ? Promise.resolve(false)
         : this.followsService.isActiveFollower(viewerUserId, targetUserId),
       this.followsService.getCounts(targetUserId),
+      getCurrentStreakDays(this.workoutRepo, targetUserId),
     ]);
 
     return PublicProfileResponseDto.build(
@@ -219,6 +236,7 @@ export class UsersService {
       profile ?? null,
       { isOwner, isFollower },
       counts,
+      streakDays,
     );
   }
 
@@ -247,16 +265,20 @@ export class UsersService {
     if (users.length === 0) return [];
 
     const userIds = users.map((u) => u.id);
-    const [profiles, followerCounts, followingCounts, followedUserIds] =
-      await Promise.all([
-        this.profileRepo.find({ where: { user_id: In(userIds) } }),
-        this.followsService.getFollowerCountsForUsers(userIds),
-        this.followsService.getFollowingCountsForUsers(userIds),
-        this.followsService.getFollowedUserIdsForViewer(
-          viewerUserId,
-          userIds,
-        ),
-      ]);
+    const [
+      profiles,
+      followerCounts,
+      followingCounts,
+      followedUserIds,
+      streakDaysByUser,
+    ] = await Promise.all([
+      this.profileRepo.find({ where: { user_id: In(userIds) } }),
+      this.followsService.getFollowerCountsForUsers(userIds),
+      this.followsService.getFollowingCountsForUsers(userIds),
+      this.followsService.getFollowedUserIdsForViewer(viewerUserId, userIds),
+      // One grouped query for the whole result page (a user with no completed day is absent = 0).
+      getCurrentStreakDaysForUsers(this.workoutRepo, userIds),
+    ]);
     const profileByUser = new Map(profiles.map((p) => [p.user_id, p]));
 
     return users.map((u) =>
@@ -268,6 +290,7 @@ export class UsersService {
           followersCount: followerCounts.get(u.id) ?? 0,
           followingCount: followingCounts.get(u.id) ?? 0,
         },
+        streakDaysByUser.get(u.id) ?? 0,
       ),
     );
   }
@@ -438,10 +461,10 @@ export class UsersService {
         current_day: cappedCurrentDay,
         today_completed: todayByChallenge.has(relation.challenge_id),
         progress_percent: progressPercent,
-        // A "streak" is awarded every 3 consecutive days of completed
-        // progress, not the raw day count — e.g. 3 days in a row = streak 1,
-        // 6 days in a row = streak 2.
-        streak: Math.floor(consecutiveDays / 3),
+        // The plain count of consecutive days with completed progress — one
+        // photo logged = streak 1 (it used to be floor(days / 3), which read as
+        // 0 for the first two days). Same meaning as every other streak in the app.
+        streak: consecutiveDays,
         is_rest_day: dayType === 'rest',
         dominant_activity_category:
           dominantActivityByChallenge.get(relation.challenge_id) ?? null,
