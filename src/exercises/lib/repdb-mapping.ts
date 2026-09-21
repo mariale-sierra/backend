@@ -6,6 +6,10 @@
  */
 
 export interface RepDbExerciseForMapping {
+  /** RepDB's own slug id (e.g. "burpees") — stable across dataset versions
+   * (it's what `source_id` is upserted by). Only `inferCategories` reads it,
+   * for the small bodyweight-conditioning-vs-locomotion correction below. */
+  id: string;
   category: string;
   force_type: string;
   mechanic: string;
@@ -148,6 +152,16 @@ export interface CategoryResult {
   reason: string;
 }
 
+// See the comment at its one use site (`inferCategories`'s cardio branch) for why this is a
+// hand-picked id list rather than a general rule — data-corrected once already, live, by
+// 2026-09-21-04-fix-repdb-bodyweight-conditioning-category.sql.
+const BODYWEIGHT_CONDITIONING_NOT_DISTANCE_CARDIO = new Set([
+  'burpees',
+  'high-knees',
+  'jumping-jacks',
+  'mountain-climbers',
+]);
+
 export function inferCategories(ex: RepDbExerciseForMapping): CategoryResult[] {
   const tags = ex.tags ?? [];
   const goals = ex.goals ?? [];
@@ -189,6 +203,27 @@ export function inferCategories(ex: RepDbExerciseForMapping): CategoryResult[] {
   // MET is only ever used here — never outside category='cardio' — to distinguish intensity
   // within cardio. A high-MET squat/deadlift/circuit never becomes cardio_* through this rule.
   if (ex.category === 'cardio') {
+    // Real, confirmed data bug (2026-09-21, reported live: "burpees shouldn't have
+    // kilometers"): our `cardio-intense`/`cardio-low` categories drive the frontend's
+    // metric config into duration+DISTANCE tracking — correct for RepDB's
+    // locomotion/machine cardio (running, treadmill, rowing, bike, ...), wrong for a
+    // handful of bodyweight interval/conditioning drills RepDB also tags "cardio"
+    // purely on MET, that nobody tracks in kilometers. Verified by hand against the
+    // full vendored dataset: these 4 are the only ones, and nothing structural in the
+    // dataset (tags/goals/mechanic are identical to running/walking's) distinguishes
+    // them — hence the explicit id list, not a general rule. They go to `functional`
+    // (rounds + reps: "3 rounds of 15 burpees" is how these are actually programmed),
+    // same category the strength-circuit rule below already sends bodyweight
+    // conditioning work to.
+    if (BODYWEIGHT_CONDITIONING_NOT_DISTANCE_CARDIO.has(ex.id)) {
+      return [
+        {
+          code: 'functional',
+          isPrimary: true,
+          reason: 'bodyweight interval/conditioning drill, not distance-trackable',
+        },
+      ];
+    }
     const intense = ex.met >= 7;
     return [
       {

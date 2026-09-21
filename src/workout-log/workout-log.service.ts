@@ -16,7 +16,9 @@ import { WorkoutLogExerciseSetTarget } from './entities/workout-log-exercise-set
 import { Between } from 'typeorm';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
 import { Challenge } from '../challenges/entities/challenge.entity';
+import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
 import { getLocalDayBoundsUtc } from '../common/timezone.util';
+import { getCycleDayInfo } from '../common/cycle-day.util';
 
 @Injectable()
 export class WorkoutLogService {
@@ -35,6 +37,9 @@ export class WorkoutLogService {
 
     @InjectRepository(Challenge)
     private challengeRepo: Repository<Challenge>,
+
+    @InjectRepository(ChallengeUserMap)
+    private challengeUserMapRepo: Repository<ChallengeUserMap>,
   ) {}
 
   async createWorkout(dto: {
@@ -58,7 +63,25 @@ export class WorkoutLogService {
       );
     }
 
+    // Fetched once up front (when there's a challenge at all) and reused below for the
+    // auto-complete check after the workout is saved — one query serves both, rather than
+    // fetching the same row twice.
+    let challenge: Challenge | null = null;
+
     if (dto.challengeId) {
+      challenge = await this.challengeRepo.findOne({
+        where: { id: dto.challengeId },
+      });
+      if (!challenge) throw new NotFoundException('Challenge not found');
+
+      // Bloque 1: a closed challenge ("no one will be able to join or log new progress
+      // once it is closed" — the admin close-challenge popup's own copy) rejects new
+      // progress server-side, not just by hiding the button — a stale client, or anyone
+      // calling the API directly, must not be able to bypass a close.
+      if (challenge.status === 'closed') {
+        throw new BadRequestException('This challenge is closed');
+      }
+
       // Bounded by the user's local calendar day, not the server's UTC
       // clock, so the one-log-per-day gate agrees with the "completed
       // today" display logic elsewhere (ChallengesService, UsersService) —
@@ -197,7 +220,69 @@ export class WorkoutLogService {
       });
     }
 
+    // The workout (and its post) are already saved at this point — nothing below is
+    // allowed to surface as a "failed to save progress" error, same rule the frontend's
+    // own post-save cleanup already follows (see progressLoggedFeedback.ts).
+    if (dto.challengeId && challenge) {
+      await this.completeChallengeIfThisWasTheLastDay(
+        dto.userId,
+        dto.challengeId,
+        challenge,
+        dto.timezone ?? 'UTC',
+      ).catch((error) =>
+        console.error(
+          '[WorkoutLogService] completeChallengeIfThisWasTheLastDay failed:',
+          error,
+        ),
+      );
+    }
+
     return this.findOne(savedWorkout.id);
+  }
+
+  /**
+   * Marks a challenge `completed` (challenge_user_map.status) the moment its actual
+   * final day is logged — server-side, right when the workout that finishes it is
+   * saved, instead of relying solely on a second client round-trip after the fact
+   * (`utils/progressLoggedFeedback.ts`'s own `completeChallengeIfFinished`, which stays
+   * as a client-side safety net: this makes it usually redundant, not wrong to keep).
+   * That second-round-trip-only design was the real cause of a challenge that had
+   * genuinely run its full length staying `active` forever if that one extra call ever
+   * silently failed (network hiccup, app backgrounded right after the confirm tap, ...)
+   * — nothing else in the app would ever retry it.
+   *
+   * No-ops (does not throw) for anything short of "this really was the last day":
+   * already completed, not currently active, or today isn't actually the challenge's
+   * final capped day yet — the exact same test `isChallengeFinished()`
+   * (services/adapters/challengeState.ts) applies client-side, kept in agreement on
+   * purpose (both read `currentDay >= totalDays`, capped the same way, via the same
+   * `getCycleDayInfo`).
+   */
+  private async completeChallengeIfThisWasTheLastDay(
+    userId: string,
+    challengeId: string,
+    challenge: Challenge,
+    timezone: string,
+  ): Promise<void> {
+    if (!challenge.cycle_length_days) return;
+
+    const relation = await this.challengeUserMapRepo.findOne({
+      where: { user_id: userId, challenge_id: challengeId, status: 'active' },
+    });
+    if (!relation) return;
+
+    const { currentDay } = getCycleDayInfo(
+      relation.joined_at!,
+      timezone,
+      challenge.duration_days,
+      challenge.cycle_length_days,
+    );
+    // Today's workout was just saved above, so "completed today" is already true —
+    // the only remaining question is whether today is the capped last day.
+    if (currentDay < challenge.duration_days) return;
+
+    relation.status = 'completed';
+    await this.challengeUserMapRepo.save(relation);
   }
 
   /**

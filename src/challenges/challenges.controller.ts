@@ -14,7 +14,9 @@ import { ChallengesService } from './challenges.service';
 import { CreateChallengeDto } from './dto/create-challenge.dto';
 import { UpdateChallengeDto } from './dto/update-challenge.dto';
 import { ChallengeProgressDto } from './dto/challenge-progress.dto';
+import { ChallengeJoinRequestResponseDto } from './dto/challenge-join-request-response.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AdminGuard } from '../auth/guards/admin.guard';
 import {
   ApiTags,
   ApiOperation,
@@ -22,6 +24,7 @@ import {
   ApiBearerAuth,
   ApiParam,
   ApiOkResponse,
+  ApiForbiddenResponse,
 } from '@nestjs/swagger';
 import { WorkoutLogService } from '../workout-log/workout-log.service';
 import { CreateWorkoutProgressDto } from '../workout-log/dto/create-workout-progress.dto';
@@ -221,6 +224,101 @@ export class ChallengesController {
   @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
   findUsers(@Param('id', ParseUUIDPipe) id: string) {
     return this.challengesService.findUsersByChallenge(id);
+  }
+
+  @Patch(':id/users/:userId/remove')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiParam({ name: 'userId', description: 'ID del participante a remover' })
+  @ApiOperation({
+    summary: 'Remover participante (owner)',
+    description:
+      'Solo el creador del desafío, y solo para desafíos públicos — un desafío privado se administra por solicitudes de ingreso, no por remoción.',
+  })
+  @ApiOkResponse({ description: 'Participante removido' })
+  @ApiForbiddenResponse({ description: 'Solo el creador del desafío' })
+  @ApiResponse({ status: 404, description: 'Desafío o participante no encontrado' })
+  removeParticipant(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.challengesService.removeChallengeParticipant(
+      user.sub,
+      id,
+      userId,
+    );
+  }
+
+  @Get(':id/join-requests')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiOperation({
+    summary: 'Solicitudes de ingreso pendientes (owner)',
+    description: 'Solo el creador de un desafío privado.',
+  })
+  @ApiOkResponse({ type: ChallengeJoinRequestResponseDto, isArray: true })
+  @ApiForbiddenResponse({ description: 'Solo el creador del desafío' })
+  getJoinRequests(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<ChallengeJoinRequestResponseDto[]> {
+    return this.challengesService.getChallengeJoinRequests(user.sub, id);
+  }
+
+  @Post(':id/join-requests/:requestId/approve')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiParam({ name: 'requestId', description: 'ID de la solicitud' })
+  @ApiOperation({ summary: 'Aprobar solicitud de ingreso (owner)' })
+  @ApiOkResponse({ type: ChallengeJoinRequestResponseDto })
+  @ApiForbiddenResponse({ description: 'Solo el creador del desafío' })
+  approveJoinRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('requestId') requestId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<ChallengeJoinRequestResponseDto> {
+    return this.challengesService.respondToChallengeJoinRequest(
+      user.sub,
+      id,
+      requestId,
+      true,
+    );
+  }
+
+  @Post(':id/join-requests/:requestId/reject')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiParam({ name: 'requestId', description: 'ID de la solicitud' })
+  @ApiOperation({ summary: 'Rechazar solicitud de ingreso (owner)' })
+  @ApiOkResponse({ type: ChallengeJoinRequestResponseDto })
+  @ApiForbiddenResponse({ description: 'Solo el creador del desafío' })
+  rejectJoinRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('requestId') requestId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<ChallengeJoinRequestResponseDto> {
+    return this.challengesService.respondToChallengeJoinRequest(
+      user.sub,
+      id,
+      requestId,
+      false,
+    );
+  }
+
+  @Patch(':id/close')
+  @UseGuards(AdminGuard)
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiOperation({
+    summary: 'Cerrar desafío (admin)',
+    description:
+      'Nadie podrá unirse ni registrar progreso nuevo una vez cerrado. Solo administradores.',
+  })
+  @ApiOkResponse({ description: 'Desafío cerrado' })
+  @ApiForbiddenResponse({ description: 'Solo administradores' })
+  closeChallenge(@Param('id', ParseUUIDPipe) id: string) {
+    return this.challengesService.closeChallenge(id);
   }
 
   @Public()

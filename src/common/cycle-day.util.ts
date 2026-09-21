@@ -60,6 +60,9 @@ export function getCycleDayInfo(
     currentDayInCycle: cycleLengthDays
       ? ((currentDay - 1) % cycleLengthDays) + 1
       : null,
-    isCompleted: rawCurrentDay > durationDays,
+    // `>=`, not `>`: a challenge's LAST day (rawCurrentDay === durationDays, e.g. day 20
+    // of a 20-day challenge) is already the final day, not the day before it — an
+    // off-by-one that read a challenge on its actual last day as still having a day left.
+    isCompleted: rawCurrentDay >= durationDays,
   };
 }

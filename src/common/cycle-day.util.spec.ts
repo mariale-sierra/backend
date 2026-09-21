@@ -80,6 +80,43 @@ describe('cycle-day.util', () => {
       expect(result.isCompleted).toBe(true);
     });
 
+    // Off-by-one regression: `isCompleted` used to require rawCurrentDay > durationDays
+    // (strictly), so a challenge on its actual LAST day (raw === duration, e.g. day 20 of
+    // 20) read as not yet completed — only the day after. `currentDay`, which callers
+    // that decide "is this the final day" (see challengeState.ts's isChallengeFinished)
+    // actually read, was already correct; this only fixes this struct's own isCompleted.
+    it('is completed on the exact last day, not only the day after it', () => {
+      jest.useFakeTimers();
+      // Joined 19 days before "now" -> raw elapsed day 20 == durationDays exactly.
+      jest.setSystemTime(new Date('2026-09-15T12:00:00.000Z'));
+
+      const result = getCycleDayInfo(
+        new Date('2026-08-27T12:00:00.000Z'),
+        'UTC',
+        20,
+        4,
+      );
+
+      expect(result.currentDay).toBe(20);
+      expect(result.isCompleted).toBe(true);
+    });
+
+    it('is not completed the day before the last day', () => {
+      jest.useFakeTimers();
+      // Joined 18 days before "now" -> raw elapsed day 19, one short of a 20-day duration.
+      jest.setSystemTime(new Date('2026-09-14T12:00:00.000Z'));
+
+      const result = getCycleDayInfo(
+        new Date('2026-08-27T12:00:00.000Z'),
+        'UTC',
+        20,
+        4,
+      );
+
+      expect(result.currentDay).toBe(19);
+      expect(result.isCompleted).toBe(false);
+    });
+
     it('never returns a currentDay past durationDays, however far past it the elapsed days go', () => {
       jest.useFakeTimers();
       jest.setSystemTime(new Date('2027-01-01T12:00:00.000Z'));

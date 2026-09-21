@@ -130,6 +130,7 @@ describe('AuthService', () => {
         email: 'a@example.com',
         username: 'a',
         password_hash: 'hashed-value',
+        is_active: true,
       };
       userRepo.findOne.mockResolvedValue(user);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
@@ -144,6 +145,24 @@ describe('AuthService', () => {
         expect.objectContaining({ secret: 'test-secret', expiresIn: '7d' }),
       );
       expect(result.accessToken).toBe('signed.jwt.token');
+    });
+
+    // Bloque 1: UsersService.banUser deactivates via the same is_active flag — this is
+    // what actually makes that ban have an effect (see AuthService.login's own comment).
+    it('should reject login for a banned (is_active=false) account, even with the correct password', async () => {
+      userRepo.findOne.mockResolvedValue({
+        id: 'user-1',
+        email: 'banned@example.com',
+        username: 'banned',
+        password_hash: 'hashed-value',
+        is_active: false,
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      await expect(
+        service.login({ email: 'banned@example.com', password: 'correct-password' }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
     });
   });
 });

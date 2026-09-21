@@ -91,7 +91,7 @@ export class WorkoutPostsService {
    * code to resurrect. Read only through `create()`/`moderatePost()` below;
    * flip this one constant to re-enable real moderation.
    */
-  private static readonly MODERATION_GATE_ENABLED = false;
+  private static readonly MODERATION_GATE_ENABLED = true;
   private static readonly MODERATION_DISABLED_REASON =
     'Aprobado automáticamente: moderación por IA desactivada temporalmente por el equipo';
 

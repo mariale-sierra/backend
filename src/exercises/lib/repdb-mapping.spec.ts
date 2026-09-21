@@ -10,6 +10,7 @@ function baseExercise(
   overrides: Partial<RepDbExerciseForMapping>,
 ): RepDbExerciseForMapping {
   return {
+    id: 'test-exercise',
     category: 'strength',
     force_type: 'push',
     mechanic: 'compound',
@@ -179,6 +180,42 @@ describe('inferCategories', () => {
   it('cardio + met<7 -> cardio-low', () => {
     const result = inferCategories(
       baseExercise({ category: 'cardio', met: 6 }),
+    );
+    expect(result[0].code).toBe('cardio-low');
+  });
+
+  // Real, confirmed data bug (2026-09-21): burpees, high-knees, jumping-jacks and
+  // mountain-climbers are all RepDB category="cardio" with met>=7 (the same shape as
+  // genuine distance cardio like running), which put them in cardio-intense — and the
+  // frontend tracks cardio-intense in duration + DISTANCE. Nobody logs kilometers of
+  // burpees. See the data-correction migration this mirrors:
+  // database/migrations/2026-09-21-04-fix-repdb-bodyweight-conditioning-category.sql.
+  it.each(['burpees', 'high-knees', 'jumping-jacks', 'mountain-climbers'])(
+    'bodyweight conditioning cardio (%s) -> functional, not cardio-intense — not distance-trackable',
+    (id) => {
+      const result = inferCategories(
+        baseExercise({ id, category: 'cardio', met: 8, is_bodyweight: true }),
+      );
+      expect(result).toEqual([
+        {
+          code: 'functional',
+          isPrimary: true,
+          reason: 'bodyweight interval/conditioning drill, not distance-trackable',
+        },
+      ]);
+    },
+  );
+
+  it('genuine locomotion/machine cardio (e.g. running) is unaffected — still cardio-intense', () => {
+    const result = inferCategories(
+      baseExercise({ id: 'running', category: 'cardio', met: 8, is_bodyweight: true }),
+    );
+    expect(result[0].code).toBe('cardio-intense');
+  });
+
+  it('a different bodyweight cardio exercise not on the hand-picked list still follows the plain MET rule', () => {
+    const result = inferCategories(
+      baseExercise({ id: 'walking', category: 'cardio', met: 3.5, is_bodyweight: true }),
     );
     expect(result[0].code).toBe('cardio-low');
   });
