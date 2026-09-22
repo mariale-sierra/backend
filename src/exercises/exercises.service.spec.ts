@@ -113,16 +113,22 @@ describe('ExercisesService', () => {
   });
 
   describe('findAll', () => {
-    it('paginates and only lists active exercises', async () => {
+    function queryBuilderReturning(rows: unknown[], total: number) {
       const qb = {
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         take: jest.fn().mockReturnThis(),
-        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+        getManyAndCount: jest.fn().mockResolvedValue([rows, total]),
       };
       exerciseRepo.createQueryBuilder.mockReturnValue(qb);
+      return qb;
+    }
+
+    it('paginates and only lists active exercises', async () => {
+      const qb = queryBuilderReturning([], 0);
 
       const result = await service.findAll({
         page: 1,
@@ -135,15 +141,7 @@ describe('ExercisesService', () => {
     });
 
     it('adds a cross-locale EXISTS search filter when ?search= is given', async () => {
-      const qb = {
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        skip: jest.fn().mockReturnThis(),
-        take: jest.fn().mockReturnThis(),
-        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
-      };
-      exerciseRepo.createQueryBuilder.mockReturnValue(qb);
+      const qb = queryBuilderReturning([], 0);
 
       await service.findAll({
         page: 1,
@@ -156,6 +154,71 @@ describe('ExercisesService', () => {
       expect(sql).toContain('exercise_translations');
       expect(sql).not.toContain('locale');
       expect(params).toEqual({ search: '%squat%' });
+    });
+
+    // Real, confirmed bug (2026-09-22): `ORDER BY name` alone has no tiebreaker
+    // for exercises sharing an exact name, so two separate page fetches could
+    // return the same row twice (a duplicate React key on the frontend, which
+    // crashed the Add-Exercises picker mid-selection). `id` is unique.
+    it('breaks name ties with a stable id order, so pagination cannot return the same exercise twice', async () => {
+      const qb = queryBuilderReturning([], 0);
+
+      await service.findAll({ page: 2, pageSize: 20, locale: 'en' });
+
+      expect(qb.orderBy).toHaveBeenCalledWith('exercise.name', 'ASC');
+      expect(qb.addOrderBy).toHaveBeenCalledWith('exercise.id', 'ASC');
+    });
+
+    // Real, confirmed bug (2026-09-22, reported directly): selecting "Anywhere"
+    // as a location returned FEWER exercises than picking every other location
+    // tag, because 'anywhere' is a real, minority tag most exercises don't
+    // carry — not a wildcard. See `wantsAnywhereLocation`'s own doc comment.
+    it('drops the location filter entirely when "anywhere" is among the requested location codes', async () => {
+      const qb = queryBuilderReturning([], 0);
+
+      await service.findAll({
+        page: 1,
+        pageSize: 20,
+        locale: 'en',
+        location: ['anywhere'],
+      });
+
+      const locationCalls = qb.andWhere.mock.calls.filter(([sql]: [string]) =>
+        sql.includes('exercise_location_map'),
+      );
+      expect(locationCalls).toHaveLength(0);
+    });
+
+    it('still filters by location when "anywhere" was not requested', async () => {
+      const qb = queryBuilderReturning([], 0);
+
+      await service.findAll({
+        page: 1,
+        pageSize: 20,
+        locale: 'en',
+        location: ['gym', 'outdoor'],
+      });
+
+      const [sql, params] = qb.andWhere.mock.calls.find(([s]: [string]) =>
+        s.includes('exercise_location_map'),
+      ) as [string, unknown];
+      expect(params).toEqual({ locationCodes: ['gym', 'outdoor'] });
+    });
+
+    it('drops the location filter when "anywhere" is combined with other locations too', async () => {
+      const qb = queryBuilderReturning([], 0);
+
+      await service.findAll({
+        page: 1,
+        pageSize: 20,
+        locale: 'en',
+        location: ['gym', 'anywhere'],
+      });
+
+      const locationCalls = qb.andWhere.mock.calls.filter(([sql]: [string]) =>
+        sql.includes('exercise_location_map'),
+      );
+      expect(locationCalls).toHaveLength(0);
     });
   });
 
@@ -251,6 +314,41 @@ describe('ExercisesService', () => {
       await service.countMatchingExercises(['Strength'], ['Gym']);
 
       expect(qb.andWhere).toHaveBeenCalledTimes(2);
+    });
+
+    // Real, confirmed bug (2026-09-22, reported directly: "when you select
+    // 'anywhere' as a location, you unlock 0 exercises? but when you hand
+    // pick the other 4 location tags you [get] 9"). 'anywhere' is a real,
+    // minority tag (~35% of the live catalog), not a wildcard for every
+    // location — see `wantsAnywhereLocation`'s own doc comment.
+    it('drops the location filter entirely when "Anywhere" is selected, case-insensitively', async () => {
+      const qb = queryBuilderReturning(9);
+
+      const result = await service.countMatchingExercises([], ['Anywhere']);
+
+      expect(result).toBe(9);
+      expect(qb.andWhere).not.toHaveBeenCalled();
+    });
+
+    it('still counts categories normally alongside a dropped "Anywhere" location filter', async () => {
+      const qb = queryBuilderReturning(9);
+
+      await service.countMatchingExercises(['Cardio Intense'], ['anywhere']);
+
+      expect(qb.andWhere).toHaveBeenCalledTimes(1);
+      const [sql] = qb.andWhere.mock.calls[0] as [string, unknown];
+      expect(sql).toContain('exercise_category_map');
+    });
+
+    it('drops the location filter when "Anywhere" is combined with other locations too', async () => {
+      const qb = queryBuilderReturning(9);
+
+      await service.countMatchingExercises([], ['Gym', 'Anywhere', 'Outdoor']);
+
+      const locationCalls = qb.andWhere.mock.calls.filter(([sql]: [string]) =>
+        sql.includes('exercise_location_map'),
+      );
+      expect(locationCalls).toHaveLength(0);
     });
   });
 

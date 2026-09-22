@@ -25,6 +25,27 @@ import { MuscleSvgPart } from './entities/muscle-svg-part.entity';
 // Preference order when a list row needs exactly one representative image.
 const ASSET_TYPE_PRIORITY = ['main', 'start', 'peak', 'thumbnail', 'animation'];
 
+/**
+ * Real, confirmed bug (2026-09-22, reported directly: "when you select 'anywhere' as a
+ * location, you unlock 0 exercises? but when you hand pick the other 4 location tags you
+ * [get] 9"). `exercise_locations` is NOT a "matches every location" wildcard tag — it's its
+ * own real, minority category a subset of exercises are explicitly tagged with (live counts:
+ * 382 Gym / 380 Home / 207 Anywhere / 178 Outdoor / 29 Studio, out of 589 active exercises —
+ * Gym+Home+Outdoor+Studio together already cover 100% of the catalog, so "Anywhere" is a
+ * genuinely separate, smaller tag layered on top of those, not a superset of them). Filtering
+ * on it literally (`LOWER(el.name) IN ('anywhere')` / `el.code IN ('anywhere')`) — what both
+ * `countMatchingExercises` and `findAll` used to do — matches only that minority, which reads
+ * as broken to anyone picking the "Anywhere" pill expecting "I don't care where, show me
+ * everything" (its plain-English meaning, and the ONLY location pill described that way —
+ * `challengeCreateOptions.ts`'s own copy: "Flexible setups that can be completed in almost
+ * any environment"). So: selecting "Anywhere" (alone or combined with anything else) now
+ * drops the location filter entirely instead of narrowing to the literal tag — both call
+ * sites below share this check so they can't drift apart on it again.
+ */
+function wantsAnywhereLocation(locationValues: string[]): boolean {
+  return locationValues.some((value) => value.trim().toLowerCase() === 'anywhere');
+}
+
 @Injectable()
 export class ExercisesService {
   constructor(
@@ -105,7 +126,11 @@ export class ExercisesService {
       );
     }
 
-    if (query.location?.length) {
+    // See wantsAnywhereLocation's own doc comment: 'anywhere' is a real, minority
+    // location tag, not a wildcard — selecting it means "don't filter by location
+    // at all," so the EXISTS clause below is skipped entirely rather than matching
+    // only the literal 'anywhere' code.
+    if (query.location?.length && !wantsAnywhereLocation(query.location)) {
       qb.andWhere(
         `EXISTS (
           SELECT 1 FROM havit.exercise_location_map elm
@@ -136,6 +161,16 @@ export class ExercisesService {
 
     const [exercises, total] = await qb
       .orderBy('exercise.name', 'ASC')
+      // Real, confirmed bug (2026-09-22, reported directly: a duplicate React key
+      // for the same exercise id while paging through the Add-Exercises picker,
+      // which crashed the screen and lost the routine being built). `ORDER BY
+      // name` alone has no tiebreaker for the many exercises that share an exact
+      // name — Postgres doesn't guarantee a stable order for those ties ACROSS
+      // separate query executions, so two different page fetches (`skip`/`take`)
+      // could return the same row twice (or skip one) depending on which tied row
+      // the planner happened to place first each time. `id` is unique, so this
+      // pins a fully deterministic order without changing how ties otherwise sort.
+      .addOrderBy('exercise.id', 'ASC')
       .skip((page - 1) * pageSize)
       .take(pageSize)
       .getManyAndCount();
@@ -255,7 +290,8 @@ export class ExercisesService {
    * convention ChallengesService.findOrCreateCategoryId/findOrCreateLocationId
    * already use elsewhere for these same two catalogs — the frontend already
    * sends category/location display names for challenge creation, not codes.
-   * No filters at all just counts every active exercise.
+   * No filters at all just counts every active exercise. See
+   * `wantsAnywhereLocation`'s own doc comment for the 'anywhere' special case.
    */
   async countMatchingExercises(
     categoryNames: string[],
@@ -277,7 +313,7 @@ export class ExercisesService {
       );
     }
 
-    if (locationNames.length > 0) {
+    if (locationNames.length > 0 && !wantsAnywhereLocation(locationNames)) {
       qb.andWhere(
         `EXISTS (
           SELECT 1 FROM havit.exercise_location_map elm
