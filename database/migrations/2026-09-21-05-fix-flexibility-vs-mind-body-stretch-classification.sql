@@ -22,11 +22,20 @@ DECLARE
   flexibility_id BIGINT;
   mind_body_id BIGINT;
 BEGIN
+  -- Matches either separator: this DB's exercise_categories rows have a documented
+  -- history of hyphen-vs-underscore mismatches between what a fresh init/seed run
+  -- produces and what was actually hand-seeded live (see
+  -- 2026-08-28-02-fix-exercise-catalog-code-mismatches.sql's own header comment).
   SELECT id INTO flexibility_id FROM havit.exercise_categories WHERE code = 'flexibility';
-  SELECT id INTO mind_body_id FROM havit.exercise_categories WHERE code = 'mind-body';
+  SELECT id INTO mind_body_id FROM havit.exercise_categories WHERE code IN ('mind-body', 'mind_body');
 
   IF flexibility_id IS NULL OR mind_body_id IS NULL THEN
-    RAISE EXCEPTION 'flexibility/mind-body category rows not found — cannot run this migration';
+    -- Same no-op-if-missing guard as that same file's own DO blocks use — a migration
+    -- that runs automatically on every deploy must never take the whole backend down
+    -- (via db:migrate failing, which crash-loops the container) just because a category
+    -- code didn't resolve the way this was written expecting. Safe to re-run once
+    -- whatever the mismatch was is sorted out.
+    RETURN;
   END IF;
 
   UPDATE havit.exercise_category_map ecm
