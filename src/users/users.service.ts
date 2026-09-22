@@ -318,6 +318,12 @@ export class UsersService {
         streak: number;
         is_rest_day: boolean;
         dominant_activity_category: string | null;
+        // See the "lazily auto-complete" block below this loop — true when THIS
+        // call just flipped the relation's status to 'completed' because its time
+        // ran out, so `getUserChallenges()` can reflect it in the SAME response
+        // (the `challenges` array it already has in hand was read before that
+        // write, so its own `c.status` is stale by the time this returns).
+        just_completed: boolean;
       }
     >
   > {
@@ -341,6 +347,7 @@ export class UsersService {
         streak: number;
         is_rest_day: boolean;
         dominant_activity_category: string | null;
+        just_completed: boolean;
       }
     >();
 
@@ -420,6 +427,24 @@ export class UsersService {
       );
     }
 
+    // Real, confirmed bug (reported live: "the challenge lasts 10 days, I
+    // don't upload a single picture, then even after the 10 days the
+    // challenge still behaves as active — it is only after I upload a
+    // picture that it gets marked as completed"). Every existing path that
+    // ever marks a challenge `completed` — `ChallengesService.completeChallenge()`
+    // (the explicit endpoint), `WorkoutLogService`'s own
+    // `completeChallengeIfThisWasTheLastDay()`, and the frontend's
+    // `progressLoggedFeedback.ts` fallback — only ever runs at the moment a
+    // workout is actually LOGGED. A challenge nobody ever logs anything
+    // against again past its last day has no path that ever re-checks it, so
+    // it just sits `active` forever, no matter how much real time passes.
+    // `getCycleDayInfo()`'s `isCompleted` (computed from the RAW, uncapped
+    // elapsed-days count — true once today is on/past the challenge's last
+    // day, independent of whether anything was ever logged) already existed
+    // for exactly this, but nothing actually read it. Collected below and
+    // persisted once per call, after the main loop.
+    const justCompletedChallengeIds: string[] = [];
+
     for (const relation of countableRelations) {
       const durationDays = relation.challenge?.duration_days ?? 0;
 
@@ -429,13 +454,19 @@ export class UsersService {
       // math, which is exactly how ChallengesService's own uncapped copy
       // could disagree with this one on a challenge running longer than its
       // duration.
-      const { currentDay: cappedCurrentDay, currentDayInCycle } =
-        getCycleDayInfo(
-          relation.joined_at!,
-          timezone,
-          durationDays,
-          relation.challenge?.cycle_length_days,
-        );
+      const {
+        currentDay: cappedCurrentDay,
+        currentDayInCycle,
+        isCompleted,
+      } = getCycleDayInfo(
+        relation.joined_at!,
+        timezone,
+        durationDays,
+        relation.challenge?.cycle_length_days,
+      );
+
+      const isExpired = relation.status === 'active' && isCompleted;
+      if (isExpired) justCompletedChallengeIds.push(relation.challenge_id);
 
       const completedDays =
         completedByChallenge.get(relation.challenge_id) ?? 0;
@@ -468,7 +499,33 @@ export class UsersService {
         is_rest_day: dayType === 'rest',
         dominant_activity_category:
           dominantActivityByChallenge.get(relation.challenge_id) ?? null,
+        just_completed: isExpired,
       });
+    }
+
+    if (justCompletedChallengeIds.length > 0) {
+      // Same 'completed' value, same column `ChallengesService.completeChallenge()`
+      // itself writes — this is just a second, time-based way to reach it, not a
+      // different status. One batched UPDATE for every challenge this call expired,
+      // not one per challenge. `.catch()`, not `await`ed into a throw: this is a
+      // side effect of a read (GET /users/me/challenges) — its failure must never
+      // turn viewing your challenges into an error, same reasoning as
+      // `WorkoutLogService`'s own auto-complete call.
+      this.challengeUserRepo
+        .update(
+          {
+            user_id: relations[0].user_id,
+            challenge_id: In(justCompletedChallengeIds),
+            status: 'active',
+          },
+          { status: 'completed' },
+        )
+        .catch((error) =>
+          console.error(
+            '[UsersService.attachProgress] could not auto-complete expired challenges:',
+            error,
+          ),
+        );
     }
 
     return result;
@@ -558,19 +615,25 @@ export class UsersService {
 
     for (const c of challenges) {
       const progress = progressByChallenge.get(c.challenge_id);
+      // `c.status` was read before `attachProgress()` above ran (and possibly
+      // auto-completed this exact relation for having run out of time) — its
+      // `just_completed` flag is this same response's only way to know that
+      // happened, so this request reports it correctly instead of only the
+      // NEXT one, once `c.status` itself would catch up.
+      const effectiveStatus = progress?.just_completed ? 'completed' : c.status;
 
       const formatted: any = {
         ...c.challenge,
-        status: c.status,
+        status: effectiveStatus,
         joinedAt: c.joined_at,
         categories: categoriesByChallenge.get(c.challenge_id) ?? [],
         locations: locationsByChallenge.get(c.challenge_id) ?? [],
         ...(progress ?? {}),
       };
 
-      if (c.status === 'completed') {
+      if (effectiveStatus === 'completed') {
         grouped.completed.push(formatted);
-      } else if (c.status === 'left') {
+      } else if (effectiveStatus === 'left') {
         grouped.left.push(formatted);
       } else {
         grouped.active.push(formatted);

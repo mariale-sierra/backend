@@ -43,6 +43,7 @@ const createMockRepo = () => ({
   findOne: jest.fn(),
   save: jest.fn(),
   create: jest.fn(),
+  update: jest.fn().mockResolvedValue({ affected: 0 }),
   createQueryBuilder: jest.fn(),
   manager: {},
 });
@@ -967,6 +968,126 @@ describe('UsersService', () => {
     });
   });
 
+  // Real, confirmed bug (reported live: "the challenge lasts 10 days, I don't
+  // upload a single picture, then even after the 10 days the challenge still
+  // behaves as active — it is only after I upload a picture that it gets
+  // marked as completed"). Every existing "mark completed" path only ever ran
+  // at the moment a workout was actually logged — nothing ever re-checked a
+  // challenge nobody logs anything against again after its last day. Fixed:
+  // getUserChallenges() (via attachProgress()) now lazily completes any
+  // `active` relation whose real elapsed time has passed its `duration_days`,
+  // on every read, regardless of whether today (or ever) got logged.
+  describe('getUserChallenges (auto-completing an expired challenge)', () => {
+    // Joined "today," well within its duration — genuinely still active.
+    // Local copy of the outer describe block's own `activeRelation` (scoped
+    // there, not reachable from here).
+    function activeRelation(challengeId: string) {
+      return {
+        challenge_id: challengeId,
+        user_id: 'user-1',
+        status: 'active',
+        joined_at: new Date(),
+        challenge: { id: challengeId, duration_days: 30, cycle_length_days: 3 },
+      };
+    }
+
+    function expiredActiveRelation(challengeId: string, durationDays = 10) {
+      const joinedAt = new Date();
+      joinedAt.setUTCDate(joinedAt.getUTCDate() - (durationDays + 5));
+      return {
+        challenge_id: challengeId,
+        user_id: 'user-1',
+        status: 'active',
+        joined_at: joinedAt,
+        challenge: {
+          id: challengeId,
+          duration_days: durationDays,
+          cycle_length_days: 3,
+        },
+      };
+    }
+
+    it('marks a challenge whose time ran out as completed in THIS response, even though nothing was ever logged', async () => {
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        expiredActiveRelation('challenge-1'),
+      ]);
+      mockWorkoutQueries(workoutRepo, {});
+      challengeCycleDayRepo.find.mockResolvedValue([]);
+
+      const result = await service.getUserChallenges('user-1');
+
+      expect(result.active).toHaveLength(0);
+      expect(result.completed).toHaveLength(1);
+      expect((result.completed[0] as { id: string; status: string })).toMatchObject({
+        id: 'challenge-1',
+        status: 'completed',
+      });
+    });
+
+    it('persists the transition, batched for every expired challenge in one call', async () => {
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        expiredActiveRelation('challenge-1'),
+        expiredActiveRelation('challenge-2'),
+        activeRelation('challenge-3'), // genuinely still active — untouched
+      ]);
+      mockWorkoutQueries(workoutRepo, {});
+      challengeCycleDayRepo.find.mockResolvedValue([]);
+
+      await service.getUserChallenges('user-1');
+
+      expect(challengeUserRepo.update).toHaveBeenCalledTimes(1);
+      const [where, patch] = challengeUserRepo.update.mock.calls[0] as [
+        { user_id: string; challenge_id: { value: string[] }; status: string },
+        { status: string },
+      ];
+      expect(where.user_id).toBe('user-1');
+      expect(where.status).toBe('active');
+      expect(patch).toEqual({ status: 'completed' });
+      expect([...where.challenge_id.value].sort()).toEqual([
+        'challenge-1',
+        'challenge-2',
+      ]);
+    });
+
+    it('leaves a genuinely still-active challenge (within its duration) alone', async () => {
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        activeRelation('challenge-1'),
+      ]);
+      mockWorkoutQueries(workoutRepo, {});
+      challengeCycleDayRepo.find.mockResolvedValue([]);
+
+      const result = await service.getUserChallenges('user-1');
+
+      expect(result.active).toHaveLength(1);
+      expect(result.completed).toHaveLength(0);
+      expect(challengeUserRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('does not try to re-complete an already-completed challenge', async () => {
+      const relation = expiredActiveRelation('challenge-1');
+      relation.status = 'completed';
+      mockChallengeUserQueryBuilder(challengeUserRepo, [relation]);
+      mockWorkoutQueries(workoutRepo, {});
+      challengeCycleDayRepo.find.mockResolvedValue([]);
+
+      const result = await service.getUserChallenges('user-1');
+
+      expect(result.completed).toHaveLength(1);
+      expect(challengeUserRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('never lets the auto-complete write fail the whole request', async () => {
+      mockChallengeUserQueryBuilder(challengeUserRepo, [
+        expiredActiveRelation('challenge-1'),
+      ]);
+      mockWorkoutQueries(workoutRepo, {});
+      challengeCycleDayRepo.find.mockResolvedValue([]);
+      challengeUserRepo.update.mockRejectedValue(new Error('db hiccup'));
+
+      await expect(service.getUserChallenges('user-1')).resolves.toBeDefined();
+    });
+  });
+
   describe('getUserChallenges (timezone-aware current_day)', () => {
     afterEach(() => {
       jest.useRealTimers();
@@ -1116,7 +1237,12 @@ describe('UsersService', () => {
 
       const result = await service.getUserChallenges('user-1');
 
-      expect(result.active[0]).toMatchObject({
+      // 2 days past its own duration — the auto-complete describe block
+      // below covers this exact scenario in depth; this one keeps checking
+      // what it always checked (current_day/is_rest_day capping), just from
+      // `completed` now instead of `active`, since being 2 days overdue is
+      // now correctly also enough to complete it.
+      expect(result.completed[0]).toMatchObject({
         current_day: 28,
         is_rest_day: false,
       });
