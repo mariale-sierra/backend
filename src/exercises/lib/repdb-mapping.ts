@@ -164,8 +164,65 @@ const BODYWEIGHT_CONDITIONING_NOT_DISTANCE_CARDIO = new Set([
   'mountain-climbers',
 ]);
 
+/**
+ * Real, confirmed data bug (2026-09-22, reported directly: "I do need there to be flexibility
+ * exercises because if not there is no point for the category"). All 76 of RepDB's
+ * `category: 'stretching'` exercises carry the EXACT same tags (`['mobility', 'stretching']`,
+ * verified against the vendored dataset directly — no exceptions, `yoga` is never used) — so the
+ * old `isMindBody = tags.includes('mobility') || tags.includes('yoga') || met < 3` heuristic
+ * routed every single one to `mind-body`; `flexibility` got zero exercises no matter how the
+ * threshold was tuned, because the input signal it read never varied.
+ *
+ * There IS a real split in the data, just not in the tags — in the exercise NAMES and
+ * descriptions. These 36 are plain, isolated, equipment/anatomy-targeted static stretches (a
+ * band, a bench, or bodyweight, aimed at one muscle group) — reviewed by hand, the same
+ * per-id-review approach as `exercise-metric-profiles.ts`. Every other `stretching` exercise
+ * (a named yoga asana — Downward Dog, Cobra, Triangle Pose, ... — or a Pilates-branded move) is
+ * NOT in this set and falls through to `mind-body` below, same as before.
+ */
+export const FLEXIBILITY_STRETCH_IDS = new Set([
+  'banded-adductor-stretch',
+  'banded-ankle-stretch',
+  'banded-calf-stretch',
+  'banded-chest-stretch',
+  'banded-figure-4-stretch',
+  'banded-hamstring-stretch',
+  'banded-it-band-stretch',
+  'banded-lat-stretch',
+  'banded-rear-delt-stretch',
+  'banded-shoulder-stretch',
+  'banded-triceps-stretch',
+  'bench-adductor-stretch',
+  'bench-ankle-stretch',
+  'bench-bulgarian-split-stretch',
+  'bench-calf-stretch',
+  'bench-chest-stretch',
+  'bench-couch-stretch',
+  'bench-figure-4-glute-stretch',
+  'bench-hamstring-stretch',
+  'bench-lat-stretch',
+  'butterfly-stretch',
+  'cat-stretch',
+  'cross-body-shoulder-stretch',
+  'doorway-chest-stretch',
+  'half-kneeling-hip-flexor-rock',
+  'knee-to-chest-stretch',
+  'kneeling-hip-flexor-stretch',
+  'kneeling-wrist-stretch',
+  'neck-side-stretch',
+  'overhead-triceps-stretch',
+  'pigeon-stretch',
+  'seated-straddle-stretch',
+  'standing-calf-stretch',
+  'standing-quad-stretch',
+  'standing-side-bend',
+  'standing-side-bend-flow',
+]);
+
 export function inferCategories(ex: RepDbExerciseForMapping): CategoryResult[] {
-  const tags = ex.tags ?? [];
+  // `tags` no longer read here — the stretching branch's flexibility/mind-body split
+  // moved to an explicit id list (`FLEXIBILITY_STRETCH_IDS`, see its own doc comment
+  // for why: every stretch in the dataset carries the exact same tags).
   const goals = ex.goals ?? [];
 
   if (ex.category === 'olympic') {
@@ -182,23 +239,30 @@ export function inferCategories(ex: RepDbExerciseForMapping): CategoryResult[] {
     return [{ code: 'functional', isPrimary: true, reason: 'plyometric' }];
   }
   if (ex.category === 'stretching') {
-    const isMindBody =
-      tags.some((t) => t === 'mobility' || t === 'yoga') || ex.met < 3;
+    // Real, confirmed bug (2026-09): havit.exercise_categories.code uses
+    // HYPHENS ('mind-body', 'cardio-intense', 'cardio-low' — verified
+    // live against GET /exercises/categories), not the underscored codes
+    // this function used to emit. The importer's own JOIN against
+    // exercise_categories.code matched zero rows for any of these three,
+    // so every RepDB-imported cardio/flexibility/mind-body exercise
+    // silently ended up with NO category at all (falling through to
+    // "strength"/"functional" only, or fully uncategorized) — confirmed
+    // live: 0 exercises in any of these 3 categories despite hundreds
+    // being tagged 'stretching'/'cardio' in the source dataset.
+    //
+    // Which of the two (2026-09-22): see `FLEXIBILITY_STRETCH_IDS`'s own doc
+    // comment — was tag/MET based (`isMindBody = tags.includes('mobility')
+    // || tags.includes('yoga') || met < 3`), which routed 100% of stretches
+    // to mind-body since the tags never varied. Now an explicit, reviewed id
+    // list.
+    const isFlexibility = FLEXIBILITY_STRETCH_IDS.has(ex.id);
     return [
       {
-        // Real, confirmed bug (2026-09): havit.exercise_categories.code uses
-        // HYPHENS ('mind-body', 'cardio-intense', 'cardio-low' — verified
-        // live against GET /exercises/categories), not the underscored codes
-        // this function used to emit. The importer's own JOIN against
-        // exercise_categories.code matched zero rows for any of these three,
-        // so every RepDB-imported cardio/flexibility/mind-body exercise
-        // silently ended up with NO category at all (falling through to
-        // "strength"/"functional" only, or fully uncategorized) — confirmed
-        // live: 0 exercises in any of these 3 categories despite hundreds
-        // being tagged 'stretching'/'cardio' in the source dataset.
-        code: isMindBody ? 'mind-body' : 'flexibility',
+        code: isFlexibility ? 'flexibility' : 'mind-body',
         isPrimary: true,
-        reason: isMindBody ? 'low-intensity/mobility stretching' : 'stretching',
+        reason: isFlexibility
+          ? 'isolated static stretch'
+          : 'yoga/pilates pose or practice',
       },
     ];
   }

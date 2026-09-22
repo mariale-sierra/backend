@@ -1,8 +1,11 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import {
   normalizeMuscleCodes,
   inferLocations,
   inferCategories,
   inferTrackingMode,
+  FLEXIBILITY_STRETCH_IDS,
   RepDbExerciseForMapping,
 } from './repdb-mapping';
 
@@ -142,30 +145,41 @@ describe('inferCategories', () => {
     ]);
   });
 
-  it('stretching + mobility tag -> mind-body', () => {
+  // Real, confirmed data bug, fixed 2026-09-22 ("I do need there to be flexibility
+  // exercises because if not there is no point for the category"): every one of the
+  // 76 real `stretching` exercises in the vendored dataset carries the EXACT same tags
+  // (`['mobility', 'stretching']`) — so the OLD tag/MET-based split below routed 100%
+  // of them to `mind-body` regardless of the actual exercise, no matter the threshold.
+  // Replaced with an explicit, reviewed id list (`FLEXIBILITY_STRETCH_IDS`) — these
+  // tests now cover THAT split, not a tag/MET rule (tags/met are irrelevant to this
+  // branch now). havit.exercise_categories.code uses hyphens ('mind-body'), not
+  // underscores — verified live against GET /exercises/categories; the old underscored
+  // code matched zero rows on insert, so every imported exercise meant for this
+  // category silently ended up with none at all (a separate, earlier bug fix).
+  it('a plain, isolated static stretch -> flexibility, regardless of tags/met', () => {
     const result = inferCategories(
-      baseExercise({ category: 'stretching', tags: ['mobility'] }),
-    );
-    // Real, confirmed bug fix (2026-09): havit.exercise_categories.code uses
-    // hyphens ('mind-body'), not underscores — verified live against
-    // GET /exercises/categories. The old underscored code matched zero rows
-    // on insert, so every imported exercise meant for this category silently
-    // ended up with none at all.
-    expect(result[0].code).toBe('mind-body');
-  });
-
-  it('stretching + low MET -> mind-body even without a mobility/yoga tag', () => {
-    const result = inferCategories(
-      baseExercise({ category: 'stretching', met: 2 }),
-    );
-    expect(result[0].code).toBe('mind-body');
-  });
-
-  it('stretching, no mobility signal -> flexibility', () => {
-    const result = inferCategories(
-      baseExercise({ category: 'stretching', met: 4 }),
+      baseExercise({
+        id: 'banded-hamstring-stretch',
+        category: 'stretching',
+        tags: ['mobility', 'stretching'],
+        met: 5,
+      }),
     );
     expect(result[0].code).toBe('flexibility');
+  });
+
+  it('a named yoga pose or Pilates move -> mind-body', () => {
+    const result = inferCategories(
+      baseExercise({ id: 'downward-dog', category: 'stretching', tags: ['mobility', 'stretching'] }),
+    );
+    expect(result[0].code).toBe('mind-body');
+  });
+
+  it('an unreviewed/unknown stretching id defaults to mind-body, not flexibility', () => {
+    const result = inferCategories(
+      baseExercise({ id: 'some-future-stretch', category: 'stretching', tags: ['mobility', 'stretching'] }),
+    );
+    expect(result[0].code).toBe('mind-body');
   });
 
   it('cardio + met>=7 -> cardio-intense', () => {
@@ -259,6 +273,61 @@ describe('inferCategories', () => {
     expect(result).toEqual([
       { code: 'strength', isPrimary: true, reason: 'strength' },
     ]);
+  });
+});
+
+// Every `stretching` exercise in the real vendored dataset, reviewed by hand and split into
+// `FLEXIBILITY_STRETCH_IDS` (isolated static stretches) vs. everything else (yoga/Pilates,
+// falls through to mind-body) — see that constant's own doc comment for why a per-id list was
+// needed instead of a general tag/MET rule. Guards against silent drift: a typo'd id here, or a
+// future dataset update adding a new stretch nobody has reviewed, both show up as a failure
+// instead of quietly mis-categorizing something.
+describe('FLEXIBILITY_STRETCH_IDS vs. the real vendored dataset', () => {
+  const DATABASE_DIR = join(__dirname, '..', '..', '..', 'database');
+  const dataset = JSON.parse(
+    readFileSync(
+      join(DATABASE_DIR, 'importers', 'repdb', 'dataset', 'exercises.json'),
+      'utf8',
+    ),
+  ) as { exercises: Array<{ id: string; category: string }> };
+  const realStretchIds = new Set(
+    dataset.exercises.filter((e) => e.category === 'stretching').map((e) => e.id),
+  );
+
+  it('has exactly 76 real stretching exercises to classify (catches a dataset update)', () => {
+    expect(realStretchIds.size).toBe(76);
+  });
+
+  it('every id in FLEXIBILITY_STRETCH_IDS is a real stretching exercise (no typos)', () => {
+    const bogus = [...FLEXIBILITY_STRETCH_IDS].filter((id) => !realStretchIds.has(id));
+    expect(bogus).toEqual([]);
+  });
+
+  it('is a real subset, not the whole category (mind-body still gets exercises)', () => {
+    expect(FLEXIBILITY_STRETCH_IDS.size).toBeGreaterThan(0);
+    expect(FLEXIBILITY_STRETCH_IDS.size).toBeLessThan(realStretchIds.size);
+  });
+
+  // Same "the migration and the TS table can't drift apart" guard the metric-profiles
+  // migration has — this one applies this same id list to the already-imported live
+  // catalog, so it has to list the exact same ids.
+  it("matches the id list in 2026-09-21-05's re-categorization migration exactly", () => {
+    const sql = readFileSync(
+      join(
+        DATABASE_DIR,
+        'migrations',
+        '2026-09-21-05-fix-flexibility-vs-mind-body-stretch-classification.sql',
+      ),
+      'utf8',
+    );
+    // Only the ids inside the `slug IN (...)` list — the file's header comment and
+    // its `code = 'flexibility'`/`code = 'mind-body'`/`source = 'repdb'` conditions
+    // also have quoted strings that aren't slugs.
+    const inClause = sql.slice(sql.indexOf('e.slug IN ('), sql.lastIndexOf(')'));
+    const idsInMigration = [...inClause.matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]);
+    expect(new Set(idsInMigration)).toEqual(FLEXIBILITY_STRETCH_IDS);
+    // Also catches an accidental duplicate slipping into either list.
+    expect(idsInMigration.length).toBe(FLEXIBILITY_STRETCH_IDS.size);
   });
 });
 
