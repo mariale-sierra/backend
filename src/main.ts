@@ -23,7 +23,7 @@ async function bootstrap() {
   app.enableCors({
     origin: corsOrigins && corsOrigins.length > 0 ? corsOrigins : true,
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'PUT', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Timezone'],
     // Without this, a browser-based caller (Swagger UI, a future web client)
     // can't read X-Next-Cursor via the fetch/XHR Headers API even though the
     // header is on the wire — CORS hides non-"simple" response headers from
