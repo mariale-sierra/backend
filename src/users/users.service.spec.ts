@@ -306,6 +306,31 @@ describe('UsersService', () => {
       expect(result.followers_count).toBe(4);
       expect(result.following_count).toBe(9);
     });
+
+    // Onboarding's practice-preference badges — see UpdateUserProfileDto's own
+    // doc comment for why these are plain strings, not validated against a
+    // backend table (the frontend's practiceOptions.ts owns the valid list).
+    it("should default practice_preferences to an empty array when the user has no profile row yet", async () => {
+      userRepo.findOne.mockResolvedValue(baseUser());
+      profileRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.getMyProfile('user-1');
+
+      expect(result.practice_preferences).toEqual([]);
+    });
+
+    it('should pass through a saved practice_preferences list', async () => {
+      userRepo.findOne.mockResolvedValue(baseUser());
+      profileRepo.findOne.mockResolvedValue({
+        user_id: 'user-1',
+        display_name: 'alice',
+        practice_preferences: ['Weightlifting', 'Yoga'],
+      });
+
+      const result = await service.getMyProfile('user-1');
+
+      expect(result.practice_preferences).toEqual(['Weightlifting', 'Yoga']);
+    });
   });
 
   describe('updateProfile', () => {
@@ -393,6 +418,39 @@ describe('UsersService', () => {
         NotFoundException,
       );
       expect(profileRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should persist a sent practice_preferences list', async () => {
+      userRepo.findOne.mockResolvedValue(baseUser());
+      profileRepo.findOne.mockResolvedValue({
+        user_id: 'user-1',
+        display_name: 'Alice',
+        practice_preferences: [],
+      });
+      profileRepo.save.mockImplementation((p: object) => Promise.resolve(p));
+
+      const result = await service.updateProfile('user-1', {
+        practice_preferences: ['Boxing', 'Pilates'],
+      });
+
+      expect(profileRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ practice_preferences: ['Boxing', 'Pilates'] }),
+      );
+      expect(result.practice_preferences).toEqual(['Boxing', 'Pilates']);
+    });
+
+    it('should leave an existing practice_preferences list alone when the request omits it', async () => {
+      userRepo.findOne.mockResolvedValue(baseUser());
+      profileRepo.findOne.mockResolvedValue({
+        user_id: 'user-1',
+        display_name: 'Alice',
+        practice_preferences: ['Running'],
+      });
+      profileRepo.save.mockImplementation((p: object) => Promise.resolve(p));
+
+      const result = await service.updateProfile('user-1', { bio: 'hi' });
+
+      expect(result.practice_preferences).toEqual(['Running']);
     });
   });
 
@@ -545,6 +603,36 @@ describe('UsersService', () => {
       // Photo and display name stay visible even on private profiles.
       expect(result.display_name).toBe('Bob');
       expect(result.profile_image_url).toBe('https://cdn.example.com/b.jpg');
+    });
+
+    // Practice badges are an identity signal like display_name/photo, not
+    // activity data like bio/streak_days — never withheld, even from a
+    // stranger who can't see into a private profile at all.
+    it('should show practice_preferences even on a private profile, for a stranger', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'user-2', username: 'bob' });
+      profileRepo.findOne.mockResolvedValue({
+        user_id: 'user-2',
+        display_name: 'Bob',
+        is_private: true,
+        practice_preferences: ['Boxing', 'Running'],
+      });
+
+      const result = await service.getPublicProfile('user-2', 'user-1');
+
+      expect(result.practice_preferences).toEqual(['Boxing', 'Running']);
+    });
+
+    it('should default practice_preferences to an empty array, never undefined', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'user-2', username: 'bob' });
+      profileRepo.findOne.mockResolvedValue({
+        user_id: 'user-2',
+        display_name: 'Bob',
+        is_private: false,
+      });
+
+      const result = await service.getPublicProfile('user-2', 'user-1');
+
+      expect(result.practice_preferences).toEqual([]);
     });
 
     it('should reveal the bio of a private profile to the owner viewing it through the public endpoint', async () => {

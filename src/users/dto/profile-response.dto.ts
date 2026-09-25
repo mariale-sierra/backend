@@ -43,6 +43,14 @@ export class ProfileResponseDto {
   })
   streak_days!: number;
 
+  @ApiProperty({
+    type: [String],
+    description:
+      'Self-reported sport/fitness practices (badges on the profile screen). Never privacy-gated — same visibility as display_name/counts, not bio/streak_days.',
+    example: ['Weightlifting', 'Yoga'],
+  })
+  practice_preferences!: string[];
+
   static build(
     user: User,
     profile: UserProfile | null,
@@ -64,6 +72,7 @@ export class ProfileResponseDto {
     dto.followers_count = counts.followersCount;
     dto.following_count = counts.followingCount;
     dto.streak_days = streakDays;
+    dto.practice_preferences = profile?.practice_preferences ?? [];
     return dto;
   }
 }
@@ -110,6 +119,14 @@ export class PublicProfileResponseDto {
   })
   streak_days?: number;
 
+  @ApiProperty({
+    type: [String],
+    description:
+      'Self-reported sport/fitness practices (badges on the profile screen). Never privacy-gated, same as display_name/counts — visible even for a private profile a stranger cannot otherwise see into.',
+    example: ['Weightlifting', 'Yoga'],
+  })
+  practice_preferences!: string[];
+
   /**
    * @param viewer Defaults to "a stranger" (not the owner, not a follower)
    * for call sites that don't pass it. `searchUsers` used to be one of
@@ -154,6 +171,7 @@ export class PublicProfileResponseDto {
     if (canSeeFullProfile && streakDays !== undefined) {
       dto.streak_days = streakDays;
     }
+    dto.practice_preferences = profile?.practice_preferences ?? [];
     return dto;
   }
 }

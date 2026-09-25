@@ -1,5 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsOptional,
@@ -59,6 +61,24 @@ export class UpdateUserProfileDto {
   @IsOptional()
   @IsBoolean({ message: 'is_private must be a boolean' })
   is_private?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Prácticas/deportes que el usuario dice practicar (máx. 6) — se muestran como badges de color en el perfil. Los valores válidos los define el frontend (constants/practiceOptions.ts), igual que las categorías/ubicaciones de challenges — no se validan contra una tabla aquí, sólo forma/tamaño.',
+    example: ['Weightlifting', 'Yoga'],
+    maxItems: 6,
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(6, {
+    message: 'practice_preferences can have at most 6 entries',
+  })
+  @IsString({ each: true })
+  @MaxLength(50, {
+    each: true,
+    message: 'each practice_preferences entry must be at most 50 characters',
+  })
+  practice_preferences?: string[];
 }
 
 export class UpdateProfilePhotoDto {

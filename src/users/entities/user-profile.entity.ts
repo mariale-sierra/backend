@@ -24,4 +24,15 @@ export class UserProfile {
 
   @Column({ default: false })
   is_private!: boolean;
+
+  /** Self-reported sport/fitness practices (e.g. "Weightlifting", "Yoga") —
+   * shown as colored badges on the profile screen. A plain Postgres text
+   * array, not a join table: same "small, frontend-owned reference list"
+   * pattern challenge categories/locations already use
+   * (`constants/challengeCreateOptions.ts` on the frontend) — the valid
+   * codes/labels/colors live in the frontend's own `practiceOptions.ts`,
+   * not a backend table, so this column just stores whatever short strings
+   * the client sends (capped at 6, see `UpdateUserProfileDto`). */
+  @Column({ type: 'text', array: true, default: () => "'{}'" })
+  practice_preferences!: string[];
 }

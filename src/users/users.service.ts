@@ -139,6 +139,7 @@ export class UsersService {
         display_name: user.username,
         preferred_language: 'en',
         is_private: false,
+        practice_preferences: [],
       });
     }
 
@@ -155,6 +156,9 @@ export class UsersService {
     }
     if (dto.is_private !== undefined) {
       profile.is_private = dto.is_private;
+    }
+    if (dto.practice_preferences !== undefined) {
+      profile.practice_preferences = dto.practice_preferences;
     }
 
     await this.profileRepo.save(profile);
@@ -189,6 +193,7 @@ export class UsersService {
         display_name: user.username,
         preferred_language: 'en',
         is_private: false,
+        practice_preferences: [],
       });
     }
 
