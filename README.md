@@ -116,6 +116,16 @@ GET  /challenges/progress
 POST /workout-posts
 ```
 
+### 🚩 Reportes y moderación manual
+
+```http
+POST  /reports                 # reportar un post o comentario (autenticado)
+GET   /reports/pending         # cola de reportes pendientes (solo admin)
+PATCH /reports/:id/resolve     # dismiss | hide (+ penalize) (solo admin)
+```
+
+Detalle en [`docs/moderacion-manual.md`](docs/moderacion-manual.md).
+
 ---
 
 ## 🧠 Flujo principal
@@ -158,6 +168,8 @@ Authorization: Bearer <TOKEN>
 - Solo se permite **un registro por día** por challenge
 - El progreso se calcula dinámicamente según workouts completados
 - Las imágenes se manejan como URLs (integración con Cloudflare R2 pendiente)
+- El contenido ocultado por un admin (`is_hidden`) no aparece en feed, galerías, perfil, mosaico ni comentarios
+- Un mismo post/comentario genera como máximo **un strike** al autor, aunque tenga varios reportes o se reintente la resolución
 
 ---
 
