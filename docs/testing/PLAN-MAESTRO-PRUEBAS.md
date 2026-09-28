@@ -190,6 +190,8 @@ Justificación: nuevo alcance sobre el módulo existente `src/workout-posts/`, s
 
 **Decisión de modelo de datos (sin ambigüedad — ver el CLAUDE.md del proyecto y el propio init-schema):** un solo tipo de reacción (`like`), una reacción por usuario por post (enforced por la PK compuesta `(workout_post_id, user_id)`), comentarios planos (sin respuestas anidadas), y cada usuario solo puede eliminar su propia reacción/comentario (`assertOwnership()`, mismo helper que ya usa `spaces.service.ts`).
 
+> **Actualizado en Sprint 8 (B3):** esta decisión quedó superada. Los comentarios ahora se moderan de forma síncrona antes de guardarse con `ModerationService.assertTextAllowed()` (ver CP-67 y [`docs/moderacion-automatica.md`](../moderacion-automatica.md)). Chats y spaces siguen sin moderación, a propósito. El texto original se conserva abajo como historial.
+
 **Decisión sobre moderación de comentarios (gap identificado, no resuelto — mismo patrón que Chats/Spaces documentaron para sus propios mensajes):** `ModerationService.validateWorkoutImage()` (`src/openai/moderation.service.ts`) requiere un `imageUrl` obligatorio — fue construido específicamente para moderar la imagen de un `workout_post`, no existe ningún contrato de moderación de solo-texto en este repositorio. La Moderation API que construye Esteban (Bloque 4) tampoco existe todavía aquí (mismo hallazgo ya registrado en la sección de Chats, arriba). Crear un comentario (`WorkoutPostCommentsService.create()`) deliberadamente NO llama a ningún servicio de moderación — documentado directamente como comentario sobre el método, mismo punto de integración que `ChatsService.sendMessage()`/`SpacesService.sendMessage()` ya dejaron marcado para cuando ese contrato exista.
 
 | ID | Funcionalidad | Tipo | Prueba | Condiciones/Entrada | Resultado esperado | Prioridad | Cobertura automatizada | Estado |
@@ -223,7 +225,7 @@ Justificación: nuevo alcance sobre el módulo existente `src/workout-posts/`, s
 - Cualquier prueba de integración/sistema end-to-end (`POST /workout-posts/:postId/reactions`, `POST .../comments`, etc. contra un servidor real) — mismo gap ya documentado para CP-16/CP-17/Chats/Spaces.
 
 **Riesgos y decisiones explícitamente NO tomadas en este cierre:**
-- **Moderación de comentarios**: ver la decisión documentada arriba — no hay contrato de moderación de solo-texto disponible; crear un comentario nunca llama a `ModerationService`. Punto de integración documentado directamente sobre `WorkoutPostCommentsService.create()`.
+- **Moderación de comentarios**: ~~no hay contrato de moderación de solo-texto disponible~~. **Resuelto en Sprint 8 (B3)**, ver CP-67.
 - **Visibilidad `'followers'` en reacciones/comentarios**: el gate de acceso implementado (`assertPostVisibleToUser`) solo bloquea reaccionar/comentar en un post `'private'` ajeno — no replica la regla completa de "solo seguidores activos" que sí aplica a la lectura de posts (`getUserPosts`/B3). Decisión deliberada para no tener que inyectar `FollowsService` en dos servicios nuevos por una brecha más angosta (un no-seguidor podría reaccionar/comentar un post `'followers'`) que el caso `'private'`, que es inequívocamente incorrecto sin importar la relación de follow. Documentado como limitación conocida, no como bug.
 - **Comentarios anidados/respuestas**: fuera de alcance — el modelo es plano por decisión explícita (ver arriba), consistente con "usar el modelo más simple" cuando no hay una decisión de equipo distinta.
 
@@ -246,6 +248,34 @@ Justificación: reporte de usuario probando la app localmente — una foto subid
 | Lint dirigido | `eslint` sobre los archivos modificados | `npx eslint src/workout-posts/workout-posts.service.ts src/workout-posts/feed.controller.ts src/workout-posts/workout-posts.service.spec.ts` | Sin errores nuevos (1 error preexistente en `workout-posts.service.spec.ts`, ya documentado arriba, no tocado por este fix) | Aprobado | — |
 
 **No ejecutado en esta sesión:** ninguna prueba de integración/sistema contra la base real de Azure (mismo gap ya documentado en el resto de este documento); el índice usado por el `EXISTS` sobre `user_follows` (`PRIMARY KEY (follower_user_id, followed_user_id)`) ya existía desde `database/init/2026-07-07-00-init-schema.sql`, sin necesidad de migración nueva.
+
+---
+
+### Casos agregados — Sprint 8, Bloque 3: Moderación automática de texto (CP-65 a CP-70)
+
+Justificación: B3 agrega moderación **automática, síncrona y preventiva** (antes de guardar) de texto público y persistente, reutilizando `ModerationService` (`omni-moderation-latest`) mediante un método hermano de `validateWorkoutImage()`: `validateText()` y `assertTextAllowed()`. Detalle de dónde se aplica, las decisiones (síncrono, fail-closed) y lo que queda fuera (chats y spaces a propósito): [`docs/moderacion-automatica.md`](../moderacion-automatica.md). No modifica el modelo de reportes y penalizaciones de B2.
+
+| ID | Funcionalidad | Tipo | Prueba | Condiciones/Entrada | Resultado esperado | Prioridad | Cobertura automatizada | Estado |
+|---|---|---|---|---|---|---|---|---|
+| CP-65 | Challenges | Funcional | Crear challenge con texto aceptado/rechazado | `name`/`description`/`instructions` | Una sola llamada de moderación con los 3 campos, **antes** de abrir la transacción. Si se marca: `400` `code: CONTENT_REJECTED` y nunca se abre la transacción. Si OpenAI falla: `503` y no se guarda nada | Alta | `challenges.service.spec.ts` → describe *"create — text moderation (B3)"* (3 tests) | Ejecutado — Aprobado |
+| CP-66 | Challenges | Funcional | Editar challenge | `PATCH /challenges/:id` parcial | Solo se moderan los campos de texto presentes. Si se marca: `400` y no hay `save`. Un no-dueño recibe `403` **sin** gastar llamada de moderación | Alta | `challenges.service.spec.ts` → describe `update` (3 tests nuevos) | Ejecutado — Aprobado |
+| CP-67 | Comentarios | Funcional | Comentar con texto aceptado/rechazado | `POST /workout-posts/:postId/comments` | Se modera después de 404/403/`is_hidden` (esos casos no llaman a moderación) y antes de `save`. Si se marca: `400 CONTENT_REJECTED`, no se crea ni se guarda. Si OpenAI falla: `503`, no se guarda | Alta | `workout-post-comments.service.spec.ts` → describe `create` (2 tests nuevos + 3 existentes ampliados) | Ejecutado — Aprobado |
+| CP-68 | Perfil | Funcional | Editar bio | `PATCH /users/me/profile` | Una bio no vacía se modera antes de escribir el perfil. Si se marca: `400`, no se guarda **ningún** campo. Si OpenAI falla: `503`. Sin bio o con bio vacía (la borra): no se llama a moderación | Alta | `users.service.spec.ts` → describe `updateProfile` (4 tests nuevos) | Ejecutado — Aprobado |
+| CP-69 | Moderación | Funcional | Contrato de `validateText`/`assertTextAllowed` | Textos vacíos, uno o varios textos, marcados o no, error de API, sin API key | Vacíos: no llama a la API. Varios textos: una llamada `input: string[]` con `omni-moderation-latest`, marcado si cualquiera lo está, categorías sin duplicados. Error de API: `503`. Sin key: `500`. Marcado: `400 { message, error, code: 'CONTENT_REJECTED' }`. `validateWorkoutImage` sin cambios | Alta | `moderation.service.spec.ts` (10 tests, nuevo) | Ejecutado — Aprobado |
+| CP-70 | Posts | Funcional | Sin moderación duplicada del caption | Crear post con foto + caption | `WorkoutPostsService.create()` no llama a la moderación de texto: el caption se sigue moderando junto con la foto en el batch (`validateWorkoutImage`) | Media | `workout-posts.service.spec.ts` → *"create — no duplicated caption moderation (B3)"* | Ejecutado — Aprobado |
+
+**Limitación documentada (no es un caso de prueba):** "post de solo texto / día de descanso". En `development`, `rest-day.tsx` no envía texto, `WorkoutLogService.createWorkout()` no crea post en días de descanso y `workout_posts.image_url` es `NOT NULL`, así que hoy **no hay texto persistido que moderar**. No se tocó la lógica de B5 ni se crearon migraciones. Ver `docs/moderacion-automatica.md`.
+
+**Resultados de ejecución (Sprint 8 — B3):**
+
+| Casos | Comando | Resultado | Estado |
+|---|---|---|---|
+| CP-65 – CP-70 | `npx jest src/openai src/challenges src/users src/workout-posts` | Todos los tests nuevos y modificados de B3 pasan | Aprobado |
+| Suite completa | `npm test` | 39 suites, 700 tests: **698 pasan, 2 fallan**. Las 2 fallas son **preexistentes** y ajenas a B3 (`workout-posts.service.spec.ts`: *"…while the moderation gate is disabled"*). Esos tests asumen `MODERATION_GATE_ENABLED = false`, pero el gate ya se reactivó (`true`), así que fallan igual en `development` sin los cambios de B3 | Aprobado con observación |
+| Lint | `eslint` sin `--fix` sobre `src` y `test` | Sin errores nuevos: 101 errores / 39 warnings, frente a 104 / 38 de base. El warning nuevo es un `{} as any` en `workout-post-reports.service.spec.ts`, mismo patrón que las líneas vecinas | Aprobado |
+| Build | `npm run build` | Sin errores | Aprobado |
+
+**No ejecutado en esta sesión:** llamadas reales a OpenAI con textos aceptados y rechazados. Desde el entorno de desarrollo no había salida de red a `api.openai.com`. Se verifican manualmente con el snippet de PowerShell del documento del sprint o probando la app contra el backend desplegado.
 
 ---
 

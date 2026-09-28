@@ -15,6 +15,8 @@ export enum ErrorCode {
   NOT_FOUND = 'NOT_FOUND',
   VALIDATION_ERROR = 'VALIDATION_ERROR',
   INTERNAL = 'INTERNAL',
+  /** B3: user text rejected by automatic moderation (ModerationService). */
+  CONTENT_REJECTED = 'CONTENT_REJECTED',
 }
 
 /**

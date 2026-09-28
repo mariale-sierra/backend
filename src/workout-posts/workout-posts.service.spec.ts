@@ -41,7 +41,11 @@ describe('WorkoutPostsService', () => {
     getReactedPostIds: jest.Mock;
   };
   let commentsService: { getCountsForPosts: jest.Mock };
-  let moderationService: { validateWorkoutImage: jest.Mock };
+  let moderationService: {
+    validateWorkoutImage: jest.Mock;
+    validateText: jest.Mock;
+    assertTextAllowed: jest.Mock;
+  };
 
   const VIEWER_ID = 'viewer-1';
   const OTHER_USER_ID = 'other-2';
@@ -64,7 +68,11 @@ describe('WorkoutPostsService', () => {
     commentsService = {
       getCountsForPosts: jest.fn().mockResolvedValue(new Map()),
     };
-    moderationService = { validateWorkoutImage: jest.fn() };
+    moderationService = {
+      validateWorkoutImage: jest.fn(),
+      validateText: jest.fn(),
+      assertTextAllowed: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -144,6 +152,27 @@ describe('WorkoutPostsService', () => {
           ),
         }),
       );
+    });
+  });
+
+  // B3 (CP-70): the caption of a photo post is already moderated together
+  // with the image by the async batch (validateWorkoutImage) — create() must
+  // not also run the synchronous text moderation on it.
+  describe('create — no duplicated caption moderation (B3)', () => {
+    it('should never call the text moderation when creating a photo post with a caption', async () => {
+      postRepo.create.mockReturnValue({});
+      postRepo.save.mockImplementation((post: WorkoutPost) =>
+        Promise.resolve(post),
+      );
+
+      await service.create({
+        user_id: 'author-1',
+        image_url: 'https://example.com/a.jpg',
+        caption: 'día 3',
+      });
+
+      expect(moderationService.validateText).not.toHaveBeenCalled();
+      expect(moderationService.assertTextAllowed).not.toHaveBeenCalled();
     });
   });
 

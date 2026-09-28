@@ -1,9 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { WorkoutPostCommentsService } from './workout-post-comments.service';
 import { WorkoutPostComment } from './entities/workout-post-comment.entity';
 import { WorkoutPost } from './entities/workout-post.entity';
+import { ModerationService } from '../openai/moderation.service';
 
 const createMockCommentRepo = () => ({
   create: jest.fn((data: Record<string, unknown>) => data),
@@ -18,6 +24,7 @@ const createMockPostRepo = () => ({
 
 describe('WorkoutPostCommentsService', () => {
   let service: WorkoutPostCommentsService;
+  let moderationService: { assertTextAllowed: jest.Mock };
   let commentRepo: ReturnType<typeof createMockCommentRepo>;
   let postRepo: ReturnType<typeof createMockPostRepo>;
 
@@ -33,9 +40,14 @@ describe('WorkoutPostCommentsService', () => {
     commentRepo = createMockCommentRepo();
     postRepo = createMockPostRepo();
 
+    moderationService = {
+      assertTextAllowed: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WorkoutPostCommentsService,
+        { provide: ModerationService, useValue: moderationService },
         {
           provide: getRepositoryToken(WorkoutPostComment),
           useValue: commentRepo,
@@ -55,6 +67,7 @@ describe('WorkoutPostCommentsService', () => {
         NotFoundException,
       );
       expect(commentRepo.save).not.toHaveBeenCalled();
+      expect(moderationService.assertTextAllowed).not.toHaveBeenCalled();
     });
 
     it('should throw ForbiddenException when the post is private and the user is not its owner', async () => {
@@ -64,6 +77,7 @@ describe('WorkoutPostCommentsService', () => {
         ForbiddenException,
       );
       expect(commentRepo.save).not.toHaveBeenCalled();
+      expect(moderationService.assertTextAllowed).not.toHaveBeenCalled();
     });
 
     it('should persist the comment and return it with the author populated', async () => {
@@ -84,6 +98,9 @@ describe('WorkoutPostCommentsService', () => {
 
       const result = await service.create(POST_ID, USER_ID, 'Nice work!');
 
+      expect(moderationService.assertTextAllowed).toHaveBeenCalledWith(
+        'Nice work!',
+      );
       expect(commentRepo.save).toHaveBeenCalledWith({
         workout_post_id: POST_ID,
         user_id: USER_ID,
@@ -101,6 +118,35 @@ describe('WorkoutPostCommentsService', () => {
         content: 'Nice work!',
         createdAt: new Date('2026-09-08T10:00:00.000Z'),
       });
+    });
+    // B3 — moderación automática de texto (CP-67)
+    it('should reject a flagged comment with 400 CONTENT_REJECTED and never save it', async () => {
+      postRepo.findOne.mockResolvedValue(publicPost);
+      moderationService.assertTextAllowed.mockRejectedValue(
+        new BadRequestException({
+          message: 'Tu contenido no cumple con las normas de la comunidad',
+          error: 'Bad Request',
+          code: 'CONTENT_REJECTED',
+        }),
+      );
+
+      await expect(
+        service.create(POST_ID, USER_ID, 'texto ofensivo'),
+      ).rejects.toThrow(BadRequestException);
+      expect(commentRepo.create).not.toHaveBeenCalled();
+      expect(commentRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should not save the comment when moderation is unavailable (fail-closed 503)', async () => {
+      postRepo.findOne.mockResolvedValue(publicPost);
+      moderationService.assertTextAllowed.mockRejectedValue(
+        new ServiceUnavailableException(),
+      );
+
+      await expect(service.create(POST_ID, USER_ID, 'hola')).rejects.toThrow(
+        ServiceUnavailableException,
+      );
+      expect(commentRepo.save).not.toHaveBeenCalled();
     });
   });
 

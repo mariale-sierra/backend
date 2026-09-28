@@ -53,7 +53,17 @@ export class ChallengesController {
     description: 'Crea un nuevo desafío para que otros usuarios se unan',
   })
   @ApiResponse({ status: 201, description: 'Desafío creado exitosamente' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Datos inválidos, o Contenido rechazado por la moderación automática (code: CONTENT_REJECTED) en name/description/instructions',
+  })
   @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'No se pudo validar el contenido con el servicio de moderación; no se guardó nada',
+  })
   create(@Body() dto: CreateChallengeDto, @Req() req) {
     return this.challengesService.create(dto, req.user.sub);
   }
@@ -367,6 +377,16 @@ export class ChallengesController {
     description: 'No eres el creador de este desafío',
   })
   @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Contenido rechazado por la moderación automática (code: CONTENT_REJECTED) en name/description/instructions',
+  })
+  @ApiResponse({
+    status: 503,
+    description:
+      'No se pudo validar el contenido con el servicio de moderación; no se guardó nada',
+  })
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateChallengeDto: UpdateChallengeDto,

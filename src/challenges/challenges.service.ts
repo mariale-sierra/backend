@@ -46,6 +46,7 @@ import {
   categoryNameToActivityType,
 } from './activity-type.util';
 import { assertOwnership } from '../auth/utils/assert-ownership';
+import { ModerationService } from '../openai/moderation.service';
 
 @Injectable()
 export class ChallengesService {
@@ -75,6 +76,7 @@ export class ChallengesService {
     private exerciseLocationRepo: Repository<ExerciseLocation>,
     @InjectRepository(ChallengeJoinRequest)
     private challengeJoinRequestRepo: Repository<ChallengeJoinRequest>,
+    private moderationService: ModerationService,
   ) {}
 
   async create(createChallengeDto: CreateChallengeDto, userId: string) {
@@ -87,6 +89,14 @@ export class ChallengesService {
 
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
+
+    // B3: moderate the public text fields synchronously, before opening the
+    // transaction (so no DB connection is held while waiting on OpenAI).
+    await this.moderationService.assertTextAllowed([
+      createChallengeDto.name,
+      createChallengeDto.description,
+      createChallengeDto.instructions,
+    ]);
 
     const { categories, locations, cycle_days, ...challengeFields } =
       createChallengeDto;
@@ -783,6 +793,14 @@ export class ChallengesService {
     const challenge = await this.challengeRepo.findOne({ where: { id } });
     if (!challenge) throw new NotFoundException('Challenge not found');
     assertOwnership(challenge.created_by_user_id, userId);
+
+    // B3: only the text fields actually present in this partial update are
+    // moderated (validateText skips undefined/empty entries).
+    await this.moderationService.assertTextAllowed([
+      updateChallengeDto.name,
+      updateChallengeDto.description,
+      updateChallengeDto.instructions,
+    ]);
 
     Object.assign(challenge, updateChallengeDto);
     const updated = await this.challengeRepo.save(challenge);

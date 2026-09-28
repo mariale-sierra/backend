@@ -5,8 +5,10 @@ import {
   ConflictException,
   ForbiddenException,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { Between, DataSource } from 'typeorm';
+import { ModerationService } from '../openai/moderation.service';
 import { ChallengesService } from './challenges.service';
 import { Challenge } from './entities/challenge.entity';
 import { User } from '../users/entities/user.entity';
@@ -20,7 +22,10 @@ import { ExerciseCategory } from '../exercises/entities/exercise-category.entity
 import { ExerciseLocation } from '../exercises/entities/exercise-location.entity';
 import { ChallengeJoinRequest } from './entities/challenge-join-request.entity';
 import { getDominantActivityCategories } from './dominant-activity-category.util';
-import { CreateChallengeDto } from './dto/create-challenge.dto';
+import {
+  ChallengeVisibility,
+  CreateChallengeDto,
+} from './dto/create-challenge.dto';
 
 // findAll()/findOne() delegate the dominant-category computation entirely to
 // this util — its own SQL/tie-break logic is covered by
@@ -66,6 +71,7 @@ describe('ChallengesService', () => {
   let workoutRepo: MockRepo;
   let challengeJoinRequestRepo: MockRepo;
   let dataSource: { transaction: jest.Mock };
+  let moderationService: { assertTextAllowed: jest.Mock };
 
   const OWNER_ID = 'owner-1';
   const OTHER_USER_ID = 'other-2';
@@ -97,6 +103,10 @@ describe('ChallengesService', () => {
     challengeLocationMapRepo.find.mockResolvedValue([]);
     mockGetDominantActivityCategories.mockReset().mockResolvedValue(new Map());
     dataSource = { transaction: jest.fn() };
+    // B3: text passes moderation unless a test says otherwise.
+    moderationService = {
+      assertTextAllowed: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -134,6 +144,7 @@ describe('ChallengesService', () => {
           useValue: challengeJoinRequestRepo,
         },
         { provide: DataSource, useValue: dataSource },
+        { provide: ModerationService, useValue: moderationService },
       ],
     }).compile();
 
@@ -171,6 +182,112 @@ describe('ChallengesService', () => {
       await expect(
         service.update('missing-id', { name: 'x' } as any, OWNER_ID),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    // B3 — moderación automática de texto (CP-66)
+    it('should moderate only the text fields present in the partial update', async () => {
+      const challenge = baseChallenge();
+      challengeRepo.findOne.mockResolvedValue(challenge);
+      challengeRepo.save.mockResolvedValue(challenge);
+
+      await service.update(
+        CHALLENGE_ID,
+        { description: 'Nueva descripción', duration_days: 20 },
+        OWNER_ID,
+      );
+
+      expect(moderationService.assertTextAllowed).toHaveBeenCalledWith([
+        undefined,
+        'Nueva descripción',
+        undefined,
+      ]);
+    });
+
+    it('should reject a flagged update with 400 CONTENT_REJECTED and not save it', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      moderationService.assertTextAllowed.mockRejectedValue(
+        new BadRequestException({
+          message: 'Tu contenido no cumple con las normas de la comunidad',
+          error: 'Bad Request',
+          code: 'CONTENT_REJECTED',
+        }),
+      );
+
+      await expect(
+        service.update(
+          CHALLENGE_ID,
+          { instructions: 'texto ofensivo' },
+          OWNER_ID,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(challengeRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should check ownership before spending a moderation call', async () => {
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+
+      await expect(
+        service.update(CHALLENGE_ID, { name: 'x' }, OTHER_USER_ID),
+      ).rejects.toThrow(ForbiddenException);
+      expect(moderationService.assertTextAllowed).not.toHaveBeenCalled();
+    });
+  });
+
+  // B3 — moderación automática de texto al crear (CP-65)
+  describe('create — text moderation (B3)', () => {
+    const dto: CreateChallengeDto = {
+      name: 'Reto 30 días',
+      description: 'Descripción',
+      instructions: 'Instrucciones',
+      visibility: ChallengeVisibility.PUBLIC,
+      duration_days: 30,
+      cycle_length_days: 7,
+    };
+
+    it('should moderate name, description and instructions in one call before opening the transaction', async () => {
+      userRepo.findOne.mockResolvedValue({ id: OWNER_ID });
+      dataSource.transaction.mockResolvedValue({ id: CHALLENGE_ID });
+      challengeRepo.findOne.mockResolvedValue(null);
+
+      await service.create(dto, OWNER_ID).catch(() => undefined);
+
+      expect(moderationService.assertTextAllowed).toHaveBeenCalledTimes(1);
+      expect(moderationService.assertTextAllowed).toHaveBeenCalledWith([
+        'Reto 30 días',
+        'Descripción',
+        'Instrucciones',
+      ]);
+      expect(
+        moderationService.assertTextAllowed.mock.invocationCallOrder[0],
+      ).toBeLessThan(dataSource.transaction.mock.invocationCallOrder[0]);
+    });
+
+    it('should reject flagged content with 400 and never open the transaction', async () => {
+      userRepo.findOne.mockResolvedValue({ id: OWNER_ID });
+      moderationService.assertTextAllowed.mockRejectedValue(
+        new BadRequestException({
+          message: 'Tu contenido no cumple con las normas de la comunidad',
+          error: 'Bad Request',
+          code: 'CONTENT_REJECTED',
+        }),
+      );
+
+      await expect(service.create(dto, OWNER_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('should fail closed (503) without saving when moderation is unavailable', async () => {
+      userRepo.findOne.mockResolvedValue({ id: OWNER_ID });
+      moderationService.assertTextAllowed.mockRejectedValue(
+        new ServiceUnavailableException(),
+      );
+
+      await expect(service.create(dto, OWNER_ID)).rejects.toThrow(
+        ServiceUnavailableException,
+      );
+      expect(dataSource.transaction).not.toHaveBeenCalled();
     });
   });
 

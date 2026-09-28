@@ -101,9 +101,14 @@ export class UsersController {
   @ApiResponse({
     status: 400,
     description:
-      'Campos inválidos (longitud, idioma no soportado, campos no permitidos)',
+      'Campos inválidos (longitud, idioma no soportado, campos no permitidos), o bio rechazada por la moderación automática (code: CONTENT_REJECTED)',
   })
   @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'No se pudo validar el contenido con el servicio de moderación; no se guardó nada',
+  })
   updateMyProfile(
     @Body() dto: UpdateUserProfileDto,
     @CurrentUser() user: AuthenticatedUser,

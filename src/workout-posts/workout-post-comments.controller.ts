@@ -10,12 +10,14 @@ import {
   Query,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiServiceUnavailableResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { WorkoutPostCommentsService } from './workout-post-comments.service';
@@ -38,6 +40,14 @@ export class WorkoutPostCommentsController {
   })
   @ApiOkResponse({ description: 'Comentario creado' })
   @ApiNotFoundResponse({ description: 'Publicación no encontrada' })
+  @ApiBadRequestResponse({
+    description:
+      'Contenido inválido, o Contenido rechazado por la moderación automática (code: CONTENT_REJECTED)',
+  })
+  @ApiServiceUnavailableResponse({
+    description:
+      'No se pudo validar el contenido con el servicio de moderación; no se guardó nada',
+  })
   create(
     @Param('postId', new ParseUUIDPipe()) postId: string,
     @Body() dto: CreateCommentDto,

@@ -411,6 +411,7 @@ describe('WorkoutPostReportsService', () => {
       const commentsService = new WorkoutPostCommentsService(
         {} as any,
         h.postRepo as any,
+        {} as any, // ModerationService (B3) — unused by list()
       );
       await expect(commentsService.list(POST_ID, REPORTER, {})).rejects.toThrow(
         NotFoundException,

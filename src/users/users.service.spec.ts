@@ -1,6 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { UsersService } from './users.service';
 import { User } from './entities/user.entity';
 import { UserProfile } from './entities/user-profile.entity';
@@ -10,6 +14,7 @@ import { ChallengeCategoryMap } from '../challenges/entities/challenge-category-
 import { ChallengeLocationMap } from '../challenges/entities/challenge-location-map.entity';
 import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
 import { FollowsService } from '../follows/follows.service';
+import { ModerationService } from '../openai/moderation.service';
 import { getDominantActivityCategories } from '../challenges/dominant-activity-category.util';
 import {
   getCurrentStreakDays,
@@ -114,6 +119,7 @@ describe('UsersService', () => {
     getFollowingCountsForUsers: jest.Mock;
     getFollowedUserIdsForViewer: jest.Mock;
   };
+  let moderationService: { assertTextAllowed: jest.Mock };
 
   const baseUser = () => ({
     id: 'user-1',
@@ -152,6 +158,11 @@ describe('UsersService', () => {
       getFollowedUserIdsForViewer: jest.fn().mockResolvedValue(new Set()),
     };
 
+    // B3: text passes moderation unless a test says otherwise.
+    moderationService = {
+      assertTextAllowed: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UsersService,
@@ -175,6 +186,7 @@ describe('UsersService', () => {
           useValue: challengeCycleDayRepo,
         },
         { provide: FollowsService, useValue: followsService },
+        { provide: ModerationService, useValue: moderationService },
       ],
     }).compile();
 
@@ -392,6 +404,71 @@ describe('UsersService', () => {
         expect.objectContaining({ bio: null }),
       );
       expect(result.bio).toBeNull();
+    });
+
+    // B3 — moderación automática de texto (CP-68)
+    it('should moderate a non-empty bio before saving', async () => {
+      userRepo.findOne.mockResolvedValue(baseUser());
+      profileRepo.findOne.mockResolvedValue(null);
+      profileRepo.create.mockImplementation((data: object) => ({ ...data }));
+      profileRepo.save.mockImplementation((p: object) => Promise.resolve(p));
+
+      await service.updateProfile('user-1', { bio: 'Runner. 5k → 42k' });
+
+      expect(moderationService.assertTextAllowed).toHaveBeenCalledWith(
+        'Runner. 5k → 42k',
+      );
+      expect(
+        moderationService.assertTextAllowed.mock.invocationCallOrder[0],
+      ).toBeLessThan(profileRepo.save.mock.invocationCallOrder[0]);
+    });
+
+    it('should reject a flagged bio with 400 CONTENT_REJECTED and save nothing', async () => {
+      userRepo.findOne.mockResolvedValue(baseUser());
+      moderationService.assertTextAllowed.mockRejectedValue(
+        new BadRequestException({
+          message: 'Tu contenido no cumple con las normas de la comunidad',
+          error: 'Bad Request',
+          code: 'CONTENT_REJECTED',
+        }),
+      );
+
+      await expect(
+        service.updateProfile('user-1', {
+          bio: 'texto ofensivo',
+          display_name: 'Alice',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(profileRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should fail closed (503) without saving when moderation is unavailable', async () => {
+      userRepo.findOne.mockResolvedValue(baseUser());
+      moderationService.assertTextAllowed.mockRejectedValue(
+        new ServiceUnavailableException(),
+      );
+
+      await expect(
+        service.updateProfile('user-1', { bio: 'hola' }),
+      ).rejects.toThrow(ServiceUnavailableException);
+      expect(profileRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should not call moderation when the bio is absent or is being cleared', async () => {
+      userRepo.findOne.mockResolvedValue(baseUser());
+      profileRepo.findOne.mockResolvedValue({
+        user_id: 'user-1',
+        display_name: 'Alice',
+        bio: 'old bio',
+        preferred_language: 'en',
+        is_private: false,
+      });
+      profileRepo.save.mockImplementation((p: object) => Promise.resolve(p));
+
+      await service.updateProfile('user-1', { display_name: 'Alice 2' });
+      await service.updateProfile('user-1', { bio: '   ' });
+
+      expect(moderationService.assertTextAllowed).not.toHaveBeenCalled();
     });
 
     it('should normalize a whitespace-only display_name back to the username', async () => {
