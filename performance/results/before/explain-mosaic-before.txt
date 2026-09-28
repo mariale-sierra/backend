@@ -1,0 +1,24 @@
+                                                             QUERY PLAN                                                              
+-------------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=733.83..734.04 rows=84 width=158) (actual time=7.843..7.853 rows=96.00 loops=1)
+   Sort Key: post.created_at DESC
+   Sort Method: quicksort  Memory: 39kB
+   Buffers: shared hit=393
+   ->  Hash Join  (cost=500.00..731.15 rows=84 width=158) (actual time=4.638..7.759 rows=96.00 loops=1)
+         Hash Cond: (post.workout_log_id = wl.id)
+         Buffers: shared hit=390
+         ->  Seq Scan on workout_posts post  (cost=0.00..212.82 rows=6982 width=158) (actual time=0.016..3.006 rows=6982.00 loops=1)
+               Buffers: shared hit=143
+         ->  Hash  (cost=497.00..497.00 rows=240 width=8) (actual time=3.668..3.669 rows=240.00 loops=1)
+               Buckets: 1024  Batches: 1  Memory Usage: 18kB
+               Buffers: shared hit=247
+               ->  Seq Scan on workout_logs wl  (cost=0.00..497.00 rows=240 width=8) (actual time=0.758..3.598 rows=240.00 loops=1)
+                     Filter: (challenge_id = 'da852b5a-334d-461b-9758-6e77bdc8d5dd'::uuid)
+                     Rows Removed by Filter: 19760
+                     Buffers: shared hit=247
+ Planning:
+   Buffers: shared hit=363
+ Planning Time: 3.037 ms
+ Execution Time: 8.003 ms
+(20 filas)
+

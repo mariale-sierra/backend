@@ -1,0 +1,37 @@
+{
+  "name": "exercises-categories",
+  "url": "http://localhost:3000/exercises/categories",
+  "connections": 10,
+  "amount": 200,
+  "timestamp": "2026-09-28T02:00:25.767Z",
+  "sha": "5b17de9",
+  "branch": "development",
+  "scenario": "before",
+  "stats": {
+    "durationSeconds": 1.01,
+    "requests": {
+      "total": 200,
+      "average": 200,
+      "mean": 200
+    },
+    "throughputBytesPerSec": 263296,
+    "latencyMs": {
+      "average": 1.46,
+      "p50": 1,
+      "p75": 1,
+      "p90": 2,
+      "p97_5": 9,
+      "p99": 11,
+      "min": 1,
+      "max": 13
+    },
+    "errors": 0,
+    "timeouts": 0,
+    "non2xx": 0,
+    "statusCodeStats": {
+      "200": {
+        "count": 200
+      }
+    }
+  }
+}

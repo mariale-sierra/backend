@@ -38,11 +38,17 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
     // Modest global rate limit (hardening, Fase 1): protects against basic
     // abuse/flooding without affecting normal mobile app usage patterns.
+    // ttl/limit are env-overridable (defaults unchanged) purely so B6's load
+    // tests (backend/performance/) can raise the ceiling for a benchmark run
+    // without every request from one IP tripping 429s — see
+    // backend/performance/METHODOLOGY.md. Never set THROTTLE_* in a real
+    // deployment; there's no legitimate reason to loosen this outside a
+    // benchmark environment.
     ThrottlerModule.forRoot([
       {
         name: 'default',
-        ttl: 60_000,
-        limit: 300,
+        ttl: parseInt(process.env.THROTTLE_TTL_MS ?? '60000', 10),
+        limit: parseInt(process.env.THROTTLE_LIMIT ?? '300', 10),
       },
     ]),
 

@@ -1,0 +1,37 @@
+{
+  "name": "workout-posts-mosaic",
+  "url": "http://localhost:3000/workout-posts/mosaic?challengeId=897eb402-2fbd-4f59-9cc5-87baee38fbaa",
+  "connections": 1,
+  "amount": 200,
+  "timestamp": "2026-09-28T02:01:04.542Z",
+  "sha": "5b17de9",
+  "branch": "development",
+  "scenario": "before",
+  "stats": {
+    "durationSeconds": 1,
+    "requests": {
+      "total": 200,
+      "average": 200,
+      "mean": 200
+    },
+    "throughputBytesPerSec": 214976,
+    "latencyMs": {
+      "average": 3.9,
+      "p50": 4,
+      "p75": 5,
+      "p90": 6,
+      "p97_5": 9,
+      "p99": 10,
+      "min": 2,
+      "max": 32
+    },
+    "errors": 0,
+    "timeouts": 0,
+    "non2xx": 0,
+    "statusCodeStats": {
+      "200": {
+        "count": 200
+      }
+    }
+  }
+}
