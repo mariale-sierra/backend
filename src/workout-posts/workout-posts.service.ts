@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import {
   WorkoutPost,
   WorkoutPostModerationStatus,
@@ -126,23 +126,37 @@ export class WorkoutPostsService {
     return this.moderationColumnsSupportPromise;
   }
 
-  async create(data: Partial<WorkoutPost>) {
+  /**
+   * `manager`, when passed (WorkoutLogService.createWorkout does, for the
+   * challenge-progress path — B5), saves through the caller's own open
+   * transaction instead of a separate connection, so the post is committed
+   * or rolled back atomically together with the workout_logs row it
+   * evidences. supportsModerationColumns()'s information_schema check is
+   * left on the default connection either way — a plain metadata read, safe
+   * to run outside the caller's transaction and already cached after the
+   * first call.
+   */
+  async create(data: Partial<WorkoutPost>, manager?: EntityManager) {
     const supportsModeration = await this.supportsModerationColumns();
-    const post = this.repo.create();
+    const repo = manager ? manager.getRepository(WorkoutPost) : this.repo;
+    const post = repo.create();
     Object.assign(post, data);
 
     if (supportsModeration) {
-      Object.assign(post, WorkoutPostsService.MODERATION_GATE_ENABLED
-        ? {
-            moderationStatus: WorkoutPostModerationStatus.PENDING,
-            moderationReason: undefined,
-            moderatedAt: undefined,
-          }
-        : {
-            moderationStatus: WorkoutPostModerationStatus.APPROVED,
-            moderationReason: WorkoutPostsService.MODERATION_DISABLED_REASON,
-            moderatedAt: new Date(),
-          });
+      Object.assign(
+        post,
+        WorkoutPostsService.MODERATION_GATE_ENABLED
+          ? {
+              moderationStatus: WorkoutPostModerationStatus.PENDING,
+              moderationReason: undefined,
+              moderatedAt: undefined,
+            }
+          : {
+              moderationStatus: WorkoutPostModerationStatus.APPROVED,
+              moderationReason: WorkoutPostsService.MODERATION_DISABLED_REASON,
+              moderatedAt: new Date(),
+            },
+      );
     }
 
     // Moderation no longer runs inline on upload — it's picked up by
@@ -153,7 +167,7 @@ export class WorkoutPostsService {
     // post was stuck as 'pending' (never shown) with nothing to retry it
     // again. Batching on a timer smooths the request rate and gives every
     // pending post another chance every cycle.
-    return this.repo.save(post);
+    return repo.save(post);
   }
 
   /**
