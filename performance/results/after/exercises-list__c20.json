@@ -1,0 +1,37 @@
+{
+  "name": "exercises-list",
+  "url": "http://localhost:3000/exercises",
+  "connections": 20,
+  "amount": 200,
+  "timestamp": "2026-09-28T02:02:35.218Z",
+  "sha": "5b17de9",
+  "branch": "development",
+  "scenario": "after",
+  "stats": {
+    "durationSeconds": 1.01,
+    "requests": {
+      "total": 200,
+      "average": 200,
+      "mean": 200
+    },
+    "throughputBytesPerSec": 1023232,
+    "latencyMs": {
+      "average": 4.16,
+      "p50": 3,
+      "p75": 4,
+      "p90": 6,
+      "p97_5": 16,
+      "p99": 17,
+      "min": 2,
+      "max": 19
+    },
+    "errors": 0,
+    "timeouts": 0,
+    "non2xx": 0,
+    "statusCodeStats": {
+      "200": {
+        "count": 200
+      }
+    }
+  }
+}

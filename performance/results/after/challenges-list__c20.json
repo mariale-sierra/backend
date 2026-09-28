@@ -1,0 +1,37 @@
+{
+  "name": "challenges-list",
+  "url": "http://localhost:3000/challenges",
+  "connections": 20,
+  "amount": 200,
+  "timestamp": "2026-09-28T02:03:07.878Z",
+  "sha": "5b17de9",
+  "branch": "development",
+  "scenario": "after",
+  "stats": {
+    "durationSeconds": 1.01,
+    "requests": {
+      "total": 200,
+      "average": 200,
+      "mean": 200
+    },
+    "throughputBytesPerSec": 31924224,
+    "latencyMs": {
+      "average": 63,
+      "p50": 61,
+      "p75": 64,
+      "p90": 71,
+      "p97_5": 91,
+      "p99": 95,
+      "min": 44,
+      "max": 104
+    },
+    "errors": 0,
+    "timeouts": 0,
+    "non2xx": 0,
+    "statusCodeStats": {
+      "200": {
+        "count": 200
+      }
+    }
+  }
+}
