@@ -316,6 +316,7 @@ export class WorkoutPostsService {
       .createQueryBuilder('post')
       .innerJoinAndSelect('post.workoutLog', 'workoutLog')
       .where('workoutLog.challenge_id = :challengeId', { challengeId })
+      .andWhere('post.is_hidden = false')
       .orderBy('post.created_at', 'DESC')
       .getMany();
 
@@ -493,7 +494,7 @@ export class WorkoutPostsService {
        LEFT JOIN havit.challenges c ON c.id = wl.challenge_id
        LEFT JOIN havit.challenge_user_map cum
               ON cum.challenge_id = wl.challenge_id AND cum.user_id = p.user_id
-       WHERE ${whereClause} ${moderationFilter} ${visibilityFilter}
+       WHERE ${whereClause} AND p.is_hidden = false ${moderationFilter} ${visibilityFilter}
        ORDER BY p.created_at DESC`,
       params,
     );
@@ -609,7 +610,7 @@ export class WorkoutPostsService {
        LEFT JOIN havit.challenges c ON c.id = wl.challenge_id
        LEFT JOIN havit.challenge_user_map cum
               ON cum.challenge_id = wl.challenge_id AND cum.user_id = p.user_id
-       WHERE ${baseWhereClause} ${moderationFilter} ${visibilityFilter} ${challengePrivacyFilter} ${cursorFilter}
+       WHERE ${baseWhereClause} AND p.is_hidden = false ${moderationFilter} ${visibilityFilter} ${challengePrivacyFilter} ${cursorFilter}
        ORDER BY p.created_at DESC, p.id DESC
        LIMIT $${limitParamIndex}`,
       params,
@@ -745,6 +746,7 @@ export class WorkoutPostsService {
               ON cum.challenge_id = wl.challenge_id AND cum.user_id = p.user_id
        WHERE ${visibilityFilter}
          AND p.moderation_status = 'approved'
+         AND p.is_hidden = false
          AND c.visibility != 'private'
          ${cursorFilter}
        ORDER BY p.created_at DESC, p.id DESC

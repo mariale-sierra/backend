@@ -29,7 +29,9 @@ export class WorkoutPostReactionsService {
     postId: string,
     userId: string,
   ): Promise<WorkoutPost> {
-    const post = await this.postRepo.findOne({ where: { id: postId } });
+    const post = await this.postRepo.findOne({
+      where: { id: postId, is_hidden: false },
+    });
     if (!post) throw new NotFoundException('Workout post not found');
     assertPostVisibleToUser(post, userId);
     return post;

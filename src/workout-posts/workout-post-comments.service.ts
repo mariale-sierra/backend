@@ -28,7 +28,9 @@ export class WorkoutPostCommentsService {
     postId: string,
     userId: string,
   ): Promise<WorkoutPost> {
-    const post = await this.postRepo.findOne({ where: { id: postId } });
+    const post = await this.postRepo.findOne({
+      where: { id: postId, is_hidden: false },
+    });
     if (!post) throw new NotFoundException('Workout post not found');
     assertPostVisibleToUser(post, userId);
     return post;
@@ -88,6 +90,7 @@ export class WorkoutPostCommentsService {
       .leftJoinAndSelect('author.profile', 'profile')
       .where('c.workout_post_id = :postId', { postId })
       .andWhere('c.is_active = true')
+      .andWhere('c.is_hidden = false')
       .orderBy('c.id', 'ASC')
       .take(limit + 1);
 
@@ -135,6 +138,7 @@ export class WorkoutPostCommentsService {
       .addSelect('COUNT(*)', 'count')
       .where('c.workout_post_id IN (:...postIds)', { postIds })
       .andWhere('c.is_active = true')
+      .andWhere('c.is_hidden = false')
       .groupBy('c.workout_post_id')
       .getRawMany<{ postId: string; count: string }>();
     return new Map(rows.map((r) => [r.postId, Number(r.count)]));

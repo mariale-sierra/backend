@@ -12,6 +12,10 @@ import { WorkoutPostReactionsController } from './workout-post-reactions.control
 import { WorkoutPostReactionsService } from './workout-post-reactions.service';
 import { WorkoutPostCommentsController } from './workout-post-comments.controller';
 import { WorkoutPostCommentsService } from './workout-post-comments.service';
+import { WorkoutPostReportsController } from './workout-post-reports.controller';
+import { WorkoutPostReportsService } from './workout-post-reports.service';
+import { ContentReport } from './entities/content-report.entity';
+import { UserPenalty } from './entities/user-penalty.entity';
 import { OpenAiModule } from '../openai/openai.module';
 import { FollowsModule } from '../follows/follows.module';
 
@@ -21,6 +25,8 @@ import { FollowsModule } from '../follows/follows.module';
       WorkoutPost,
       WorkoutPostLike,
       WorkoutPostComment,
+      ContentReport,
+      UserPenalty,
       WorkoutLog,
       User,
     ]),
@@ -32,11 +38,13 @@ import { FollowsModule } from '../follows/follows.module';
     FeedController,
     WorkoutPostReactionsController,
     WorkoutPostCommentsController,
+    WorkoutPostReportsController,
   ],
   providers: [
     WorkoutPostsService,
     WorkoutPostReactionsService,
     WorkoutPostCommentsService,
+    WorkoutPostReportsService,
   ],
   exports: [WorkoutPostsService],
 })
