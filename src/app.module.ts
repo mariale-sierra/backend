@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
+import { CacheModule } from './cache/cache.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ChallengesModule } from './challenges/challenges.module';
@@ -77,6 +78,7 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
                 process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true',
             },
     }),
+    CacheModule,
     AuthModule,
     UsersModule,
     ChallengesModule,

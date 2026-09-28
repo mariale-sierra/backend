@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-09-28T02:03:53.243Z",
+  "samples": 5,
+  "results": [
+    {
+      "path": "/exercises",
+      "cold": {
+        "min": "3.78",
+        "avg": "16.88",
+        "max": "63.74"
+      },
+      "warm": {
+        "min": "0.85",
+        "avg": "1.20",
+        "max": "2.33"
+      }
+    },
+    {
+      "path": "/exercises/categories",
+      "cold": {
+        "min": "0.99",
+        "avg": "1.29",
+        "max": "1.68"
+      },
+      "warm": {
+        "min": "0.50",
+        "avg": "0.56",
+        "max": "0.72"
+      }
+    },
+    {
+      "path": "/exercises/muscle-regions",
+      "cold": {
+        "min": "1.71",
+        "avg": "2.00",
+        "max": "2.22"
+      },
+      "warm": {
+        "min": "0.56",
+        "avg": "0.61",
+        "max": "0.66"
+      }
+    }
+  ]
+}
