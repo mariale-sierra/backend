@@ -2,6 +2,7 @@ import {
   resolveTimezone,
   getLocalMidnightUtc,
   getLocalDayBoundsUtc,
+  getLocalCalendarDate,
 } from './timezone.util';
 
 describe('timezone.util', () => {
@@ -80,6 +81,47 @@ describe('timezone.util', () => {
       );
       expect(start.toISOString()).toBe('2026-08-27T07:00:00.000Z');
       expect(end.toISOString()).toBe('2026-08-28T06:59:59.999Z');
+    });
+  });
+
+  describe('getLocalCalendarDate', () => {
+    it('returns the UTC calendar date unchanged when timezone is UTC', () => {
+      expect(
+        getLocalCalendarDate(new Date('2026-08-27T15:30:00.000Z'), 'UTC'),
+      ).toBe('2026-08-27');
+    });
+
+    it('rolls back a day for a negative UTC offset near midnight (used by the B5 progress uniqueness check)', () => {
+      // Same instant as the workout-log.service.spec "logged late at night"
+      // case: already Aug 28 in UTC, but still Aug 27 local in Guatemala.
+      expect(
+        getLocalCalendarDate(
+          new Date('2026-08-28T05:59:00.000Z'),
+          'America/Guatemala',
+        ),
+      ).toBe('2026-08-27');
+    });
+
+    it('rolls forward a day for a positive UTC offset (Asia/Tokyo, UTC+9, no DST)', () => {
+      expect(
+        getLocalCalendarDate(
+          new Date('2026-08-27T16:00:00.000Z'),
+          'Asia/Tokyo',
+        ),
+      ).toBe('2026-08-28');
+    });
+
+    it('pads single-digit month/day to two digits', () => {
+      expect(
+        getLocalCalendarDate(new Date('2026-01-05T12:00:00.000Z'), 'UTC'),
+      ).toBe('2026-01-05');
+    });
+
+    it('never throws for an unrecognized timezone, degrading to UTC', () => {
+      const date = new Date('2026-08-27T15:30:00.000Z');
+      expect(getLocalCalendarDate(date, 'Not/AZone')).toBe(
+        getLocalCalendarDate(date, 'UTC'),
+      );
     });
   });
 });

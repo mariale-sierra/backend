@@ -17,7 +17,10 @@ import { Between } from 'typeorm';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
-import { getLocalDayBoundsUtc } from '../common/timezone.util';
+import {
+  getLocalCalendarDate,
+  getLocalDayBoundsUtc,
+} from '../common/timezone.util';
 import { getCycleDayInfo } from '../common/cycle-day.util';
 
 @Injectable()
@@ -67,6 +70,13 @@ export class WorkoutLogService {
     // auto-complete check after the workout is saved — one query serves both, rather than
     // fetching the same row twice.
     let challenge: Challenge | null = null;
+    // The caller's local calendar day at submission time (see
+    // getLocalCalendarDate) — only computed for challenge progress, and
+    // persisted on the row below. This is the actual, database-enforced
+    // "one progress record per day per challenge" identity: see
+    // uq_workout_logs_user_challenge_local_day (B5,
+    // database/migrations/2026-09-28-01-workout-logs-progress-uniqueness.sql).
+    let localDay: string | undefined;
 
     if (dto.challengeId) {
       challenge = await this.challengeRepo.findOne({
@@ -86,12 +96,22 @@ export class WorkoutLogService {
       // clock, so the one-log-per-day gate agrees with the "completed
       // today" display logic elsewhere (ChallengesService, UsersService) —
       // logging late at night now flips back to "available" at the user's
-      // own midnight, not the server's.
-      const { start, end } = getLocalDayBoundsUtc(
-        new Date(),
-        dto.timezone ?? 'UTC',
-      );
+      // own midnight, not the server's. `now` is reused for both boundary
+      // helpers below so they can never disagree about which local day this
+      // submission falls on.
+      const now = new Date();
+      const timezone = dto.timezone ?? 'UTC';
+      localDay = getLocalCalendarDate(now, timezone);
+      const { start, end } = getLocalDayBoundsUtc(now, timezone);
 
+      // Fast-path only: a plain read, not itself the correctness guarantee.
+      // Two overlapping requests can both pass this SELECT before either
+      // commits (the exact TOCTOU race B5 fixes) — it exists purely to give
+      // the common sequential-duplicate case the same 409 quickly, without
+      // doing the routine-copy work below. The real guarantee is
+      // uq_workout_logs_user_challenge_local_day, enforced at INSERT time
+      // inside the transaction and translated back to this same
+      // ConflictException in the catch block below.
       const existing = await this.workoutRepo.findOne({
         where: {
           userId: dto.userId,
@@ -105,119 +125,145 @@ export class WorkoutLogService {
       }
     }
 
-    const savedWorkout = await this.dataSource.transaction(async (manager) => {
-      const workout = manager.create(WorkoutLog, {
-        routineId: dto.routineId,
-        userId: dto.userId,
-        challengeId: dto.challengeId,
-        // createWorkout is a single atomic submission (image + all exercise
-        // data at once) — nothing in the app calls PATCH /workout-logs/:id/finish
-        // afterwards, so leaving this as 'in_progress' meant every log stayed
-        // unfinished forever and progress %/streak (which only count
-        // 'completed' logs) were permanently stuck at 0.
-        status: 'completed' as WorkoutLog['status'],
-        started_at: new Date(),
-        ended_at: new Date(),
-      });
+    // Resolved before the transaction starts — a plain read, independent of
+    // the workout log row being created, so it doesn't need to run inside
+    // the same transaction/connection.
+    const postVisibility = dto.isRestDay
+      ? undefined
+      : await this.resolvePostVisibility(dto.challengeId, dto.visibility);
 
-      const createdWorkout = await manager.save(workout);
+    let savedWorkout: WorkoutLog;
+    try {
+      savedWorkout = await this.dataSource.transaction(async (manager) => {
+        const workout = manager.create(WorkoutLog, {
+          routineId: dto.routineId,
+          userId: dto.userId,
+          challengeId: dto.challengeId,
+          localDay,
+          // createWorkout is a single atomic submission (image + all exercise
+          // data at once) — nothing in the app calls PATCH /workout-logs/:id/finish
+          // afterwards, so leaving this as 'in_progress' meant every log stayed
+          // unfinished forever and progress %/streak (which only count
+          // 'completed' logs) were permanently stuck at 0.
+          status: 'completed' as WorkoutLog['status'],
+          started_at: new Date(),
+          ended_at: new Date(),
+        });
 
-      if (dto.routineId) {
-        const routineExercises = await manager
-          .getRepository(RoutineExercise)
-          .find({
-            where: { routine: { id: dto.routineId } },
-            relations: ['exercise', 'targets', 'sets', 'sets.targets'],
-            order: { order_index: 'ASC' },
-          });
+        const createdWorkout = await manager.save(workout);
 
-        const workoutExercises = await manager.save(
-          routineExercises.map((routineExercise) =>
-            manager.create(WorkoutLogExercise, {
-              workout: createdWorkout,
-              exercise: routineExercise.exercise,
-              orderIndex: routineExercise.order_index,
-              notes: routineExercise.notes,
-            }),
-          ),
-        );
+        if (dto.routineId) {
+          const routineExercises = await manager
+            .getRepository(RoutineExercise)
+            .find({
+              where: { routine: { id: dto.routineId } },
+              relations: ['exercise', 'targets', 'sets', 'sets.targets'],
+              order: { order_index: 'ASC' },
+            });
 
-        for (let index = 0; index < routineExercises.length; index += 1) {
-          const routineExercise = routineExercises[index];
-          const workoutExercise = workoutExercises[index];
+          const workoutExercises = await manager.save(
+            routineExercises.map((routineExercise) =>
+              manager.create(WorkoutLogExercise, {
+                workout: createdWorkout,
+                exercise: routineExercise.exercise,
+                orderIndex: routineExercise.order_index,
+                notes: routineExercise.notes,
+              }),
+            ),
+          );
 
-          if (routineExercise.targets?.length) {
-            await manager.save(
-              routineExercise.targets.map((target) =>
-                manager.create(WorkoutLogExerciseTarget, {
-                  workoutLogExercise: workoutExercise,
-                  metricTypeId: target.metric_type_id,
-                  targetValueInt: target.target_value_int,
-                  targetValueDecimal: target.target_value_decimal,
-                  targetValueText: target.target_value_text,
-                  targetValueSeconds: target.target_value_seconds,
-                  targetValueBoolean: target.target_value_boolean,
-                  unit: target.unit,
-                }),
-              ),
-            );
-          }
+          for (let index = 0; index < routineExercises.length; index += 1) {
+            const routineExercise = routineExercises[index];
+            const workoutExercise = workoutExercises[index];
 
-          if (routineExercise.sets?.length) {
-            const workoutSets = await manager.save(
-              routineExercise.sets.map((set) =>
-                manager.create(WorkoutLogExerciseSet, {
-                  workoutLogExercise: workoutExercise,
-                  setNumber: set.set_number,
-                  restSecondsAfter: set.rest_seconds_after,
-                  notes: set.notes,
-                }),
-              ),
-            );
+            if (routineExercise.targets?.length) {
+              await manager.save(
+                routineExercise.targets.map((target) =>
+                  manager.create(WorkoutLogExerciseTarget, {
+                    workoutLogExercise: workoutExercise,
+                    metricTypeId: target.metric_type_id,
+                    targetValueInt: target.target_value_int,
+                    targetValueDecimal: target.target_value_decimal,
+                    targetValueText: target.target_value_text,
+                    targetValueSeconds: target.target_value_seconds,
+                    targetValueBoolean: target.target_value_boolean,
+                    unit: target.unit,
+                  }),
+                ),
+              );
+            }
 
-            for (
-              let setIndex = 0;
-              setIndex < routineExercise.sets.length;
-              setIndex += 1
-            ) {
-              const routineSet = routineExercise.sets[setIndex];
-              const workoutSet = workoutSets[setIndex];
+            if (routineExercise.sets?.length) {
+              const workoutSets = await manager.save(
+                routineExercise.sets.map((set) =>
+                  manager.create(WorkoutLogExerciseSet, {
+                    workoutLogExercise: workoutExercise,
+                    setNumber: set.set_number,
+                    restSecondsAfter: set.rest_seconds_after,
+                    notes: set.notes,
+                  }),
+                ),
+              );
 
-              if (routineSet.targets?.length) {
-                await manager.save(
-                  routineSet.targets.map((target) =>
-                    manager.create(WorkoutLogExerciseSetTarget, {
-                      workoutLogExerciseSet: workoutSet,
-                      metricTypeId: target.metric_type_id,
-                      targetValueInt: target.target_value_int,
-                      targetValueDecimal: target.target_value_decimal,
-                      targetValueText: target.target_value_text,
-                      targetValueSeconds: target.target_value_seconds,
-                      targetValueBoolean: target.target_value_boolean,
-                      unit: target.unit,
-                    }),
-                  ),
-                );
+              for (
+                let setIndex = 0;
+                setIndex < routineExercise.sets.length;
+                setIndex += 1
+              ) {
+                const routineSet = routineExercise.sets[setIndex];
+                const workoutSet = workoutSets[setIndex];
+
+                if (routineSet.targets?.length) {
+                  await manager.save(
+                    routineSet.targets.map((target) =>
+                      manager.create(WorkoutLogExerciseSetTarget, {
+                        workoutLogExerciseSet: workoutSet,
+                        metricTypeId: target.metric_type_id,
+                        targetValueInt: target.target_value_int,
+                        targetValueDecimal: target.target_value_decimal,
+                        targetValueText: target.target_value_text,
+                        targetValueSeconds: target.target_value_seconds,
+                        targetValueBoolean: target.target_value_boolean,
+                        unit: target.unit,
+                      }),
+                    ),
+                  );
+                }
               }
             }
           }
         }
-      }
 
-      return createdWorkout;
-    });
+        // Created through the same manager/transaction as the workout log
+        // above (B5) — an evidence post is part of the same atomic progress
+        // operation, so a failure here rolls back the workout log too instead
+        // of leaving an orphaned "progress recorded" row with no post.
+        if (!dto.isRestDay) {
+          await this.workoutPostsService.create(
+            {
+              workout_log_id: createdWorkout.id,
+              user_id: dto.userId,
+              image_url: dto.imageUrl,
+              caption: dto.caption,
+              visibility: postVisibility,
+            },
+            manager,
+          );
+        }
 
-    if (!dto.isRestDay) {
-      await this.workoutPostsService.create({
-        workout_log_id: savedWorkout.id,
-        user_id: dto.userId,
-        image_url: dto.imageUrl,
-        caption: dto.caption,
-        visibility: await this.resolvePostVisibility(
-          dto.challengeId,
-          dto.visibility,
-        ),
+        return createdWorkout;
       });
+    } catch (error) {
+      // uq_workout_logs_user_challenge_local_day backs this up at the DB
+      // level — translate the race-condition duplicate into the same 409
+      // the pre-check above gives, same pattern as
+      // ChallengeInvitesService.create / FollowsService.follow. Only
+      // relevant to the challenge-progress path: that's the only case with
+      // a matching partial unique index (WHERE challenge_id IS NOT NULL).
+      if (dto.challengeId && (error as { code?: string })?.code === '23505') {
+        throw new ConflictException('You already logged progress today');
+      }
+      throw error;
     }
 
     // The workout (and its post) are already saved at this point — nothing below is

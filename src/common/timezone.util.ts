@@ -120,3 +120,17 @@ export function getLocalDayBoundsUtc(
   const start = getLocalMidnightUtc(date, timeZone);
   return { start, end: new Date(start.getTime() + MS_PER_DAY - 1) };
 }
+
+/**
+ * The calendar date (`YYYY-MM-DD`) `date` falls on when observed in
+ * `timeZone` — the plain-date counterpart of getLocalDayBoundsUtc's UTC
+ * instant range, for persisting as a DATE column (see
+ * WorkoutLog.localDay / uq_workout_logs_user_challenge_local_day) instead of
+ * recomputing a timezone conversion at query time.
+ */
+export function getLocalCalendarDate(date: Date, timeZone: string): string {
+  const safeTimeZone = resolveTimezone(timeZone);
+  const { year, month, day } = getLocalDateParts(date, safeTimeZone);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${year}-${pad(month)}-${pad(day)}`;
+}

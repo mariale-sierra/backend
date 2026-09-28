@@ -206,9 +206,7 @@ describe('WorkoutLogService', () => {
         dataSource.transaction.mockImplementation(async (cb) =>
           cb({
             create: jest.fn().mockReturnValue({ id: 99, userId: OWNER_ID }),
-            save: jest
-              .fn()
-              .mockResolvedValue({ id: 99, userId: OWNER_ID }),
+            save: jest.fn().mockResolvedValue({ id: 99, userId: OWNER_ID }),
             getRepository: jest.fn(),
           }),
         );
@@ -251,13 +249,19 @@ describe('WorkoutLogService', () => {
           visibility: 'public',
         });
 
-        expect(workoutPostsService.create).toHaveBeenCalledWith({
-          workout_log_id: 99,
-          user_id: OWNER_ID,
-          image_url: 'https://example.com/day1.jpg',
-          caption: 'Día 1 completado',
-          visibility: 'public',
-        });
+        expect(workoutPostsService.create).toHaveBeenCalledWith(
+          {
+            workout_log_id: 99,
+            user_id: OWNER_ID,
+            image_url: 'https://example.com/day1.jpg',
+            caption: 'Día 1 completado',
+            visibility: 'public',
+          },
+          // B5: now created through the same transactional manager as the
+          // workout log itself, not a bare call — see createWorkout's own
+          // comment on why (atomic with the log it evidences).
+          expect.anything(),
+        );
       });
 
       it('should default visibility to private when the caller omits it', async () => {
@@ -269,6 +273,7 @@ describe('WorkoutLogService', () => {
 
         expect(workoutPostsService.create).toHaveBeenCalledWith(
           expect.objectContaining({ visibility: 'private' }),
+          expect.anything(),
         );
       });
 
@@ -325,6 +330,7 @@ describe('WorkoutLogService', () => {
         });
         expect(workoutPostsService.create).toHaveBeenCalledWith(
           expect.objectContaining({ visibility: 'private' }),
+          expect.anything(),
         );
       });
 
@@ -340,6 +346,7 @@ describe('WorkoutLogService', () => {
 
         expect(workoutPostsService.create).toHaveBeenCalledWith(
           expect.objectContaining({ visibility: 'public' }),
+          expect.anything(),
         );
       });
 
@@ -361,6 +368,7 @@ describe('WorkoutLogService', () => {
         );
         expect(workoutPostsService.create).toHaveBeenCalledWith(
           expect.objectContaining({ visibility: 'followers' }),
+          expect.anything(),
         );
       });
 
@@ -382,6 +390,7 @@ describe('WorkoutLogService', () => {
         expect(challengeRepo.findOne).not.toHaveBeenCalled();
         expect(workoutPostsService.create).toHaveBeenCalledWith(
           expect.objectContaining({ visibility: 'public' }),
+          expect.anything(),
         );
       });
     });
@@ -503,9 +512,7 @@ describe('WorkoutLogService', () => {
       it('should never surface an auto-complete failure as a failed progress submission', async () => {
         jest.useFakeTimers();
         jest.setSystemTime(new Date('2026-09-15T12:00:00.000Z'));
-        challengeUserMapRepo.findOne.mockRejectedValue(
-          new Error('db hiccup'),
-        );
+        challengeUserMapRepo.findOne.mockRejectedValue(new Error('db hiccup'));
         const consoleErrorSpy = jest
           .spyOn(console, 'error')
           .mockImplementation(() => undefined);
