@@ -9,8 +9,8 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { WorkoutPostsService } from './workout-posts.service';
-import { CursorPaginationQueryDto } from './dto/cursor-pagination-query.dto';
-import { decodeCursor, DEFAULT_PAGE_LIMIT } from './pagination.util';
+import { CursorPaginationQueryDto } from '../common/cursor-pagination-query.dto';
+import { decodeCursor, DEFAULT_PAGE_LIMIT } from '../common/pagination.util';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 

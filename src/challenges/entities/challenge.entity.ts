@@ -40,4 +40,11 @@ export class Challenge {
     default: 'open',
   })
   status!: ChallengeStatus;
+
+  // B1 — added purely to back cursor pagination's keyset ordering (see
+  // database/migrations/…-add-challenges-created-at.sql and
+  // ChallengesService.findAll()). DEFAULT now() backfills every existing
+  // row at migration time; a UUID PK alone isn't chronologically ordered.
+  @Column({ type: 'timestamptz', default: () => 'now()' })
+  created_at!: Date;
 }

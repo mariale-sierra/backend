@@ -21,6 +21,7 @@ import { ChallengeLocationMap } from './entities/challenge-location-map.entity';
 import { ExerciseCategory } from '../exercises/entities/exercise-category.entity';
 import { ExerciseLocation } from '../exercises/entities/exercise-location.entity';
 import { ChallengeJoinRequest } from './entities/challenge-join-request.entity';
+import { RedisCacheService } from '../cache/redis-cache.service';
 import { getDominantActivityCategories } from './dominant-activity-category.util';
 import {
   ChallengeVisibility,
@@ -60,6 +61,21 @@ const createMockRepo = (): MockRepo => ({
   manager: {},
 });
 
+// Same pass-through mock as exercises.service.spec.ts — real code path by
+// default, only cache-specific tests assert on getOrSet/bumpVersion.
+const createMockCache = () => ({
+  isEnabled: jest.fn().mockReturnValue(false),
+  get: jest.fn().mockResolvedValue(null),
+  set: jest.fn().mockResolvedValue(undefined),
+  del: jest.fn().mockResolvedValue(undefined),
+  getVersion: jest.fn().mockResolvedValue(0),
+  bumpVersion: jest.fn().mockResolvedValue(undefined),
+  getOrSet: jest.fn(
+    async (_key: string, _ttl: number, loader: () => Promise<unknown>) =>
+      loader(),
+  ) as jest.Mock<Promise<unknown>, [string, number, () => Promise<unknown>]>,
+});
+
 describe('ChallengesService', () => {
   let service: ChallengesService;
   let challengeRepo: MockRepo;
@@ -72,6 +88,7 @@ describe('ChallengesService', () => {
   let challengeJoinRequestRepo: MockRepo;
   let dataSource: { transaction: jest.Mock };
   let moderationService: { assertTextAllowed: jest.Mock };
+  let cache: ReturnType<typeof createMockCache>;
 
   const OWNER_ID = 'owner-1';
   const OTHER_USER_ID = 'other-2';
@@ -107,10 +124,12 @@ describe('ChallengesService', () => {
     moderationService = {
       assertTextAllowed: jest.fn().mockResolvedValue(undefined),
     };
+    cache = createMockCache();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ChallengesService,
+        { provide: RedisCacheService, useValue: cache },
         { provide: getRepositoryToken(Challenge), useValue: challengeRepo },
         { provide: getRepositoryToken(User), useValue: userRepo },
         {

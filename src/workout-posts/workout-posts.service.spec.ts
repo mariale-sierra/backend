@@ -11,7 +11,7 @@ import { ModerationService } from '../openai/moderation.service';
 import { FollowsService } from '../follows/follows.service';
 import { WorkoutPostReactionsService } from './workout-post-reactions.service';
 import { WorkoutPostCommentsService } from './workout-post-comments.service';
-import { encodeCursor } from './pagination.util';
+import { encodeCursor } from '../common/pagination.util';
 
 const createMockWorkoutPostRepo = () => ({
   create: jest.fn(),
@@ -160,7 +160,7 @@ describe('WorkoutPostsService', () => {
   // not also run the synchronous text moderation on it.
   describe('create — no duplicated caption moderation (B3)', () => {
     it('should never call the text moderation when creating a photo post with a caption', async () => {
-      postRepo.create.mockReturnValue({});
+      postRepo.create.mockReturnValue({} as WorkoutPost);
       postRepo.save.mockImplementation((post: WorkoutPost) =>
         Promise.resolve(post),
       );

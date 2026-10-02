@@ -2,9 +2,9 @@ import type { Response } from 'express';
 import { BadRequestException } from '@nestjs/common';
 import { WorkoutPostsController } from './workout-posts.controller';
 import { WorkoutPostsService } from './workout-posts.service';
-import { CursorPaginationQueryDto } from './dto/cursor-pagination-query.dto';
+import { CursorPaginationQueryDto } from '../common/cursor-pagination-query.dto';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
-import { DEFAULT_PAGE_LIMIT, encodeCursor } from './pagination.util';
+import { DEFAULT_PAGE_LIMIT, encodeCursor } from '../common/pagination.util';
 
 // Only the new B2 endpoint (GET /workout-posts/user/:userId) and the
 // challenge/:challengeId/latest endpoint are covered here — the

@@ -2,8 +2,8 @@ import type { Response } from 'express';
 import { BadRequestException } from '@nestjs/common';
 import { FeedController } from './feed.controller';
 import { WorkoutPostsService } from './workout-posts.service';
-import { CursorPaginationQueryDto } from './dto/cursor-pagination-query.dto';
-import { DEFAULT_PAGE_LIMIT, encodeCursor } from './pagination.util';
+import { CursorPaginationQueryDto } from '../common/cursor-pagination-query.dto';
+import { DEFAULT_PAGE_LIMIT, encodeCursor } from '../common/pagination.util';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 
 describe('FeedController', () => {

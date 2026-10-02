@@ -87,9 +87,25 @@ describe('WorkoutLogController', () => {
 
   describe('findAll', () => {
     it('should scope the list to the authenticated caller only', async () => {
-      await controller.findAll(user);
+      service.findAll.mockResolvedValue({ data: [] });
+      const res = { setHeader: jest.fn() };
 
-      expect(service.findAll).toHaveBeenCalledWith('jwt-user-1');
+      await controller.findAll({}, res as never, user);
+
+      expect(service.findAll).toHaveBeenCalledWith(
+        'jwt-user-1',
+        undefined,
+        20,
+      );
+    });
+
+    it('sets X-Next-Cursor only when the service returns one', async () => {
+      service.findAll.mockResolvedValue({ data: [], nextCursor: 'abc' });
+      const res = { setHeader: jest.fn() };
+
+      await controller.findAll({}, res as never, user);
+
+      expect(res.setHeader).toHaveBeenCalledWith('X-Next-Cursor', 'abc');
     });
   });
 

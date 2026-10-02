@@ -13,7 +13,7 @@ import { WorkoutLogExercise } from './entities/workout-log-exercise.entity';
 import { WorkoutLogExerciseTarget } from './entities/workout-log-exercise-target.entity';
 import { WorkoutLogExerciseSet } from './entities/workout-log-exercise-set.entity';
 import { WorkoutLogExerciseSetTarget } from './entities/workout-log-exercise-set-target.entity';
-import { Between } from 'typeorm';
+import { Between, In } from 'typeorm';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
@@ -22,6 +22,21 @@ import {
   getLocalDayBoundsUtc,
 } from '../common/timezone.util';
 import { getCycleDayInfo } from '../common/cycle-day.util';
+import { RedisCacheService } from '../cache/redis-cache.service';
+import {
+  DecodedCursor,
+  encodeCursor,
+  DEFAULT_PAGE_LIMIT,
+} from '../common/pagination.util';
+
+// Per-user namespace (not global): `getVersion`/`bumpVersion` already accept
+// an arbitrary namespace string, so this reuses RedisCacheService exactly as
+// src/exercises/exercises.service.ts does, just scoped to one user's own
+// writes instead of a global catalog mutation. See
+// backend/performance/B1-REDIS.md for why this is safe to cache (short TTL,
+// invalidated synchronously on this user's own write) despite B6 flagging
+// this module as "do not cache" for the unrelated daily-uniqueness check.
+const WORKOUT_LOG_LIST_TTL_SECONDS = 15;
 
 @Injectable()
 export class WorkoutLogService {
@@ -43,6 +58,8 @@ export class WorkoutLogService {
 
     @InjectRepository(ChallengeUserMap)
     private challengeUserMapRepo: Repository<ChallengeUserMap>,
+
+    private readonly cache: RedisCacheService,
   ) {}
 
   async createWorkout(dto: {
@@ -283,6 +300,7 @@ export class WorkoutLogService {
       );
     }
 
+    await this.cache.bumpVersion(`workout-log:user:${dto.userId}`);
     return this.findOne(savedWorkout.id);
   }
 
@@ -373,7 +391,9 @@ export class WorkoutLogService {
     workout.ended_at = new Date();
     workout.status = 'completed' as WorkoutLog['status'];
 
-    return this.workoutRepo.save(workout);
+    const saved = await this.workoutRepo.save(workout);
+    await this.cache.bumpVersion(`workout-log:user:${userId}`);
+    return saved;
   }
 
   // `userId` is optional: internal callers (e.g. right after createWorkout)
@@ -406,9 +426,69 @@ export class WorkoutLogService {
     return workout;
   }
 
-  async findAll(userId: string) {
-    return this.workoutRepo.find({
-      where: { userId },
+  /**
+   * Cursor-paginated (see src/common/pagination.util.ts) and cached per-user
+   * for WORKOUT_LOG_LIST_TTL_SECONDS — see the class-level comment on that
+   * constant for why this is safe to cache. `started_at` is always
+   * server-set to `new Date()` at creation (never client-supplied — see
+   * `createWorkout` above) and `id` is a serial PK, so both are directly
+   * usable as the existing cursor pair with no new column needed.
+   *
+   * BREAKING CHANGE vs. the previous unpaginated behavior: this used to
+   * return a user's entire workout-log history unconditionally; it now
+   * returns one page (default DEFAULT_PAGE_LIMIT) with `nextCursor` for the
+   * controller to surface as `X-Next-Cursor`. See
+   * backend/performance/B1-FINDINGS.md.
+   */
+  async findAll(
+    userId: string,
+    cursor?: DecodedCursor,
+    limit: number = DEFAULT_PAGE_LIMIT,
+  ): Promise<{ data: WorkoutLog[]; nextCursor?: string }> {
+    const namespace = `workout-log:user:${userId}`;
+    const version = await this.cache.getVersion(namespace);
+    const cacheSuffix = cursor ? `${cursor.createdAt}:${cursor.id}` : 'first';
+    const key = `${namespace}:v${version}:findAll:${cacheSuffix}:${limit}`;
+    return this.cache.getOrSet(key, WORKOUT_LOG_LIST_TTL_SECONDS, () =>
+      this.findAllUncached(userId, cursor, limit),
+    );
+  }
+
+  private async findAllUncached(
+    userId: string,
+    cursor: DecodedCursor | undefined,
+    limit: number,
+  ): Promise<{ data: WorkoutLog[]; nextCursor?: string }> {
+    // Selecting ids first (no joins) then hydrating with repo.find()'s own
+    // relation loading avoids the classic TypeORM pitfall of LIMIT applying
+    // to joined rows (one-to-many fan-out) instead of root entities when a
+    // query builder's leftJoinAndSelect is combined with take()/skip().
+    const idQb = this.workoutRepo
+      .createQueryBuilder('workout')
+      .select(['workout.id', 'workout.started_at'])
+      .where('workout.userId = :userId', { userId })
+      .orderBy('workout.started_at', 'DESC')
+      .addOrderBy('workout.id', 'DESC')
+      .take(limit + 1);
+
+    if (cursor) {
+      idQb.andWhere('(workout.started_at, workout.id) < (:startedAt, :id)', {
+        startedAt: cursor.createdAt,
+        id: Number(cursor.id),
+      });
+    }
+
+    const idRows = await idQb.getMany();
+    const hasNextPage = idRows.length > limit;
+    const page = hasNextPage ? idRows.slice(0, limit) : idRows;
+
+    if (page.length === 0) {
+      return { data: [] };
+    }
+
+    const ids = page.map((w) => w.id);
+    const workouts = await this.workoutRepo.find({
+      where: { id: In(ids) },
       relations: [
         'exercises',
         'exercises.exercise',
@@ -419,5 +499,15 @@ export class WorkoutLogService {
         'posts',
       ],
     });
+    const byId = new Map(workouts.map((w) => [w.id, w]));
+    const data = ids
+      .map((id) => byId.get(id))
+      .filter((w): w is WorkoutLog => !!w);
+
+    const last = page[page.length - 1];
+    const nextCursor =
+      hasNextPage && last ? encodeCursor(last.started_at, last.id) : undefined;
+
+    return { data, nextCursor };
   }
 }

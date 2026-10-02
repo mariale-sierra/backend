@@ -6,10 +6,13 @@ import {
   Patch,
   Param,
   Delete,
+  Query,
   Req,
+  Res,
   ParseIntPipe,
   ParseUUIDPipe,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ChallengesService } from './challenges.service';
 import { CreateChallengeDto } from './dto/create-challenge.dto';
 import { UpdateChallengeDto } from './dto/update-challenge.dto';
@@ -24,6 +27,8 @@ import {
   ApiResponse,
   ApiBearerAuth,
   ApiParam,
+  ApiQuery,
+  ApiHeader,
   ApiOkResponse,
   ApiForbiddenResponse,
 } from '@nestjs/swagger';
@@ -36,6 +41,8 @@ import { Public } from '../auth/decorators/public.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { resolveRequestTimezone } from '../common/timezone.util';
+import { CursorPaginationQueryDto } from '../common/cursor-pagination-query.dto';
+import { decodeCursor, DEFAULT_PAGE_LIMIT } from '../common/pagination.util';
 
 @ApiTags('Challenges')
 @Controller('challenges')
@@ -170,11 +177,43 @@ export class ChallengesController {
   @Get()
   @ApiOperation({
     summary: 'Obtener todos los desafíos',
-    description: 'Lista todos los desafíos disponibles',
+    description:
+      'Lista de desafíos, paginada por cursor (keyset sobre created_at/id — ver GET /workout-posts/user/:userId para el mismo patrón). BREAKING CHANGE (B1): antes devolvía todos los desafíos sin paginar; ahora devuelve una página (default 20) y el cursor de la siguiente en el header X-Next-Cursor.',
   })
-  @ApiResponse({ status: 200, description: 'Lista de desafíos' })
-  findAll() {
-    return this.challengesService.findAll();
+  @ApiQuery({
+    name: 'cursor',
+    required: false,
+    description:
+      'Cursor opaco de la página anterior (header X-Next-Cursor de la respuesta previa)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: `Máximo de resultados (default ${DEFAULT_PAGE_LIMIT}, máximo 50)`,
+  })
+  @ApiHeader({
+    name: 'X-Next-Cursor',
+    required: false,
+    description: 'Presente solo si existe una página siguiente',
+  })
+  @ApiResponse({ status: 200, description: 'Página de desafíos' })
+  async findAll(
+    @Query() query: CursorPaginationQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
+    const cursor = query.cursor ? decodeCursor(query.cursor) : undefined;
+
+    const { nextCursor, ...body } = await this.challengesService.findAll(
+      cursor,
+      limit,
+    );
+
+    if (nextCursor) {
+      res.setHeader('X-Next-Cursor', nextCursor);
+    }
+
+    return body;
   }
 
   @Get('progress')

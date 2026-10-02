@@ -8,7 +8,7 @@ import {
 } from './entities/workout-post.entity';
 import { ModerationService } from '../openai/moderation.service';
 import { User } from '../users/entities/user.entity';
-import { DecodedCursor, encodeCursor } from './pagination.util';
+import { DecodedCursor, encodeCursor } from '../common/pagination.util';
 import { formatPrimaryMetric, MetricValueRow } from './metric-display.util';
 import { FollowsService } from '../follows/follows.service';
 import { getLocalMidnightUtc } from '../common/timezone.util';

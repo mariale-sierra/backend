@@ -9,6 +9,7 @@ import { WorkoutLogExercise } from './entities/workout-log-exercise.entity';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
+import { RedisCacheService } from '../cache/redis-cache.service';
 
 /**
  * B5 — Concurrency and integrity of Workout Progress.
@@ -284,6 +285,10 @@ describe('WorkoutLogService — B5 concurrency', () => {
         {
           provide: getRepositoryToken(ChallengeUserMap),
           useValue: challengeUserMapRepo,
+        },
+        {
+          provide: RedisCacheService,
+          useValue: { bumpVersion: jest.fn().mockResolvedValue(undefined) },
         },
       ],
     }).compile();
