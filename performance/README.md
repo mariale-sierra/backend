@@ -13,6 +13,23 @@ candidate evaluation. Read [`REDIS.md`](./REDIS.md) for the caching design
 [`RESULTS.md`](./RESULTS.md) for the before/after numbers, the rate-limiting
 evaluation, the conclusion, and future work.
 
+## B1 — PgBouncer, Redis consolidation, pagination (continuation)
+
+Picks up B6's own documented future work (caching `GET /challenges`,
+paginating `GET /challenges`/`GET /workout-logs`, Redis-backed throttler
+storage) plus PgBouncer, which had zero config anywhere before this block.
+Read [`B1-METHODOLOGY.md`](./B1-METHODOLOGY.md) for the load-testing/
+PgBouncer-validation environment (and why neither ran against the real,
+deployed backend or real Azure credentials — both unavailable from this
+environment). Read [`B1-PGBOUNCER.md`](./B1-PGBOUNCER.md) for the pooling
+design, TLS, and the pending Azure `max_connections` manual step. Read
+[`B1-REDIS.md`](./B1-REDIS.md) for the two new cache namespaces and the
+throttler storage change. Read [`B1-FINDINGS.md`](./B1-FINDINGS.md) for the
+pagination/schema-change rationale and the breaking-change note for the
+frontend team. Read [`B1-RESULTS.md`](./B1-RESULTS.md) for the before/after
+numbers (including where they're honestly inconclusive) and the PgBouncer
+connection-count evidence.
+
 ## Why a local database, not the shared Azure Postgres
 
 The shared Azure instance (`DB_HOST` in `backend/.env` — see root `CLAUDE.md`)

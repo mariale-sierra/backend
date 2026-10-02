@@ -80,9 +80,14 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
       // REDIS_URL. database/scripts/migrate.js (DDL, baseline, fixtures)
       // deliberately keeps using DB_HOST/DB_PORT directly, bypassing the
       // pool — see backend/performance/B1-PGBOUNCER.md.
-      host: process.env.DB_POOL_HOST ?? process.env.DB_HOST,
+      // `||`, not `??`: an env var passed through Docker Compose as
+      // `${DB_POOL_HOST:-}` (unset in .env) arrives as an actual empty
+      // string, not undefined — `??` would keep that empty string instead
+      // of falling back to DB_HOST. Confirmed live while testing the
+      // PgBouncer rollout (backend/performance/B1-PGBOUNCER.md).
+      host: process.env.DB_POOL_HOST || process.env.DB_HOST,
       port: parseInt(
-        process.env.DB_POOL_PORT ?? process.env.DB_PORT ?? '5432',
+        process.env.DB_POOL_PORT || process.env.DB_PORT || '5432',
         10,
       ),
       username: process.env.DB_USERNAME,

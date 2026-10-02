@@ -142,6 +142,17 @@ Running the backend directly (`npm run start:dev`, as this block's own
 benchmarking did — see `README.md`) needs `REDIS_URL` set in `backend/.env`
 by hand; `backend/.env.example` documents this.
 
+## B1 — extended to challenges, workout-log, and the rate limiter
+
+See `B1-REDIS.md` for the full write-up (new namespaces, TTLs, invalidation
+surfaces, and the `@nestjs/throttler` storage change). Summary: the exact
+pattern above (`getOrSet`, `getVersion`/`bumpVersion`, fail-open) was reused
+unmodified for `GET /challenges` (list + detail, `challenges` namespace) and
+`GET /workout-logs` (list, per-user namespace `workout-log:user:${userId}`),
+and `@nestjs/throttler`'s storage now backs onto Redis (via
+`ThrottlerStorageRedisService`) when `REDIS_URL` is set, so the rate limit
+stays correct across more than one backend instance.
+
 ## Production / Azure
 
 No Azure infrastructure was provisioned as part of this block (no access to
