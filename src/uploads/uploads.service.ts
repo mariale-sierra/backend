@@ -17,6 +17,10 @@ export class UploadsService {
       accessKeyId: process.env['CLOUDFLARE_R2_ACCESS_KEY_ID'] as string,
       secretAccessKey: process.env['CLOUDFLARE_R2_SECRET_ACCESS_KEY'] as string,
     },
+    // Bounded waits: account purges call R2 from a cron, and an unresponsive
+    // endpoint must fail (and be retried next hour), not hang the job.
+    requestHandler: { connectionTimeout: 5000, requestTimeout: 20000 },
+    maxAttempts: 2,
     requestChecksumCalculation: 'WHEN_REQUIRED',
     responseChecksumValidation: 'WHEN_REQUIRED',
   });

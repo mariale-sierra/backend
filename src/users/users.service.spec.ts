@@ -206,7 +206,10 @@ describe('UsersService', () => {
 
       expect(result).not.toHaveProperty('password_hash');
       expect(JSON.stringify(result)).not.toContain('leakedhash');
-      expect(result).toEqual(baseUser());
+      expect(result).toEqual({
+        ...baseUser(),
+        requires_terms_acceptance: true,
+      });
     });
 
     it('should query with an explicit select that excludes password_hash', async () => {
@@ -322,7 +325,7 @@ describe('UsersService', () => {
     // Onboarding's practice-preference badges — see UpdateUserProfileDto's own
     // doc comment for why these are plain strings, not validated against a
     // backend table (the frontend's practiceOptions.ts owns the valid list).
-    it("should default practice_preferences to an empty array when the user has no profile row yet", async () => {
+    it('should default practice_preferences to an empty array when the user has no profile row yet', async () => {
       userRepo.findOne.mockResolvedValue(baseUser());
       profileRepo.findOne.mockResolvedValue(null);
 
@@ -511,7 +514,9 @@ describe('UsersService', () => {
       });
 
       expect(profileRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ practice_preferences: ['Boxing', 'Pilates'] }),
+        expect.objectContaining({
+          practice_preferences: ['Boxing', 'Pilates'],
+        }),
       );
       expect(result.practice_preferences).toEqual(['Boxing', 'Pilates']);
     });
@@ -1183,7 +1188,9 @@ describe('UsersService', () => {
 
       expect(result.active).toHaveLength(0);
       expect(result.completed).toHaveLength(1);
-      expect((result.completed[0] as { id: string; status: string })).toMatchObject({
+      expect(
+        result.completed[0] as { id: string; status: string },
+      ).toMatchObject({
         id: 'challenge-1',
         status: 'completed',
       });

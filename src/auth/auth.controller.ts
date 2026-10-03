@@ -5,6 +5,9 @@ import { LoginDto } from './dto/login.dto';
 import { Body } from '@nestjs/common';
 import { HttpCode } from '@nestjs/common';
 import { RegisterDto } from './dto/register.dto';
+import { AcceptTermsDto } from './dto/accept-terms.dto';
+import type { AuthenticatedUser } from './decorators/current-user.decorator';
+import { CurrentUser } from './decorators/current-user.decorator';
 import { Get, Req } from '@nestjs/common';
 import {
   ApiTags,
@@ -51,6 +54,23 @@ export class AuthController {
   })
   register(@Body() regisDto: RegisterDto) {
     return this.authService.register(regisDto);
+  }
+
+  @Post('accept-terms')
+  @HttpCode(200)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Aceptar Términos y Condiciones',
+    description:
+      'Para cuentas creadas antes de que existiera la aceptación de T&C, o cuando cambia la versión. Registra fecha y versión.',
+  })
+  @ApiResponse({ status: 200, description: 'Aceptación registrada' })
+  @ApiResponse({ status: 400, description: 'Faltan las confirmaciones' })
+  acceptTerms(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() _dto: AcceptTermsDto,
+  ) {
+    return this.authService.acceptTerms(user.sub);
   }
 
   @Get('me')

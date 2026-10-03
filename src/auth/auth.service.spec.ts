@@ -19,13 +19,13 @@ const createMockRepo = () => ({
 
 describe('AuthService', () => {
   let service: AuthService;
-  let userRepo: ReturnType<typeof createMockRepo>;
+  let userRepo: ReturnType<typeof createMockRepo> & { update: jest.Mock };
   let jwtService: { signAsync: jest.Mock };
   let configService: { getOrThrow: jest.Mock };
   let dataSource: { transaction: jest.Mock };
 
   beforeEach(async () => {
-    userRepo = createMockRepo();
+    userRepo = { ...createMockRepo(), update: jest.fn() };
     jwtService = { signAsync: jest.fn().mockResolvedValue('signed.jwt.token') };
     configService = { getOrThrow: jest.fn().mockReturnValue('test-secret') };
     dataSource = { transaction: jest.fn() };
@@ -93,16 +93,14 @@ describe('AuthService', () => {
       dataSource.transaction.mockImplementation(async (cb) =>
         cb({
           create,
-          save: jest
-            .fn()
-            .mockImplementation((d) =>
-              Promise.resolve({
-                id: 'u1',
-                email: 'a@b.com',
-                username: 'ab',
-                ...d,
-              }),
-            ),
+          save: jest.fn().mockImplementation((d) =>
+            Promise.resolve({
+              id: 'u1',
+              email: 'a@b.com',
+              username: 'ab',
+              ...d,
+            }),
+          ),
         }),
       );
 
@@ -136,6 +134,31 @@ describe('AuthService', () => {
         }),
       ).rejects.toThrow(ConflictException);
       expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('acceptTerms', () => {
+    it('records acceptance time, version and age confirmation for the user', async () => {
+      userRepo.update.mockResolvedValue({ affected: 1 });
+
+      const res = await service.acceptTerms('user-1');
+
+      expect(userRepo.update).toHaveBeenCalledWith(
+        { id: 'user-1', is_active: true },
+        expect.objectContaining({
+          terms_version: CURRENT_TERMS_VERSION,
+          terms_accepted_at: expect.any(Date),
+          age_confirmed_at: expect.any(Date),
+        }),
+      );
+      expect(res.terms_version).toBe(CURRENT_TERMS_VERSION);
+    });
+
+    it('rejects when the user does not exist or is inactive', async () => {
+      userRepo.update.mockResolvedValue({ affected: 0 });
+      await expect(service.acceptTerms('ghost')).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
   });
 
