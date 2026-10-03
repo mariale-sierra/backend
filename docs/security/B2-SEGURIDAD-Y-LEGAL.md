@@ -83,4 +83,13 @@ B2_TEST_DB_URL=postgres://user:pass@localhost:5434/havit_b2_test npx jest integr
 
 ## 7. OWASP ZAP
 
-No encontré en los repositorios el reporte del primer escaneo, por lo que no puedo compararlo automáticamente. Los comandos para ejecutarlo contra una instancia **que no sea producción** están en el resumen entregado; guardar el reporte en `backend/docs/security/zap/` y comparar alertas contra el primero (cabeceras CSP/COEP/Permissions-Policy, Content-Type de `/`, "Storable and Cacheable Content" deberían desaparecer).
+Escaneos ejecutados el 2026-10-03 desde la VM contra `http://localhost:3000` (ZAP 2.17, sin autenticar). "Antes" = contenedor previo a B2; "después" = B2 desplegado y migración `2026-10-02-03` aplicada.
+
+| Escaneo | Antes (fallos / avisos / pasadas) | Después |
+|---|---|---|
+| Pasivo (`zap-baseline`) | 0 / 4 / 63 | 0 / 1 / 66 |
+| API activo (`zap-api-scan`, 145 URLs) | 0 / 1 / 118 | 0 / 0 / 118 |
+
+Avisos resueltos: Storable and Cacheable Content, CSP Wildcard Directive, Permissions Policy Header Not Set, COEP Missing or Invalid, Unexpected Content-Type en `/`. El aviso restante, "Non-Storable Content", es informativo y consecuencia buscada de `Cache-Control: no-store`.
+
+Limitación: sin token casi todos los endpoints responden 401, por lo que la cobertura de los endpoints protegidos es parcial; ver el escaneo autenticado en la sección siguiente cuando se ejecute. Guardar los HTML originales en `docs/security/zap/`.

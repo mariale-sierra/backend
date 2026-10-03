@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -96,14 +97,20 @@ export class ExercisesController {
   @ApiResponse({ status: 404, description: 'Músculo no encontrado' })
   findMuscleDetail(
     @Param('code') code: string,
-    @Query('page') page?: string,
-    @Query('pageSize') pageSize?: string,
+    @Query('page', new ParseIntPipe({ optional: true })) page?: number,
+    @Query('pageSize', new ParseIntPipe({ optional: true })) pageSize?: number,
   ) {
-    return this.exercisesService.findMuscleDetail(
-      code,
-      page ? Number(page) : undefined,
-      pageSize ? Number(pageSize) : undefined,
-    );
+    // Non-numeric values are rejected by ParseIntPipe (400); this bounds the
+    // numeric ones so a negative/huge value can't reach skip/take.
+    if (
+      (page !== undefined && page < 1) ||
+      (pageSize !== undefined && (pageSize < 1 || pageSize > 100))
+    ) {
+      throw new BadRequestException(
+        'page must be >= 1 and pageSize between 1 and 100',
+      );
+    }
+    return this.exercisesService.findMuscleDetail(code, page, pageSize);
   }
 
   @Public()

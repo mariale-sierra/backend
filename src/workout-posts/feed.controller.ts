@@ -52,7 +52,7 @@ export class FeedController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
-    const cursor = query.cursor ? decodeCursor(query.cursor) : undefined;
+    const cursor = query.cursor ? decodeCursor(query.cursor, 'uuid') : undefined;
 
     const { posts, nextCursor } = await this.workoutPostsService.getFeed({
       limit,

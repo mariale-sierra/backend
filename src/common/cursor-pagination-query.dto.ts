@@ -19,7 +19,8 @@ export class CursorPaginationQueryDto {
   @ApiPropertyOptional({
     description:
       'Cursor opaco de la página anterior (valor recibido en el header X-Next-Cursor de la respuesta anterior). Omitir para pedir la primera página.',
-    example: 'eyJjIjoiMjAyNi0wOC0xNlQxMjowMDowMC4wMDBaIiwiaSI6IjQyIn0',
+    example:
+      'eyJjIjoiMjAyNi0wOC0xNlQxMjowMDowMC4wMDBaIiwiaSI6IjNmMmI4YzFlLTVkNGEtNGU2Zi05YTdiLTFjMmQzZTRmNWE2YiJ9',
   })
   @IsOptional()
   @IsString()
