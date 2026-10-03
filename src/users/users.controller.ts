@@ -1,15 +1,20 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
+  Post,
   Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
+import { AccountDeletionService } from './account-deletion.service';
+import { RequestAccountDeletionDto } from './dto/request-account-deletion.dto';
 import {
   ApiTags,
   ApiOperation,
@@ -38,7 +43,10 @@ import { resolveRequestTimezone } from '../common/timezone.util';
 @ApiTags('Users')
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly accountDeletionService: AccountDeletionService,
+  ) {}
 
   @Get('me')
   @ApiBearerAuth()
@@ -173,6 +181,49 @@ export class UsersController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<PublicProfileResponseDto> {
     return this.usersService.getPublicProfile(id, user.sub);
+  }
+
+  @Post('me/deletion-request')
+  @HttpCode(200)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Solicitar la eliminación de la cuenta',
+    description:
+      'Programa la eliminación de la cuenta y de sus datos personales dentro de 30 días. Durante ese plazo se puede cancelar. Requiere la contraseña actual.',
+  })
+  @ApiOkResponse({ description: 'Eliminación programada' })
+  @ApiResponse({ status: 401, description: 'Contraseña incorrecta' })
+  @ApiResponse({
+    status: 409,
+    description: 'Ya existe una solicitud pendiente',
+  })
+  requestAccountDeletion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: RequestAccountDeletionDto,
+  ) {
+    return this.accountDeletionService.requestDeletion(user.sub, dto.password);
+  }
+
+  @Delete('me/deletion-request')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Cancelar la solicitud de eliminación de cuenta',
+    description: 'Solo posible antes de que venza el plazo de gracia.',
+  })
+  @ApiOkResponse({ description: 'Solicitud cancelada' })
+  @ApiNotFoundResponse({ description: 'No hay una solicitud pendiente' })
+  cancelAccountDeletion(@CurrentUser() user: AuthenticatedUser) {
+    return this.accountDeletionService.cancelDeletion(user.sub);
+  }
+
+  @Get('me/deletion-request')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Estado de la solicitud de eliminación de cuenta',
+  })
+  @ApiOkResponse({ description: 'Estado actual' })
+  getAccountDeletionStatus(@CurrentUser() user: AuthenticatedUser) {
+    return this.accountDeletionService.getStatus(user.sub);
   }
 
   @Patch(':id/ban')

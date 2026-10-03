@@ -618,6 +618,59 @@ describe('WorkoutPostsService', () => {
     });
   });
 
+  // B2: GET /workout-posts/mosaic used to apply no visibility filter at all.
+  describe('findMosaicByChallenge (B2 visibility)', () => {
+    it('should apply post visibility, followers, challenge-privacy and hidden filters for the viewer', async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.findMosaicByChallenge('challenge-1', VIEWER_ID);
+
+      const [sql, params] = postRepo.manager.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(sql).toContain('wl.challenge_id = $1');
+      expect(sql).toContain('p.is_hidden = false');
+      expect(sql).toContain("p.visibility != 'private'");
+      expect(sql).toContain("p.visibility != 'followers'");
+      expect(sql).toContain("c.visibility IS DISTINCT FROM 'private'");
+      expect(sql).toMatch(/havit\.challenge_user_map/);
+      expect(params[0]).toBe('challenge-1');
+      expect(params[1]).toBe(VIEWER_ID);
+    });
+
+    it('should keep the legacy response shape', async () => {
+      postRepo.manager.query.mockResolvedValue([
+        {
+          id: 'p1',
+          workout_log_id: 7,
+          user_id: 'u1',
+          image_url: 'https://img',
+          caption: null,
+          visibility: 'public',
+          created_at: new Date('2026-10-01T00:00:00Z'),
+          wl_id: 7,
+          wl_challenge_id: 'challenge-1',
+          wl_routine_id: 3,
+          wl_status: 'completed',
+          wl_started_at: new Date('2026-10-01T00:00:00Z'),
+        },
+      ]);
+
+      const result = await service.findMosaicByChallenge(
+        'challenge-1',
+        VIEWER_ID,
+      );
+
+      expect(result.data[0].workoutLog).toMatchObject({
+        id: 7,
+        challengeId: 'challenge-1',
+        routineId: 3,
+        status: 'completed',
+      });
+    });
+  });
+
   // ---------------------------------------------------------------------
   // GET /workout-posts/challenge/:challengeId/latest
   // ---------------------------------------------------------------------

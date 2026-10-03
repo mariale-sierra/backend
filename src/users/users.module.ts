@@ -13,6 +13,8 @@ import { ChallengeLocationMap } from '../challenges/entities/challenge-location-
 import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
 import { FollowsModule } from '../follows/follows.module';
 import { OpenAiModule } from '../openai/openai.module';
+import { UploadsModule } from '../uploads/uploads.module';
+import { AccountDeletionService } from './account-deletion.service';
 
 @Module({
   imports: [
@@ -29,9 +31,10 @@ import { OpenAiModule } from '../openai/openai.module';
     forwardRef(() => AuthModule),
     FollowsModule,
     OpenAiModule,
+    UploadsModule,
   ],
   controllers: [UsersController],
-  providers: [UsersService],
+  providers: [UsersService, AccountDeletionService],
   exports: [UsersService],
 })
 export class UsersModule {}

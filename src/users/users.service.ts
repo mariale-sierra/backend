@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, ILike, In, Not, Repository } from 'typeorm';
+import { Between, ILike, In, IsNull, Not, Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import { UserProfile } from './entities/user-profile.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
@@ -228,9 +228,16 @@ export class UsersService {
   ): Promise<PublicProfileResponseDto> {
     const user = await this.userRepo.findOne({
       where: { id: targetUserId, is_active: true },
-      select: ['id', 'username'],
+      select: ['id', 'username', 'deletion_requested_at'],
     });
-    if (!user) throw new NotFoundException('User not found');
+    // An account waiting out its deletion grace period disappears from
+    // everyone else's view right away (the owner can still see their own).
+    if (
+      !user ||
+      (user.deletion_requested_at && targetUserId !== viewerUserId)
+    ) {
+      throw new NotFoundException('User not found');
+    }
 
     const profile = await this.profileRepo.findOne({
       where: { user_id: targetUserId },
@@ -270,6 +277,7 @@ export class UsersService {
       where: {
         username: ILike(`%${q}%`),
         is_active: true,
+        deletion_requested_at: IsNull(),
         id: Not(viewerUserId),
       },
       select: ['id', 'username'],

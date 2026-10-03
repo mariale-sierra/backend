@@ -160,10 +160,15 @@ export class WorkoutPostsController {
     status: 200,
     description: 'Posts del mosaico obtenidos exitosamente',
   })
+  @ApiBearerAuth()
   @ApiResponse({ status: 400, description: 'Challenge ID inválido' })
   findMosaicByChallenge(
     @Query('challengeId', new ParseUUIDPipe()) challengeId: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.workoutPostsService.findMosaicByChallenge(challengeId);
+    return this.workoutPostsService.findMosaicByChallenge(
+      challengeId,
+      user.sub,
+    );
   }
 }
