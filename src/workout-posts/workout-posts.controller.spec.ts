@@ -52,7 +52,10 @@ describe('WorkoutPostsController.getUserPosts', () => {
 
   it('should decode a valid cursor and pass through an explicit limit', async () => {
     service.getUserPosts.mockResolvedValue({ photos: [] });
-    const cursor = encodeCursor(new Date('2026-08-16T10:00:00.000Z'), '9');
+    const cursor = encodeCursor(
+      new Date('2026-08-16T10:00:00.000Z'),
+      '3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b',
+    );
     const query: CursorPaginationQueryDto = { cursor, limit: 5 };
 
     await controller.getUserPosts(
@@ -68,7 +71,10 @@ describe('WorkoutPostsController.getUserPosts', () => {
       'viewer-1',
       {
         limit: 5,
-        cursor: { createdAt: '2026-08-16T10:00:00.000Z', id: '9' },
+        cursor: {
+          createdAt: '2026-08-16T10:00:00.000Z',
+          id: '3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b',
+        },
       },
       'America/Guatemala',
     );

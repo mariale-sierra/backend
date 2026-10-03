@@ -108,7 +108,7 @@ export class WorkoutLogController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
-    const cursor = query.cursor ? decodeCursor(query.cursor) : undefined;
+    const cursor = query.cursor ? decodeCursor(query.cursor, 'integer') : undefined;
 
     const { data, nextCursor } = await this.service.findAll(
       user.sub,

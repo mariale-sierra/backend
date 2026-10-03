@@ -49,14 +49,20 @@ describe('FeedController', () => {
 
   it('should decode a valid cursor before calling the service', async () => {
     service.getFeed.mockResolvedValue({ posts: [] });
-    const cursor = encodeCursor(new Date('2026-08-16T10:00:00.000Z'), '5');
+    const cursor = encodeCursor(
+      new Date('2026-08-16T10:00:00.000Z'),
+      '3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b',
+    );
     const query: CursorPaginationQueryDto = { cursor };
 
     await controller.getFeed(query, res as unknown as Response, viewer);
 
     expect(service.getFeed).toHaveBeenCalledWith(
       expect.objectContaining({
-        cursor: { createdAt: '2026-08-16T10:00:00.000Z', id: '5' },
+        cursor: {
+          createdAt: '2026-08-16T10:00:00.000Z',
+          id: '3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b',
+        },
       }),
     );
   });

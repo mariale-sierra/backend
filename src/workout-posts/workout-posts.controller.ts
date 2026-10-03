@@ -129,7 +129,7 @@ export class WorkoutPostsController {
     @Req() req,
   ) {
     const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
-    const cursor = query.cursor ? decodeCursor(query.cursor) : undefined;
+    const cursor = query.cursor ? decodeCursor(query.cursor, 'uuid') : undefined;
 
     const { photos, nextCursor } = await this.workoutPostsService.getUserPosts(
       userId,

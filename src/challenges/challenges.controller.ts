@@ -202,7 +202,7 @@ export class ChallengesController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
-    const cursor = query.cursor ? decodeCursor(query.cursor) : undefined;
+    const cursor = query.cursor ? decodeCursor(query.cursor, 'uuid') : undefined;
 
     const { nextCursor, ...body } = await this.challengesService.findAll(
       cursor,

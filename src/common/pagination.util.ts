@@ -3,6 +3,9 @@ import { BadRequestException } from '@nestjs/common';
 export const DEFAULT_PAGE_LIMIT = 20;
 export const MAX_PAGE_LIMIT = 50;
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export interface DecodedCursor {
   createdAt: string;
   /** Always an opaque string. workout_posts.id is a UUID column — never
@@ -32,7 +35,10 @@ export function encodeCursor(
  * `BadRequestException` on anything malformed or tampered with — this is
  * the "cursor inválido" case callers must handle as a 400, not a 500.
  */
-export function decodeCursor(cursor: string): DecodedCursor {
+export function decodeCursor(
+  cursor: string,
+  idKind?: 'uuid' | 'integer',
+): DecodedCursor {
   try {
     const json = Buffer.from(cursor, 'base64url').toString('utf8');
     const parsed: unknown = JSON.parse(json);
@@ -49,6 +55,15 @@ export function decodeCursor(cursor: string): DecodedCursor {
     }
 
     const { c, i } = parsed as { c: string; i: string };
+    // The id ends up as a bound parameter compared against a typed column;
+    // a well-formed cursor carrying the wrong kind of id would otherwise
+    // surface as a Postgres cast error (500) instead of this 400.
+    if (idKind === 'uuid' && !UUID_RE.test(i)) {
+      throw new Error('cursor id is not a uuid');
+    }
+    if (idKind === 'integer' && !/^\d{1,18}$/.test(i)) {
+      throw new Error('cursor id is not an integer');
+    }
     // Re-serialize through Date -> toISOString() rather than passing the
     // client-supplied string straight through. Date.parse() is lenient
     // (accepts things like a bare "2026"), so without this a crafted-but-

@@ -136,4 +136,31 @@ describe('pagination.util', () => {
       expect(() => decodeCursor(cursor)).not.toThrow();
     });
   });
+
+  // Found by OWASP ZAP: the Swagger example cursor carried id "42", which a
+  // UUID-keyed endpoint passed straight to Postgres and answered with a 500.
+  describe('decodeCursor — id kind validation', () => {
+    const uuid = '3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b';
+    const at = '2026-08-16T12:00:00.000Z';
+
+    it('accepts a UUID id when a uuid is expected', () => {
+      expect(decodeCursor(encodeCursor(at, uuid), 'uuid').id).toBe(uuid);
+    });
+
+    it('rejects a non-UUID id (400, not a DB error) when a uuid is expected', () => {
+      expect(() => decodeCursor(encodeCursor(at, '42'), 'uuid')).toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('accepts numeric ids and rejects the rest when an integer is expected', () => {
+      expect(decodeCursor(encodeCursor(at, 42), 'integer').id).toBe('42');
+      expect(() => decodeCursor(encodeCursor(at, uuid), 'integer')).toThrow(
+        BadRequestException,
+      );
+      expect(() =>
+        decodeCursor(encodeCursor(at, '99999999999999999999'), 'integer'),
+      ).toThrow(BadRequestException);
+    });
+  });
 });
