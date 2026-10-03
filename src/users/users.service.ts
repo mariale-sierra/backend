@@ -51,7 +51,15 @@ export class UsersService {
     // deliberately leaves it off, matching those callers' own "public-ish" shapes.
     const user = await this.userRepo.findOne({
       where: { id },
-      select: ['id', 'username', 'email', 'is_active', 'is_admin'],
+      select: [
+        'id',
+        'username',
+        'email',
+        'is_active',
+        'is_admin',
+        'terms_accepted_at',
+        'terms_version',
+      ],
     });
     if (!user) throw new NotFoundException('User not found');
     return UserResponseDto.fromEntity(user);

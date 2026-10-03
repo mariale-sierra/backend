@@ -12,10 +12,9 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { User } from '../users/entities/user.entity';
 import { UserProfile } from '../users/entities/user-profile.entity';
+import { CURRENT_TERMS_VERSION } from './terms-version';
 
-// Bump whenever the published Terms / Privacy Policy change materially; it is
-// stored on each user so we know exactly which text they agreed to.
-export const CURRENT_TERMS_VERSION = '2026-10-v1';
+export { CURRENT_TERMS_VERSION };
 
 @Injectable()
 export class AuthService {
@@ -88,6 +87,28 @@ export class AuthService {
       message: 'User registered successfully',
       accessToken: await this.signToken(user),
       user: { id: user.id, email: user.email, username: user.username },
+    };
+  }
+
+  /**
+   * For accounts created before T&C acceptance existed (or when the terms
+   * version changes): records consent for the authenticated user.
+   */
+  async acceptTerms(userId: string) {
+    const acceptedAt = new Date();
+    const result = await this.userRepo.update(
+      { id: userId, is_active: true },
+      {
+        terms_accepted_at: acceptedAt,
+        terms_version: CURRENT_TERMS_VERSION,
+        age_confirmed_at: acceptedAt,
+      },
+    );
+    if (!result.affected) throw new UnauthorizedException('User not found');
+    return {
+      message: 'Terms accepted',
+      terms_version: CURRENT_TERMS_VERSION,
+      terms_accepted_at: acceptedAt,
     };
   }
 

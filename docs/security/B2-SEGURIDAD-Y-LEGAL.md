@@ -52,8 +52,8 @@ Hallazgos que requieren decisión (no se tocaron en este bloque, son de infraest
 
 - `POST /auth/register` exige `acceptTerms: true` y `confirmAge16: true` (400 si faltan o son `false`).
 - Se guardan en `users`: `terms_accepted_at`, `terms_version` (constante `CURRENT_TERMS_VERSION` en `auth.service.ts`, hoy `2026-10-v1`) y `age_confirmed_at`. Migración `2026-10-02-03-terms-acceptance-and-account-deletion.sql`.
-- Usuarios existentes quedan con `terms_accepted_at = NULL`. **Pendiente decidir** cómo hacerles aceptar (pantalla en el siguiente login + endpoint `POST /auth/accept-terms`); no se implementó.
-- **Rompe el registro del frontend actual** hasta que envíe los dos campos y muestre los textos legales.
+- Usuarios existentes (o cuando cambie `CURRENT_TERMS_VERSION`, en `src/auth/terms-version.ts`) tienen `requires_terms_acceptance = true` en `GET /users/me`; el frontend los lleva a `/accept-terms` y llama a `POST /auth/accept-terms`, que registra fecha, versión y confirmación de edad.
+- El frontend (`register.tsx`) muestra los dos checkboxes con enlaces a los textos (`app/(auth)/legal.tsx`, contenido en `constants/legal/legalDocs.ts`, espejo del borrador .docx); no permite crear la cuenta sin ambos. Al cambiar los textos hay que actualizar ese archivo y subir `CURRENT_TERMS_VERSION`.
 
 ## 5. Eliminación de cuenta
 
