@@ -11,7 +11,7 @@ import { ModerationService } from '../openai/moderation.service';
 import { FollowsService } from '../follows/follows.service';
 import { WorkoutPostReactionsService } from './workout-post-reactions.service';
 import { WorkoutPostCommentsService } from './workout-post-comments.service';
-import { encodeCursor } from './pagination.util';
+import { encodeCursor } from '../common/pagination.util';
 
 const createMockWorkoutPostRepo = () => ({
   create: jest.fn(),
@@ -41,7 +41,11 @@ describe('WorkoutPostsService', () => {
     getReactedPostIds: jest.Mock;
   };
   let commentsService: { getCountsForPosts: jest.Mock };
-  let moderationService: { validateWorkoutImage: jest.Mock };
+  let moderationService: {
+    validateWorkoutImage: jest.Mock;
+    validateText: jest.Mock;
+    assertTextAllowed: jest.Mock;
+  };
 
   const VIEWER_ID = 'viewer-1';
   const OTHER_USER_ID = 'other-2';
@@ -64,7 +68,11 @@ describe('WorkoutPostsService', () => {
     commentsService = {
       getCountsForPosts: jest.fn().mockResolvedValue(new Map()),
     };
-    moderationService = { validateWorkoutImage: jest.fn() };
+    moderationService = {
+      validateWorkoutImage: jest.fn(),
+      validateText: jest.fn(),
+      assertTextAllowed: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -144,6 +152,27 @@ describe('WorkoutPostsService', () => {
           ),
         }),
       );
+    });
+  });
+
+  // B3 (CP-70): the caption of a photo post is already moderated together
+  // with the image by the async batch (validateWorkoutImage) — create() must
+  // not also run the synchronous text moderation on it.
+  describe('create — no duplicated caption moderation (B3)', () => {
+    it('should never call the text moderation when creating a photo post with a caption', async () => {
+      postRepo.create.mockReturnValue({} as WorkoutPost);
+      postRepo.save.mockImplementation((post: WorkoutPost) =>
+        Promise.resolve(post),
+      );
+
+      await service.create({
+        user_id: 'author-1',
+        image_url: 'https://example.com/a.jpg',
+        caption: 'día 3',
+      });
+
+      expect(moderationService.validateText).not.toHaveBeenCalled();
+      expect(moderationService.assertTextAllowed).not.toHaveBeenCalled();
     });
   });
 
@@ -586,6 +615,59 @@ describe('WorkoutPostsService', () => {
       const photos = await service.getChallengePhotos('challenge-1', VIEWER_ID);
 
       expect(photos[0].day).toBe(4);
+    });
+  });
+
+  // B2: GET /workout-posts/mosaic used to apply no visibility filter at all.
+  describe('findMosaicByChallenge (B2 visibility)', () => {
+    it('should apply post visibility, followers, challenge-privacy and hidden filters for the viewer', async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.findMosaicByChallenge('challenge-1', VIEWER_ID);
+
+      const [sql, params] = postRepo.manager.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(sql).toContain('wl.challenge_id = $1');
+      expect(sql).toContain('p.is_hidden = false');
+      expect(sql).toContain("p.visibility != 'private'");
+      expect(sql).toContain("p.visibility != 'followers'");
+      expect(sql).toContain("c.visibility IS DISTINCT FROM 'private'");
+      expect(sql).toMatch(/havit\.challenge_user_map/);
+      expect(params[0]).toBe('challenge-1');
+      expect(params[1]).toBe(VIEWER_ID);
+    });
+
+    it('should keep the legacy response shape', async () => {
+      postRepo.manager.query.mockResolvedValue([
+        {
+          id: 'p1',
+          workout_log_id: 7,
+          user_id: 'u1',
+          image_url: 'https://img',
+          caption: null,
+          visibility: 'public',
+          created_at: new Date('2026-10-01T00:00:00Z'),
+          wl_id: 7,
+          wl_challenge_id: 'challenge-1',
+          wl_routine_id: 3,
+          wl_status: 'completed',
+          wl_started_at: new Date('2026-10-01T00:00:00Z'),
+        },
+      ]);
+
+      const result = await service.findMosaicByChallenge(
+        'challenge-1',
+        VIEWER_ID,
+      );
+
+      expect(result.data[0].workoutLog).toMatchObject({
+        id: 7,
+        challengeId: 'challenge-1',
+        routineId: 3,
+        status: 'completed',
+      });
     });
   });
 

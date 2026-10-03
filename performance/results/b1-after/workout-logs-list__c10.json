@@ -1,0 +1,37 @@
+{
+  "name": "workout-logs-list",
+  "url": "http://localhost:3000/workout-logs",
+  "connections": 10,
+  "amount": 200,
+  "timestamp": "2026-10-02T21:45:50.140Z",
+  "sha": "192371b",
+  "branch": "feature/b1-pgbouncer-redis-pagination",
+  "scenario": "after",
+  "stats": {
+    "durationSeconds": 1.01,
+    "requests": {
+      "total": 200,
+      "average": 200,
+      "mean": 200
+    },
+    "throughputBytesPerSec": 202944,
+    "latencyMs": {
+      "average": 6.05,
+      "p50": 4,
+      "p75": 6,
+      "p90": 8,
+      "p97_5": 28,
+      "p99": 36,
+      "min": 2,
+      "max": 36
+    },
+    "errors": 0,
+    "timeouts": 0,
+    "non2xx": 0,
+    "statusCodeStats": {
+      "200": {
+        "count": 200
+      }
+    }
+  }
+}

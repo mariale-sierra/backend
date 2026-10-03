@@ -5,12 +5,20 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
+import {
+  helmetOptions,
+  securityHeadersMiddleware,
+} from './config/security-headers';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const publicApiUrl = process.env.PUBLIC_API_URL ?? 'http://20.63.84.1:3000';
 
-  app.use(helmet());
+  // CSP / COEP / COOP / CORP live in config/security-headers.ts; Permissions-
+  // Policy and Cache-Control come from securityHeadersMiddleware (helmet has
+  // no support for either).
+  app.use(helmet(helmetOptions));
+  app.use(securityHeadersMiddleware);
 
   // The mobile client (Expo/React Native) is not a browser and isn't subject
   // to CORS at all — this only matters for browser-based callers (Swagger UI,

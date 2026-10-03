@@ -1,0 +1,37 @@
+{
+  "name": "challenges-list",
+  "url": "http://localhost:3000/challenges",
+  "connections": 20,
+  "amount": 200,
+  "timestamp": "2026-10-02T21:45:42.483Z",
+  "sha": "192371b",
+  "branch": "feature/b1-pgbouncer-redis-pagination",
+  "scenario": "after",
+  "stats": {
+    "durationSeconds": 1.01,
+    "requests": {
+      "total": 200,
+      "average": 200,
+      "mean": 200
+    },
+    "throughputBytesPerSec": 2511872,
+    "latencyMs": {
+      "average": 7.78,
+      "p50": 5,
+      "p75": 6,
+      "p90": 10,
+      "p97_5": 41,
+      "p99": 44,
+      "min": 1,
+      "max": 47
+    },
+    "errors": 0,
+    "timeouts": 0,
+    "non2xx": 0,
+    "statusCodeStats": {
+      "200": {
+        "count": 200
+      }
+    }
+  }
+}

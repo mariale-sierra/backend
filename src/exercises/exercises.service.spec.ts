@@ -16,6 +16,23 @@ import { ExerciseAsset } from './entities/exercise-asset.entity';
 import { MuscleRegion } from './entities/muscle-region.entity';
 import { Muscle } from './entities/muscle.entity';
 import { MuscleSvgPart } from './entities/muscle-svg-part.entity';
+import { RedisCacheService } from '../cache/redis-cache.service';
+
+const createMockCache = () => ({
+  isEnabled: jest.fn().mockReturnValue(false),
+  get: jest.fn().mockResolvedValue(null),
+  set: jest.fn().mockResolvedValue(undefined),
+  del: jest.fn().mockResolvedValue(undefined),
+  getVersion: jest.fn().mockResolvedValue(0),
+  bumpVersion: jest.fn().mockResolvedValue(undefined),
+  // Pass-through: tests exercise the real (uncached) code path, same as
+  // before RedisCacheService existed — only cache-specific tests below
+  // assert on getOrSet/bumpVersion being called correctly.
+  getOrSet: jest.fn(
+    async (_key: string, _ttl: number, loader: () => Promise<unknown>) =>
+      loader(),
+  ) as jest.Mock<Promise<unknown>, [string, number, () => Promise<unknown>]>,
+});
 
 const createMockRepo = () => ({
   find: jest.fn().mockResolvedValue([]),
@@ -32,6 +49,8 @@ describe('ExercisesService', () => {
   let exerciseRepo: ReturnType<typeof createMockRepo>;
   let muscleRepo: ReturnType<typeof createMockRepo>;
   let bodyPartRepo: ReturnType<typeof createMockRepo>;
+  let categoryRepo: ReturnType<typeof createMockRepo>;
+  let cache: ReturnType<typeof createMockCache>;
   let transactionManager: {
     delete: jest.Mock;
     save: jest.Mock;
@@ -42,6 +61,8 @@ describe('ExercisesService', () => {
     exerciseRepo = createMockRepo();
     muscleRepo = createMockRepo();
     bodyPartRepo = createMockRepo();
+    categoryRepo = createMockRepo();
+    cache = createMockCache();
     transactionManager = {
       delete: jest.fn(),
       save: jest.fn(),
@@ -54,7 +75,7 @@ describe('ExercisesService', () => {
         { provide: getRepositoryToken(Exercise), useValue: exerciseRepo },
         {
           provide: getRepositoryToken(ExerciseCategory),
-          useValue: createMockRepo(),
+          useValue: categoryRepo,
         },
         {
           provide: getRepositoryToken(ExerciseLocation),
@@ -106,6 +127,7 @@ describe('ExercisesService', () => {
             ),
           },
         },
+        { provide: RedisCacheService, useValue: cache },
       ],
     }).compile();
 
@@ -418,6 +440,83 @@ describe('ExercisesService', () => {
           muscleAssignments: [{ muscleId: 999, role: 'primary' }],
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('caching (B6)', () => {
+    it('findAllCategories: a cache hit returns the cached value without querying Postgres', async () => {
+      cache.getOrSet.mockResolvedValueOnce([{ id: 1, name: 'Cached' }]);
+
+      const result = await service.findAllCategories();
+
+      expect(result).toEqual([{ id: 1, name: 'Cached' }]);
+      expect(categoryRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('findAllCategories: a cache miss loads from Postgres and stores the result', async () => {
+      categoryRepo.find.mockResolvedValue([{ id: 1, name: 'Strength' }]);
+
+      const result = await service.findAllCategories();
+
+      expect(result).toEqual([{ id: 1, name: 'Strength' }]);
+      expect(categoryRepo.find).toHaveBeenCalledTimes(1);
+      expect(cache.getOrSet).toHaveBeenCalledWith(
+        expect.stringContaining('exercises:v0:categories'),
+        expect.any(Number),
+        expect.any(Function),
+      );
+    });
+
+    it('findAll: different query params never collide on the same cache key', async () => {
+      const qb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      };
+      exerciseRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.findAll({ page: 1 } as never);
+      await service.findAll({ page: 2 } as never);
+      await service.findAll({ category: ['strength'] } as never);
+
+      const keysUsed = cache.getOrSet.mock.calls.map((call) => call[0]);
+      expect(new Set(keysUsed).size).toBe(keysUsed.length);
+    });
+
+    it('findAllCategories: the cache key is namespaced by the current cache version', async () => {
+      cache.getVersion.mockResolvedValueOnce(7);
+      categoryRepo.find.mockResolvedValue([]);
+
+      await service.findAllCategories();
+
+      expect(cache.getOrSet).toHaveBeenCalledWith(
+        'exercises:v7:categories',
+        expect.any(Number),
+        expect.any(Function),
+      );
+    });
+
+    it('create() invalidates the exercises cache namespace', async () => {
+      exerciseRepo.save.mockResolvedValue({ id: 1 });
+
+      await service.create({ name: 'New Exercise' } as never);
+
+      expect(cache.bumpVersion).toHaveBeenCalledWith('exercises');
+    });
+
+    it('updateRelations() invalidates the exercises cache namespace', async () => {
+      exerciseRepo.findOne.mockResolvedValue({ id: 123 });
+
+      await service.updateRelations(123, {
+        categoryIds: [],
+        locationIds: [],
+      });
+
+      expect(cache.bumpVersion).toHaveBeenCalledWith('exercises');
     });
   });
 });

@@ -29,6 +29,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1045.0",
     "@aws-sdk/s3-request-presigner": "^3.1045.0",
+    "@nest-lab/throttler-storage-redis": "^1.2.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.3",
     "@nestjs/core": "^11.0.1",
@@ -45,6 +46,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.4",
     "helmet": "^8.3.0",
+    "ioredis": "^5.11.1",
     "openai": "^6.39.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
@@ -68,6 +70,7 @@
     "@types/passport-jwt": "^4.0.1",
     "@types/supertest": "^6.0.2",
     "@types/uuid": "^10.0.0",
+    "autocannon": "^8.0.0",
     "eslint": "^10.1.0",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-prettier": "^5.2.2",

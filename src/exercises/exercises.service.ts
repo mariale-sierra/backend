@@ -21,6 +21,17 @@ import { ExerciseAsset } from './entities/exercise-asset.entity';
 import { MuscleRegion } from './entities/muscle-region.entity';
 import { Muscle } from './entities/muscle.entity';
 import { MuscleSvgPart } from './entities/muscle-svg-part.entity';
+import { RedisCacheService } from '../cache/redis-cache.service';
+
+// Namespace for every exercises-catalog cache key/version counter (see
+// RedisCacheService.getVersion). Bumped on create()/updateRelations() so
+// every cached read below (whatever its params) invalidates at once.
+const CACHE_NAMESPACE = 'exercises';
+// Public catalog data, changed only by rare admin writes (POST /exercises,
+// POST /exercises/:id/relations) — a few minutes of staleness is
+// unobservable in practice and bounds cost if a bump is ever missed.
+const CATALOG_TTL_SECONDS = 300;
+const LIST_TTL_SECONDS = 120;
 
 // Preference order when a list row needs exactly one representative image.
 const ASSET_TYPE_PRIORITY = ['main', 'start', 'peak', 'thumbnail', 'animation'];
@@ -43,7 +54,9 @@ const ASSET_TYPE_PRIORITY = ['main', 'start', 'peak', 'thumbnail', 'animation'];
  * sites below share this check so they can't drift apart on it again.
  */
 function wantsAnywhereLocation(locationValues: string[]): boolean {
-  return locationValues.some((value) => value.trim().toLowerCase() === 'anywhere');
+  return locationValues.some(
+    (value) => value.trim().toLowerCase() === 'anywhere',
+  );
 }
 
 @Injectable()
@@ -76,6 +89,7 @@ export class ExercisesService {
     private muscleRepo: Repository<Muscle>,
     @InjectRepository(MuscleSvgPart)
     private muscleSvgPartRepo: Repository<MuscleSvgPart>,
+    private readonly cache: RedisCacheService,
   ) {}
 
   /** Builds a public R2 URL from a bare storage_key — never persisted, always derived. */
@@ -84,9 +98,20 @@ export class ExercisesService {
     return `${process.env['CLOUDFLARE_R2_PUBLIC_URL']}/${storageKey}`;
   }
 
+  /** Prefixes a cache key with the current exercises cache version (see CACHE_NAMESPACE). */
+  private async cacheKey(suffix: string): Promise<string> {
+    const version = await this.cache.getVersion(CACHE_NAMESPACE);
+    return `${CACHE_NAMESPACE}:v${version}:${suffix}`;
+  }
+
   async create(dto: CreateExerciseDto) {
     const exercise = this.exerciseRepo.create(dto);
-    return this.exerciseRepo.save(exercise);
+    const saved = await this.exerciseRepo.save(exercise);
+    // A new exercise can appear in findAll()/counts immediately — invalidate
+    // every cached exercises read rather than trying to reason about which
+    // filter combinations it now matches.
+    await this.cache.bumpVersion(CACHE_NAMESPACE);
+    return saved;
   }
 
   /**
@@ -97,6 +122,13 @@ export class ExercisesService {
    * a null-check fallback.
    */
   async findAll(query: QueryExercisesDto) {
+    const key = await this.cacheKey(`findAll:${JSON.stringify(query)}`);
+    return this.cache.getOrSet(key, LIST_TTL_SECONDS, () =>
+      this.findAllUncached(query),
+    );
+  }
+
+  private async findAllUncached(query: QueryExercisesDto) {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const locale = query.locale ?? 'en';
@@ -272,14 +304,20 @@ export class ExercisesService {
   }
 
   async findAllBodyParts() {
-    return this.bodyPartRepo.find({
-      where: { isActive: true },
-      order: { level: 'ASC', sortOrder: 'ASC' },
-    });
+    const key = await this.cacheKey('bodyParts');
+    return this.cache.getOrSet(key, CATALOG_TTL_SECONDS, () =>
+      this.bodyPartRepo.find({
+        where: { isActive: true },
+        order: { level: 'ASC', sortOrder: 'ASC' },
+      }),
+    );
   }
 
   async findAllCategories() {
-    return this.categoryRepo.find({ order: { name: 'ASC' } });
+    const key = await this.cacheKey('categories');
+    return this.cache.getOrSet(key, CATALOG_TTL_SECONDS, () =>
+      this.categoryRepo.find({ order: { name: 'ASC' } }),
+    );
   }
 
   /**
@@ -329,6 +367,13 @@ export class ExercisesService {
   }
 
   async findFullById(id: number, locale = 'en') {
+    const key = await this.cacheKey(`full:${id}:${locale}`);
+    return this.cache.getOrSet(key, CATALOG_TTL_SECONDS, () =>
+      this.findFullByIdUncached(id, locale),
+    );
+  }
+
+  private async findFullByIdUncached(id: number, locale = 'en') {
     const exercise = await this.exerciseRepo
       .createQueryBuilder('exercise')
       .leftJoinAndSelect('exercise.exercise_metrics', 'exerciseMetric')
@@ -432,6 +477,13 @@ export class ExercisesService {
    * of their own; `full_body` has no children at all, so it stays null).
    */
   async findMuscleRegions() {
+    const key = await this.cacheKey('muscleRegions');
+    return this.cache.getOrSet(key, CATALOG_TTL_SECONDS, () =>
+      this.findMuscleRegionsUncached(),
+    );
+  }
+
+  private async findMuscleRegionsUncached() {
     const regions = await this.muscleRegionRepo.find({
       where: { isActive: true },
       order: { sortOrder: 'ASC' },
@@ -461,6 +513,13 @@ export class ExercisesService {
 
   /** Muscles in a region, each with an icon URL (or null) and its SVG parts grouped by view. */
   async findMusclesInRegion(regionCode: string) {
+    const key = await this.cacheKey(`musclesInRegion:${regionCode}`);
+    return this.cache.getOrSet(key, CATALOG_TTL_SECONDS, () =>
+      this.findMusclesInRegionUncached(regionCode),
+    );
+  }
+
+  private async findMusclesInRegionUncached(regionCode: string) {
     const region = await this.muscleRegionRepo.findOne({
       where: { code: regionCode },
     });
@@ -497,6 +556,17 @@ export class ExercisesService {
 
   /** One muscle's detail: icon, svg parts, coverage, and paginated primary/secondary exercise lists. */
   async findMuscleDetail(code: string, page = 1, pageSize = 20) {
+    const key = await this.cacheKey(`muscleDetail:${code}:${page}:${pageSize}`);
+    return this.cache.getOrSet(key, CATALOG_TTL_SECONDS, () =>
+      this.findMuscleDetailUncached(code, page, pageSize),
+    );
+  }
+
+  private async findMuscleDetailUncached(
+    code: string,
+    page = 1,
+    pageSize = 20,
+  ) {
     const muscle = await this.muscleRepo.findOne({
       where: { code },
       relations: { region: true },
@@ -679,6 +749,11 @@ export class ExercisesService {
         }
       }
     });
+
+    // Categories/locations/muscles/body parts feed findAll()'s per-row
+    // category/location and findFullById()'s full relation lists — bump
+    // rather than try to enumerate which cached filter combinations changed.
+    await this.cache.bumpVersion(CACHE_NAMESPACE);
 
     const relations = await this.findRelationsByExerciseId(id);
 

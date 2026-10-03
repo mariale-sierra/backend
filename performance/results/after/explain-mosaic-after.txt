@@ -1,0 +1,28 @@
+                                                                          QUERY PLAN                                                                           
+---------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=500.39..500.60 rows=84 width=158) (actual time=0.919..0.922 rows=96.00 loops=1)
+   Sort Key: post.created_at DESC
+   Sort Method: quicksort  Memory: 39kB
+   Buffers: shared hit=150 read=2
+   ->  Hash Join  (cost=266.56..497.70 rows=84 width=158) (actual time=0.240..0.895 rows=96.00 loops=1)
+         Hash Cond: (post.workout_log_id = wl.id)
+         Buffers: shared hit=147 read=2
+         ->  Seq Scan on workout_posts post  (cost=0.00..212.82 rows=6982 width=158) (actual time=0.004..0.634 rows=6982.00 loops=1)
+               Buffers: shared hit=143
+         ->  Hash  (cost=263.56..263.56 rows=240 width=8) (actual time=0.048..0.048 rows=240.00 loops=1)
+               Buckets: 1024  Batches: 1  Memory Usage: 18kB
+               Buffers: shared hit=4 read=2
+               ->  Bitmap Heap Scan on workout_logs wl  (cost=6.15..263.56 rows=240 width=8) (actual time=0.019..0.036 rows=240.00 loops=1)
+                     Recheck Cond: (challenge_id = 'da852b5a-334d-461b-9758-6e77bdc8d5dd'::uuid)
+                     Heap Blocks: exact=4
+                     Buffers: shared hit=4 read=2
+                     ->  Bitmap Index Scan on idx_workout_logs_challenge_id  (cost=0.00..6.09 rows=240 width=0) (actual time=0.013..0.013 rows=240.00 loops=1)
+                           Index Cond: (challenge_id = 'da852b5a-334d-461b-9758-6e77bdc8d5dd'::uuid)
+                           Index Searches: 1
+                           Buffers: shared read=2
+ Planning:
+   Buffers: shared hit=386 read=1
+ Planning Time: 0.722 ms
+ Execution Time: 0.991 ms
+(24 filas)
+

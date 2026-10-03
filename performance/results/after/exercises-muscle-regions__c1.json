@@ -1,0 +1,37 @@
+{
+  "name": "exercises-muscle-regions",
+  "url": "http://localhost:3000/exercises/muscle-regions",
+  "connections": 1,
+  "amount": 200,
+  "timestamp": "2026-09-28T02:02:47.986Z",
+  "sha": "5b17de9",
+  "branch": "development",
+  "scenario": "after",
+  "stats": {
+    "durationSeconds": 1,
+    "requests": {
+      "total": 200,
+      "average": 200,
+      "mean": 200
+    },
+    "throughputBytesPerSec": 327296,
+    "latencyMs": {
+      "average": 0.06,
+      "p50": 0,
+      "p75": 0,
+      "p90": 0,
+      "p97_5": 0,
+      "p99": 0,
+      "min": 1,
+      "max": 11
+    },
+    "errors": 0,
+    "timeouts": 0,
+    "non2xx": 0,
+    "statusCodeStats": {
+      "200": {
+        "count": 200
+      }
+    }
+  }
+}

@@ -6,6 +6,7 @@ import { WorkoutPost } from './entities/workout-post.entity';
 import { CommentDto } from './dto/comment.dto';
 import { assertOwnership } from '../auth/utils/assert-ownership';
 import { assertPostVisibleToUser } from './workout-post-visibility.util';
+import { ModerationService } from '../openai/moderation.service';
 
 export const DEFAULT_COMMENTS_LIMIT = 20;
 export const MAX_COMMENTS_LIMIT = 50;
@@ -22,27 +23,28 @@ export class WorkoutPostCommentsService {
     private commentRepo: Repository<WorkoutPostComment>,
     @InjectRepository(WorkoutPost)
     private postRepo: Repository<WorkoutPost>,
+    private moderationService: ModerationService,
   ) {}
 
   private async loadCommentablePost(
     postId: string,
     userId: string,
   ): Promise<WorkoutPost> {
-    const post = await this.postRepo.findOne({ where: { id: postId } });
+    const post = await this.postRepo.findOne({
+      where: { id: postId, is_hidden: false },
+    });
     if (!post) throw new NotFoundException('Workout post not found');
     assertPostVisibleToUser(post, userId);
     return post;
   }
 
   /**
-   * Persists and returns a new comment. Deliberately does NOT run any
-   * content moderation yet — same reasoning as ChatsService.sendMessage /
-   * SpacesService.sendMessage: Esteban's Moderation API (Bloque 4) isn't
-   * wired to any text-content surface yet, and the existing
-   * ModerationService.validateWorkoutImage() contract requires an image URL
-   * (built for post photos), so there's no text-only contract to integrate
-   * against here without inventing one. This is the call site once that
-   * contract exists.
+   * Persists and returns a new comment. B3: the text is moderated
+   * synchronously (ModerationService.assertTextAllowed) before saving — a
+   * flagged comment is rejected with 400 CONTENT_REJECTED and never
+   * persisted; if OpenAI can't be reached it fails closed with 503. The
+   * post lookup/visibility check runs first so a 404/403 never spends a
+   * moderation call. See docs/moderacion-automatica.md.
    */
   async create(
     postId: string,
@@ -50,6 +52,7 @@ export class WorkoutPostCommentsService {
     content: string,
   ): Promise<CommentDto> {
     await this.loadCommentablePost(postId, userId);
+    await this.moderationService.assertTextAllowed(content);
 
     const comment = this.commentRepo.create({
       workout_post_id: postId,
@@ -88,6 +91,7 @@ export class WorkoutPostCommentsService {
       .leftJoinAndSelect('author.profile', 'profile')
       .where('c.workout_post_id = :postId', { postId })
       .andWhere('c.is_active = true')
+      .andWhere('c.is_hidden = false')
       .orderBy('c.id', 'ASC')
       .take(limit + 1);
 
@@ -135,6 +139,7 @@ export class WorkoutPostCommentsService {
       .addSelect('COUNT(*)', 'count')
       .where('c.workout_post_id IN (:...postIds)', { postIds })
       .andWhere('c.is_active = true')
+      .andWhere('c.is_hidden = false')
       .groupBy('c.workout_post_id')
       .getRawMany<{ postId: string; count: string }>();
     return new Map(rows.map((r) => [r.postId, Number(r.count)]));

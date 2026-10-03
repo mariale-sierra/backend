@@ -14,6 +14,7 @@ import { WorkoutLogExercise } from './entities/workout-log-exercise.entity';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
+import { RedisCacheService } from '../cache/redis-cache.service';
 
 const createMockRepo = () => ({
   find: jest.fn(),
@@ -21,6 +22,22 @@ const createMockRepo = () => ({
   findOneBy: jest.fn(),
   save: jest.fn(),
   create: jest.fn((v) => v),
+  createQueryBuilder: jest.fn(),
+});
+
+// Same pass-through mock as exercises.service.spec.ts — real code path by
+// default, only cache-specific tests assert on getOrSet/bumpVersion.
+const createMockCache = () => ({
+  isEnabled: jest.fn().mockReturnValue(false),
+  get: jest.fn().mockResolvedValue(null),
+  set: jest.fn().mockResolvedValue(undefined),
+  del: jest.fn().mockResolvedValue(undefined),
+  getVersion: jest.fn().mockResolvedValue(0),
+  bumpVersion: jest.fn().mockResolvedValue(undefined),
+  getOrSet: jest.fn(
+    async (_key: string, _ttl: number, loader: () => Promise<unknown>) =>
+      loader(),
+  ) as jest.Mock<Promise<unknown>, [string, number, () => Promise<unknown>]>,
 });
 
 describe('WorkoutLogService', () => {
@@ -30,6 +47,7 @@ describe('WorkoutLogService', () => {
   let workoutPostsService: { create: jest.Mock };
   let challengeRepo: ReturnType<typeof createMockRepo>;
   let challengeUserMapRepo: ReturnType<typeof createMockRepo>;
+  let cache: ReturnType<typeof createMockCache>;
 
   const OWNER_ID = 'owner-1';
   const OTHER_USER_ID = 'other-2';
@@ -45,10 +63,12 @@ describe('WorkoutLogService', () => {
     workoutPostsService = { create: jest.fn() };
     challengeRepo = createMockRepo();
     challengeUserMapRepo = createMockRepo();
+    cache = createMockCache();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WorkoutLogService,
+        { provide: RedisCacheService, useValue: cache },
         {
           provide: getRepositoryToken(RoutineExercise),
           useValue: createMockRepo(),
@@ -206,9 +226,7 @@ describe('WorkoutLogService', () => {
         dataSource.transaction.mockImplementation(async (cb) =>
           cb({
             create: jest.fn().mockReturnValue({ id: 99, userId: OWNER_ID }),
-            save: jest
-              .fn()
-              .mockResolvedValue({ id: 99, userId: OWNER_ID }),
+            save: jest.fn().mockResolvedValue({ id: 99, userId: OWNER_ID }),
             getRepository: jest.fn(),
           }),
         );
@@ -251,13 +269,19 @@ describe('WorkoutLogService', () => {
           visibility: 'public',
         });
 
-        expect(workoutPostsService.create).toHaveBeenCalledWith({
-          workout_log_id: 99,
-          user_id: OWNER_ID,
-          image_url: 'https://example.com/day1.jpg',
-          caption: 'Día 1 completado',
-          visibility: 'public',
-        });
+        expect(workoutPostsService.create).toHaveBeenCalledWith(
+          {
+            workout_log_id: 99,
+            user_id: OWNER_ID,
+            image_url: 'https://example.com/day1.jpg',
+            caption: 'Día 1 completado',
+            visibility: 'public',
+          },
+          // B5: now created through the same transactional manager as the
+          // workout log itself, not a bare call — see createWorkout's own
+          // comment on why (atomic with the log it evidences).
+          expect.anything(),
+        );
       });
 
       it('should default visibility to private when the caller omits it', async () => {
@@ -269,6 +293,7 @@ describe('WorkoutLogService', () => {
 
         expect(workoutPostsService.create).toHaveBeenCalledWith(
           expect.objectContaining({ visibility: 'private' }),
+          expect.anything(),
         );
       });
 
@@ -325,6 +350,7 @@ describe('WorkoutLogService', () => {
         });
         expect(workoutPostsService.create).toHaveBeenCalledWith(
           expect.objectContaining({ visibility: 'private' }),
+          expect.anything(),
         );
       });
 
@@ -340,6 +366,7 @@ describe('WorkoutLogService', () => {
 
         expect(workoutPostsService.create).toHaveBeenCalledWith(
           expect.objectContaining({ visibility: 'public' }),
+          expect.anything(),
         );
       });
 
@@ -361,6 +388,7 @@ describe('WorkoutLogService', () => {
         );
         expect(workoutPostsService.create).toHaveBeenCalledWith(
           expect.objectContaining({ visibility: 'followers' }),
+          expect.anything(),
         );
       });
 
@@ -382,6 +410,7 @@ describe('WorkoutLogService', () => {
         expect(challengeRepo.findOne).not.toHaveBeenCalled();
         expect(workoutPostsService.create).toHaveBeenCalledWith(
           expect.objectContaining({ visibility: 'public' }),
+          expect.anything(),
         );
       });
     });
@@ -503,9 +532,7 @@ describe('WorkoutLogService', () => {
       it('should never surface an auto-complete failure as a failed progress submission', async () => {
         jest.useFakeTimers();
         jest.setSystemTime(new Date('2026-09-15T12:00:00.000Z'));
-        challengeUserMapRepo.findOne.mockRejectedValue(
-          new Error('db hiccup'),
-        );
+        challengeUserMapRepo.findOne.mockRejectedValue(new Error('db hiccup'));
         const consoleErrorSpy = jest
           .spyOn(console, 'error')
           .mockImplementation(() => undefined);
@@ -585,14 +612,67 @@ describe('WorkoutLogService', () => {
   });
 
   describe('findAll', () => {
+    function mockIdQuery(rows: Array<{ id: number; started_at: Date }>) {
+      const qb = {
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(rows),
+      };
+      workoutRepo.createQueryBuilder.mockReturnValue(qb);
+      return qb;
+    }
+
     it('should scope the query to only the requesting user id', async () => {
-      workoutRepo.find.mockResolvedValue([]);
+      const qb = mockIdQuery([]);
 
       await service.findAll(OWNER_ID);
 
+      expect(qb.where).toHaveBeenCalledWith('workout.userId = :userId', {
+        userId: OWNER_ID,
+      });
+      expect(workoutRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('hydrates the page with the usual relations, in cursor order', async () => {
+      const started1 = new Date('2026-01-02T00:00:00.000Z');
+      const started2 = new Date('2026-01-01T00:00:00.000Z');
+      mockIdQuery([
+        { id: 2, started_at: started1 },
+        { id: 1, started_at: started2 },
+      ]);
+      workoutRepo.find.mockResolvedValue([
+        { id: 1, started_at: started2 },
+        { id: 2, started_at: started1 },
+      ]);
+
+      const { data, nextCursor } = await service.findAll(OWNER_ID);
+
       expect(workoutRepo.find).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { userId: OWNER_ID } }),
+        expect.objectContaining({
+          where: { id: expect.anything() },
+          relations: expect.arrayContaining(['exercises', 'posts']),
+        }),
       );
+      expect(data.map((w) => w.id)).toEqual([2, 1]);
+      expect(nextCursor).toBeUndefined();
+    });
+
+    it('returns a nextCursor when there is one more row than the page limit', async () => {
+      const rows = Array.from({ length: 21 }, (_, i) => ({
+        id: 21 - i,
+        started_at: new Date(2026, 0, 21 - i),
+      }));
+      mockIdQuery(rows);
+      workoutRepo.find.mockResolvedValue(rows.slice(0, 20));
+
+      const { data, nextCursor } = await service.findAll(OWNER_ID);
+
+      expect(data).toHaveLength(20);
+      expect(nextCursor).toBeDefined();
     });
   });
 });

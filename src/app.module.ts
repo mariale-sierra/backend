@@ -3,7 +3,9 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
 import { ScheduleModule } from '@nestjs/schedule';
+import { CacheModule } from './cache/cache.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ChallengesModule } from './challenges/challenges.module';
@@ -38,18 +40,56 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
     // Modest global rate limit (hardening, Fase 1): protects against basic
     // abuse/flooding without affecting normal mobile app usage patterns.
-    ThrottlerModule.forRoot([
-      {
-        name: 'default',
-        ttl: 60_000,
-        limit: 300,
-      },
-    ]),
+    // ttl/limit are env-overridable (defaults unchanged) purely so B6's load
+    // tests (backend/performance/) can raise the ceiling for a benchmark run
+    // without every request from one IP tripping 429s — see
+    // backend/performance/METHODOLOGY.md. Never set THROTTLE_* in a real
+    // deployment; there's no legitimate reason to loosen this outside a
+    // benchmark environment.
+    //
+    // B1: storage defaults to @nestjs/throttler's own in-memory Map, which
+    // is per-process — correct for today's single-instance deployment, but
+    // would silently become `limit × instance count` the moment the backend
+    // runs as more than one container behind a load balancer (flagged as
+    // B6's own "Future work #3"). When REDIS_URL is set, every instance
+    // shares one real counter in Redis instead — same env var, same
+    // zero-risk/env-gated rollout as RedisCacheService itself (unset =
+    // old in-memory behavior, no code change needed to roll back). See
+    // backend/performance/B1-REDIS.md.
+    ThrottlerModule.forRootAsync({
+      useFactory: () => ({
+        throttlers: [
+          {
+            name: 'default',
+            ttl: parseInt(process.env.THROTTLE_TTL_MS ?? '60000', 10),
+            limit: parseInt(process.env.THROTTLE_LIMIT ?? '300', 10),
+          },
+        ],
+        storage: process.env.REDIS_URL
+          ? new ThrottlerStorageRedisService(process.env.REDIS_URL)
+          : undefined,
+      }),
+    }),
 
     TypeOrmModule.forRoot({
       type: 'postgres',
-      host: process.env.DB_HOST,
-      port: parseInt(process.env.DB_PORT ?? '5432', 10),
+      // B1 (PgBouncer): the app's runtime connection goes through
+      // DB_POOL_HOST/DB_POOL_PORT when set — PgBouncer sitting in front of
+      // Azure Postgres — defaulting to DB_HOST/DB_PORT (the direct
+      // connection) when unset, same zero-risk/env-gated rollout as
+      // REDIS_URL. database/scripts/migrate.js (DDL, baseline, fixtures)
+      // deliberately keeps using DB_HOST/DB_PORT directly, bypassing the
+      // pool — see backend/performance/B1-PGBOUNCER.md.
+      // `||`, not `??`: an env var passed through Docker Compose as
+      // `${DB_POOL_HOST:-}` (unset in .env) arrives as an actual empty
+      // string, not undefined — `??` would keep that empty string instead
+      // of falling back to DB_HOST. Confirmed live while testing the
+      // PgBouncer rollout (backend/performance/B1-PGBOUNCER.md).
+      host: process.env.DB_POOL_HOST || process.env.DB_HOST,
+      port: parseInt(
+        process.env.DB_POOL_PORT || process.env.DB_PORT || '5432',
+        10,
+      ),
       username: process.env.DB_USERNAME,
       password: process.env.DB_PASSWORD,
       database: process.env.DB_DATABASE,
@@ -70,7 +110,12 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
               rejectUnauthorized:
                 process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true',
             },
+      // PgBouncer (transaction pooling) now does the heavy multiplexing
+      // across instances; this just bounds how many connections THIS
+      // process's own `pg` pool opens against whatever it's pointed at.
+      extra: { max: parseInt(process.env.DB_POOL_SIZE ?? '10', 10) },
     }),
+    CacheModule,
     AuthModule,
     UsersModule,
     ChallengesModule,

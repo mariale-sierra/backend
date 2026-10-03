@@ -35,6 +35,16 @@ export class WorkoutPostComment {
   @Column({ default: true })
   is_active!: boolean;
 
+  /** Oculto por un admin al resolver un reporte (Sprint 8, B2). */
+  @Column({ default: false })
+  is_hidden!: boolean;
+
+  @Column({ type: 'timestamp', nullable: true })
+  hidden_at?: Date | null;
+
+  @Column({ type: 'text', nullable: true })
+  hidden_reason?: string | null;
+
   @ManyToOne(() => WorkoutPost)
   @JoinColumn({ name: 'workout_post_id' })
   post?: WorkoutPost;

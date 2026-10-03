@@ -20,8 +20,8 @@ import {
 import { WorkoutPostsService } from './workout-posts.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
-import { CursorPaginationQueryDto } from './dto/cursor-pagination-query.dto';
-import { decodeCursor, DEFAULT_PAGE_LIMIT } from './pagination.util';
+import { CursorPaginationQueryDto } from '../common/cursor-pagination-query.dto';
+import { decodeCursor, DEFAULT_PAGE_LIMIT } from '../common/pagination.util';
 import { resolveRequestTimezone } from '../common/timezone.util';
 
 @ApiTags('Workout Posts')
@@ -160,10 +160,15 @@ export class WorkoutPostsController {
     status: 200,
     description: 'Posts del mosaico obtenidos exitosamente',
   })
+  @ApiBearerAuth()
   @ApiResponse({ status: 400, description: 'Challenge ID inválido' })
   findMosaicByChallenge(
     @Query('challengeId', new ParseUUIDPipe()) challengeId: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.workoutPostsService.findMosaicByChallenge(challengeId);
+    return this.workoutPostsService.findMosaicByChallenge(
+      challengeId,
+      user.sub,
+    );
   }
 }

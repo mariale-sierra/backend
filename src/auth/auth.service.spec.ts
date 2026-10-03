@@ -5,7 +5,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
-import { AuthService } from './auth.service';
+import { AuthService, CURRENT_TERMS_VERSION } from './auth.service';
 import { User } from '../users/entities/user.entity';
 
 jest.mock('bcrypt', () => ({
@@ -71,6 +71,8 @@ describe('AuthService', () => {
         email: 'new@example.com',
         username: 'newuser',
         password: 'plaintext-password',
+        acceptTerms: true,
+        confirmAge16: true,
       });
 
       expect(bcrypt.hash).toHaveBeenCalledWith('plaintext-password', 10);
@@ -84,6 +86,40 @@ describe('AuthService', () => {
       expect(JSON.stringify(result)).not.toContain('plaintext-password');
     });
 
+    it('should record when the terms were accepted, which version, and the 16+ confirmation', async () => {
+      userRepo.findOne.mockResolvedValue(null);
+      (bcrypt.hash as jest.Mock).mockResolvedValue('h');
+      const create = jest.fn().mockImplementation((_entity, data) => data);
+      dataSource.transaction.mockImplementation(async (cb) =>
+        cb({
+          create,
+          save: jest
+            .fn()
+            .mockImplementation((d) =>
+              Promise.resolve({
+                id: 'u1',
+                email: 'a@b.com',
+                username: 'ab',
+                ...d,
+              }),
+            ),
+        }),
+      );
+
+      await service.register({
+        email: 'a@b.com',
+        username: 'ab',
+        password: 'password123',
+        acceptTerms: true,
+        confirmAge16: true,
+      });
+
+      const userData = create.mock.calls[0][1];
+      expect(userData.terms_accepted_at).toBeInstanceOf(Date);
+      expect(userData.terms_version).toBe(CURRENT_TERMS_VERSION);
+      expect(userData.age_confirmed_at).toBeInstanceOf(Date);
+    });
+
     it('should reject registration when the email is already in use', async () => {
       userRepo.findOne.mockResolvedValue({
         id: 'existing-user',
@@ -95,6 +131,8 @@ describe('AuthService', () => {
           email: 'taken@example.com',
           username: 'someone',
           password: 'whatever',
+          acceptTerms: true,
+          confirmAge16: true,
         }),
       ).rejects.toThrow(ConflictException);
       expect(dataSource.transaction).not.toHaveBeenCalled();
@@ -160,7 +198,10 @@ describe('AuthService', () => {
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
       await expect(
-        service.login({ email: 'banned@example.com', password: 'correct-password' }),
+        service.login({
+          email: 'banned@example.com',
+          password: 'correct-password',
+        }),
       ).rejects.toThrow(UnauthorizedException);
       expect(jwtService.signAsync).not.toHaveBeenCalled();
     });

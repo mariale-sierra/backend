@@ -1,5 +1,10 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  ListObjectsV2Command,
+  DeleteObjectsCommand,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -40,5 +45,46 @@ export class UploadsService {
         'Failed to generate signed upload URL',
       );
     }
+  }
+
+  /**
+   * Deletes every object under `uploads/<userId>/` (the key scheme
+   * getPresignedUrl() uses), i.e. all photos the user ever uploaded. Used by
+   * account deletion. Returns how many objects were removed. Throws on any
+   * storage error so the caller can retry instead of marking the purge done.
+   */
+  async deleteUserObjects(userId: string): Promise<number> {
+    const Bucket = process.env['CLOUDFLARE_R2_BUCKET_NAME'];
+    const Prefix = `uploads/${userId}/`;
+    let deleted = 0;
+    let ContinuationToken: string | undefined;
+
+    do {
+      const page = await this.s3.send(
+        new ListObjectsV2Command({ Bucket, Prefix, ContinuationToken }),
+      );
+      const keys = (page.Contents ?? []).flatMap((o) =>
+        o.Key ? [{ Key: o.Key }] : [],
+      );
+      if (keys.length > 0) {
+        const result = await this.s3.send(
+          new DeleteObjectsCommand({
+            Bucket,
+            Delete: { Objects: keys, Quiet: true },
+          }),
+        );
+        if (result.Errors?.length) {
+          throw new Error(
+            `R2 failed to delete ${result.Errors.length} object(s) for user ${userId}`,
+          );
+        }
+        deleted += keys.length;
+      }
+      ContinuationToken = page.IsTruncated
+        ? page.NextContinuationToken
+        : undefined;
+    } while (ContinuationToken);
+
+    return deleted;
   }
 }

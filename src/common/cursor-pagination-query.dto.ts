@@ -8,7 +8,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from '../pagination.util';
+import { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from './pagination.util';
 
 // Real cursors (base64url of {c: ISO-8601 date, i: post id}) land well under
 // 200 chars even for a long id; this just bounds how much an arbitrary

@@ -1,14 +1,14 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import {
   WorkoutPost,
   WorkoutPostModerationStatus,
 } from './entities/workout-post.entity';
 import { ModerationService } from '../openai/moderation.service';
 import { User } from '../users/entities/user.entity';
-import { DecodedCursor, encodeCursor } from './pagination.util';
+import { DecodedCursor, encodeCursor } from '../common/pagination.util';
 import { formatPrimaryMetric, MetricValueRow } from './metric-display.util';
 import { FollowsService } from '../follows/follows.service';
 import { getLocalMidnightUtc } from '../common/timezone.util';
@@ -126,23 +126,37 @@ export class WorkoutPostsService {
     return this.moderationColumnsSupportPromise;
   }
 
-  async create(data: Partial<WorkoutPost>) {
+  /**
+   * `manager`, when passed (WorkoutLogService.createWorkout does, for the
+   * challenge-progress path — B5), saves through the caller's own open
+   * transaction instead of a separate connection, so the post is committed
+   * or rolled back atomically together with the workout_logs row it
+   * evidences. supportsModerationColumns()'s information_schema check is
+   * left on the default connection either way — a plain metadata read, safe
+   * to run outside the caller's transaction and already cached after the
+   * first call.
+   */
+  async create(data: Partial<WorkoutPost>, manager?: EntityManager) {
     const supportsModeration = await this.supportsModerationColumns();
-    const post = this.repo.create();
+    const repo = manager ? manager.getRepository(WorkoutPost) : this.repo;
+    const post = repo.create();
     Object.assign(post, data);
 
     if (supportsModeration) {
-      Object.assign(post, WorkoutPostsService.MODERATION_GATE_ENABLED
-        ? {
-            moderationStatus: WorkoutPostModerationStatus.PENDING,
-            moderationReason: undefined,
-            moderatedAt: undefined,
-          }
-        : {
-            moderationStatus: WorkoutPostModerationStatus.APPROVED,
-            moderationReason: WorkoutPostsService.MODERATION_DISABLED_REASON,
-            moderatedAt: new Date(),
-          });
+      Object.assign(
+        post,
+        WorkoutPostsService.MODERATION_GATE_ENABLED
+          ? {
+              moderationStatus: WorkoutPostModerationStatus.PENDING,
+              moderationReason: undefined,
+              moderatedAt: undefined,
+            }
+          : {
+              moderationStatus: WorkoutPostModerationStatus.APPROVED,
+              moderationReason: WorkoutPostsService.MODERATION_DISABLED_REASON,
+              moderatedAt: new Date(),
+            },
+      );
     }
 
     // Moderation no longer runs inline on upload — it's picked up by
@@ -153,7 +167,7 @@ export class WorkoutPostsService {
     // post was stuck as 'pending' (never shown) with nothing to retry it
     // again. Batching on a timer smooths the request rate and gives every
     // pending post another chance every cycle.
-    return this.repo.save(post);
+    return repo.save(post);
   }
 
   /**
@@ -309,39 +323,68 @@ export class WorkoutPostsService {
     }
   }
 
-  async findMosaicByChallenge(challengeId: string) {
+  /**
+   * Challenge mosaic. Applies the same read-time visibility rules as every
+   * other post read path (moderation, per-post visibility incl. followers,
+   * and the challenge privacy filter) — before B2 this endpoint skipped all
+   * of them and could leak private / private-challenge posts to any caller.
+   */
+  async findMosaicByChallenge(challengeId: string, viewerId: string) {
     const supportsModeration = await this.supportsModerationColumns();
 
-    const posts = await this.repo
-      .createQueryBuilder('post')
-      .innerJoinAndSelect('post.workoutLog', 'workoutLog')
-      .where('workoutLog.challenge_id = :challengeId', { challengeId })
-      .orderBy('post.created_at', 'DESC')
-      .getMany();
+    const params: unknown[] = [challengeId, viewerId];
+    const viewerParamIndex = 2;
 
-    const filteredPosts = supportsModeration
-      ? posts.filter(
-          (post) =>
-            post.moderationStatus === WorkoutPostModerationStatus.APPROVED,
-        )
-      : posts;
+    let moderationFilter = '';
+    if (supportsModeration) {
+      params.push(this.visibleModerationStatuses());
+      moderationFilter = `AND (p.moderation_status = ANY($${params.length}) OR p.user_id = $${viewerParamIndex})`;
+    }
+
+    const rows: Array<{
+      id: string;
+      workout_log_id: number;
+      user_id: string;
+      image_url: string;
+      caption: string | null;
+      visibility: string;
+      created_at: Date;
+      wl_id: number;
+      wl_challenge_id: string | null;
+      wl_routine_id: number | null;
+      wl_status: string;
+      wl_started_at: Date;
+    }> = await this.repo.manager.query(
+      `SELECT p.id, p.workout_log_id, p.user_id, p.image_url, p.caption,
+              p.visibility, p.created_at,
+              wl.id AS wl_id, wl.challenge_id AS wl_challenge_id,
+              wl.routine_id AS wl_routine_id, wl.status AS wl_status,
+              wl.started_at AS wl_started_at
+       FROM havit.workout_posts p
+       JOIN havit.workout_logs wl ON wl.id = p.workout_log_id
+       LEFT JOIN havit.challenges c ON c.id = wl.challenge_id
+       WHERE wl.challenge_id = $1 AND p.is_hidden = false
+         ${moderationFilter} ${this.postVisibilityFilter(viewerParamIndex)}
+       ORDER BY p.created_at DESC`,
+      params,
+    );
 
     return {
       message: 'Workout posts retrieved successfully',
-      data: filteredPosts.map((post) => ({
-        id: post.id,
-        workout_log_id: post.workout_log_id,
-        user_id: post.user_id,
-        image_url: post.image_url,
-        caption: post.caption,
-        visibility: post.visibility,
-        created_at: post.created_at,
+      data: rows.map((row) => ({
+        id: row.id,
+        workout_log_id: row.workout_log_id,
+        user_id: row.user_id,
+        image_url: row.image_url,
+        caption: row.caption,
+        visibility: row.visibility,
+        created_at: row.created_at,
         workoutLog: {
-          id: post.workoutLog.id,
-          challengeId: post.workoutLog.challengeId,
-          routineId: post.workoutLog.routineId,
-          status: post.workoutLog.status,
-          started_at: post.workoutLog.started_at,
+          id: row.wl_id,
+          challengeId: row.wl_challenge_id,
+          routineId: row.wl_routine_id,
+          status: row.wl_status,
+          started_at: row.wl_started_at,
         },
       })),
     };
@@ -389,6 +432,29 @@ export class WorkoutPostsService {
           AND cum_viewer.user_id = $${viewerParamIndex}
       )
     )`;
+  }
+
+  /**
+   * Per-post visibility + challenge privacy, for queries that alias
+   * workout_posts as `p`, workout_logs as `wl` and challenges as `c`.
+   * Private posts are only visible to their author. 'followers' posts are
+   * only visible to the author and to viewers who actively follow them (same
+   * rule fetchPaginatedPhotos() applies for GET /workout-posts/user/:userId),
+   * so a post's visibility doesn't depend on which endpoint reads it.
+   */
+  private postVisibilityFilter(viewerParamIndex: number): string {
+    return `AND (
+      p.visibility != 'private' OR p.user_id = $${viewerParamIndex}
+    ) AND (
+      p.visibility != 'followers'
+      OR p.user_id = $${viewerParamIndex}
+      OR EXISTS (
+        SELECT 1 FROM havit.user_follows uf
+        WHERE uf.follower_user_id = $${viewerParamIndex}
+          AND uf.followed_user_id = p.user_id
+          AND uf.is_active = true
+      )
+    ) ${this.challengePrivacyFilter(viewerParamIndex)}`;
   }
 
   /**
@@ -462,23 +528,7 @@ export class WorkoutPostsService {
       moderationFilter = `AND (p.moderation_status = ANY($${params.length}) OR p.user_id = $${viewerParamIndex})`;
     }
 
-    // Private posts are only visible to the person who posted them. Posts
-    // marked 'followers' are only visible to the poster and to viewers who
-    // actively follow them — same rule fetchPaginatedPhotos() applies for
-    // GET /workout-posts/user/:userId (B3), so a post's visibility doesn't
-    // depend on which endpoint happens to read it.
-    const visibilityFilter = `AND (
-      p.visibility != 'private' OR p.user_id = $${viewerParamIndex}
-    ) AND (
-      p.visibility != 'followers'
-      OR p.user_id = $${viewerParamIndex}
-      OR EXISTS (
-        SELECT 1 FROM havit.user_follows uf
-        WHERE uf.follower_user_id = $${viewerParamIndex}
-          AND uf.followed_user_id = p.user_id
-          AND uf.is_active = true
-      )
-    ) ${this.challengePrivacyFilter(viewerParamIndex)}`;
+    const visibilityFilter = this.postVisibilityFilter(viewerParamIndex);
 
     const rows: PhotoRow[] = await this.repo.manager.query(
       `SELECT p.id, p.image_url, p.caption, p.visibility, p.created_at,
@@ -493,7 +543,7 @@ export class WorkoutPostsService {
        LEFT JOIN havit.challenges c ON c.id = wl.challenge_id
        LEFT JOIN havit.challenge_user_map cum
               ON cum.challenge_id = wl.challenge_id AND cum.user_id = p.user_id
-       WHERE ${whereClause} ${moderationFilter} ${visibilityFilter}
+       WHERE ${whereClause} AND p.is_hidden = false ${moderationFilter} ${visibilityFilter}
        ORDER BY p.created_at DESC`,
       params,
     );
@@ -609,7 +659,7 @@ export class WorkoutPostsService {
        LEFT JOIN havit.challenges c ON c.id = wl.challenge_id
        LEFT JOIN havit.challenge_user_map cum
               ON cum.challenge_id = wl.challenge_id AND cum.user_id = p.user_id
-       WHERE ${baseWhereClause} ${moderationFilter} ${visibilityFilter} ${challengePrivacyFilter} ${cursorFilter}
+       WHERE ${baseWhereClause} AND p.is_hidden = false ${moderationFilter} ${visibilityFilter} ${challengePrivacyFilter} ${cursorFilter}
        ORDER BY p.created_at DESC, p.id DESC
        LIMIT $${limitParamIndex}`,
       params,
@@ -745,6 +795,7 @@ export class WorkoutPostsService {
               ON cum.challenge_id = wl.challenge_id AND cum.user_id = p.user_id
        WHERE ${visibilityFilter}
          AND p.moderation_status = 'approved'
+         AND p.is_hidden = false
          AND c.visibility != 'private'
          ${cursorFilter}
        ORDER BY p.created_at DESC, p.id DESC

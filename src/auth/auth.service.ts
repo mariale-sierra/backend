@@ -13,6 +13,10 @@ import { RegisterDto } from './dto/register.dto';
 import { User } from '../users/entities/user.entity';
 import { UserProfile } from '../users/entities/user-profile.entity';
 
+// Bump whenever the published Terms / Privacy Policy change materially; it is
+// stored on each user so we know exactly which text they agreed to.
+export const CURRENT_TERMS_VERSION = '2026-10-v1';
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -57,7 +61,17 @@ export class AuthService {
     const password_hash = await bcrypt.hash(password, 10);
 
     const user = await this.dataSource.transaction(async (manager) => {
-      const newUser = manager.create(User, { email, username, password_hash });
+      // DTO validation already guarantees both flags are true; the timestamp
+      // is what actually gets recorded as the consent trail.
+      const acceptedAt = new Date();
+      const newUser = manager.create(User, {
+        email,
+        username,
+        password_hash,
+        terms_accepted_at: acceptedAt,
+        terms_version: CURRENT_TERMS_VERSION,
+        age_confirmed_at: acceptedAt,
+      });
       const savedUser = await manager.save(newUser);
 
       const profile = manager.create(UserProfile, {

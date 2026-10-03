@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, EntityManager, In, Repository } from 'typeorm';
+import { Between, EntityManager, In, LessThan, Repository } from 'typeorm';
 import { Challenge } from './entities/challenge.entity';
 import { CreateChallengeDto } from './dto/create-challenge.dto';
 import { CreateChallengeExerciseDto } from './dto/create-challenge-exercise.dto';
@@ -46,6 +46,19 @@ import {
   categoryNameToActivityType,
 } from './activity-type.util';
 import { assertOwnership } from '../auth/utils/assert-ownership';
+import { ModerationService } from '../openai/moderation.service';
+import { RedisCacheService } from '../cache/redis-cache.service';
+import {
+  DecodedCursor,
+  encodeCursor,
+  DEFAULT_PAGE_LIMIT,
+} from '../common/pagination.util';
+
+// Same version-counter pattern as src/exercises/exercises.service.ts: every
+// cache key embeds the current namespace version, and a mutation just bumps
+// the counter (cheap) instead of enumerating/deleting specific keys.
+const CACHE_NAMESPACE = 'challenges';
+const LIST_TTL_SECONDS = 20; // short — see backend/performance/B1-REDIS.md
 
 @Injectable()
 export class ChallengesService {
@@ -75,7 +88,14 @@ export class ChallengesService {
     private exerciseLocationRepo: Repository<ExerciseLocation>,
     @InjectRepository(ChallengeJoinRequest)
     private challengeJoinRequestRepo: Repository<ChallengeJoinRequest>,
+    private moderationService: ModerationService,
+    private readonly cache: RedisCacheService,
   ) {}
+
+  private async cacheKey(suffix: string): Promise<string> {
+    const version = await this.cache.getVersion(CACHE_NAMESPACE);
+    return `${CACHE_NAMESPACE}:v${version}:${suffix}`;
+  }
 
   async create(createChallengeDto: CreateChallengeDto, userId: string) {
     this.logger.log(`Creating challenge with name: ${createChallengeDto.name}`);
@@ -87,6 +107,14 @@ export class ChallengesService {
 
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
+
+    // B3: moderate the public text fields synchronously, before opening the
+    // transaction (so no DB connection is held while waiting on OpenAI).
+    await this.moderationService.assertTextAllowed([
+      createChallengeDto.name,
+      createChallengeDto.description,
+      createChallengeDto.instructions,
+    ]);
 
     const { categories, locations, cycle_days, ...challengeFields } =
       createChallengeDto;
@@ -130,6 +158,8 @@ export class ChallengesService {
 
       return savedChallenge;
     });
+
+    await this.cache.bumpVersion(CACHE_NAMESPACE);
 
     return {
       message: 'Challenge created successfully',
@@ -663,17 +693,63 @@ export class ChallengesService {
     }));
   }
 
-  async findAll() {
-    const challenges = await this.challengeRepo.find();
-    const enriched = await this.attachCategoriesAndLocations(challenges);
-    const ids = challenges.map((c) => c.id);
+  /**
+   * Cursor-paginated (see src/common/pagination.util.ts — same keyset
+   * pattern as WorkoutPostsService). Cached per (cursor, limit) combination
+   * under the `challenges` namespace, short TTL — see
+   * backend/performance/B1-REDIS.md. `nextCursor` is returned for the
+   * controller to surface as the `X-Next-Cursor` header, same convention as
+   * GET /workout-posts/user/:userId.
+   *
+   * BREAKING CHANGE vs. the previous unpaginated behavior: this used to
+   * return every challenge unconditionally; it now returns one page
+   * (default DEFAULT_PAGE_LIMIT) unless the caller walks `nextCursor`. See
+   * backend/performance/B1-FINDINGS.md for why, and flag this to the
+   * frontend team before relying on "all challenges in one call" anywhere.
+   */
+  async findAll(cursor?: DecodedCursor, limit: number = DEFAULT_PAGE_LIMIT) {
+    const cacheSuffix = `findAll:${
+      cursor ? `${cursor.createdAt}:${cursor.id}` : 'first'
+    }:${limit}`;
+    const key = await this.cacheKey(cacheSuffix);
+    return this.cache.getOrSet(key, LIST_TTL_SECONDS, () =>
+      this.findAllUncached(cursor, limit),
+    );
+  }
+
+  private async findAllUncached(
+    cursor: DecodedCursor | undefined,
+    limit: number,
+  ) {
+    // Keyset pagination expressed as repo.find() OR-conditions (same result
+    // as a `(created_at, id) < (:a, :b)` tuple compare) rather than a raw
+    // query builder — row is "earlier" if its created_at is strictly less,
+    // or equal with a strictly smaller id as a deterministic tie-break.
+    const cursorDate = cursor ? new Date(cursor.createdAt) : undefined;
+    const where = cursor
+      ? [
+          { created_at: LessThan(cursorDate!) },
+          { created_at: cursorDate!, id: LessThan(cursor.id) },
+        ]
+      : {};
+
+    const rows = await this.challengeRepo.find({
+      where,
+      order: { created_at: 'DESC', id: 'DESC' },
+      take: limit + 1,
+    });
+    const hasNextPage = rows.length > limit;
+    const page = hasNextPage ? rows.slice(0, limit) : rows;
+
+    const enriched = await this.attachCategoriesAndLocations(page);
+    const ids = page.map((c) => c.id);
 
     const [memberCountByChallenge, dominantActivityByChallenge, authorsById] =
       await Promise.all([
         this.getMemberCountsByChallenge(ids),
         getDominantActivityCategories(this.challengeCycleDaysRepo.manager, ids),
         // One batched lookup for every card's author, not one request per card.
-        this.loadAuthors(challenges.map((c) => c.created_by_user_id)),
+        this.loadAuthors(page.map((c) => c.created_by_user_id)),
       ]);
 
     // Same field name findOne() already returns (members_joined) so the
@@ -686,9 +762,14 @@ export class ChallengesService {
       author: authorsById.get(c.created_by_user_id) ?? null,
     }));
 
+    const last = page[page.length - 1];
+    const nextCursor =
+      hasNextPage && last ? encodeCursor(last.created_at, last.id) : undefined;
+
     return {
       message: 'Challenges retrieved successfully',
       data: withMembers,
+      nextCursor,
     };
   }
 
@@ -718,6 +799,13 @@ export class ChallengesService {
   }
 
   async findOne(id: string) {
+    const key = await this.cacheKey(`findOne:${id}`);
+    return this.cache.getOrSet(key, LIST_TTL_SECONDS, () =>
+      this.findOneUncached(id),
+    );
+  }
+
+  private async findOneUncached(id: string) {
     const challenge = await this.challengeRepo.findOne({ where: { id } });
     if (!challenge) throw new NotFoundException('Challenge not found');
 
@@ -784,8 +872,17 @@ export class ChallengesService {
     if (!challenge) throw new NotFoundException('Challenge not found');
     assertOwnership(challenge.created_by_user_id, userId);
 
+    // B3: only the text fields actually present in this partial update are
+    // moderated (validateText skips undefined/empty entries).
+    await this.moderationService.assertTextAllowed([
+      updateChallengeDto.name,
+      updateChallengeDto.description,
+      updateChallengeDto.instructions,
+    ]);
+
     Object.assign(challenge, updateChallengeDto);
     const updated = await this.challengeRepo.save(challenge);
+    await this.cache.bumpVersion(CACHE_NAMESPACE);
 
     return {
       message: 'Challenge updated successfully',
@@ -799,6 +896,7 @@ export class ChallengesService {
     assertOwnership(challenge.created_by_user_id, userId);
 
     await this.challengeRepo.remove(challenge);
+    await this.cache.bumpVersion(CACHE_NAMESPACE);
     return { message: 'Challenge deleted successfully' };
   }
 
@@ -882,6 +980,7 @@ export class ChallengesService {
     });
 
     await this.challengeUserMapRepo.save(join);
+    await this.cache.bumpVersion(CACHE_NAMESPACE);
 
     return {
       status: 'joined' as const,
@@ -934,7 +1033,7 @@ export class ChallengesService {
       'Only the owner can respond to join requests',
     );
 
-    return this.dataSource.transaction(async (manager) => {
+    const response = await this.dataSource.transaction(async (manager) => {
       const requestRepo = manager.getRepository(ChallengeJoinRequest);
       const request = await requestRepo
         .createQueryBuilder('r')
@@ -981,6 +1080,11 @@ export class ChallengesService {
       });
       return ChallengeJoinRequestResponseDto.fromEntity(withUser!);
     });
+
+    if (approve) {
+      await this.cache.bumpVersion(CACHE_NAMESPACE);
+    }
+    return response;
   }
 
   /**
@@ -1026,6 +1130,7 @@ export class ChallengesService {
     }
 
     await this.challengeUserMapRepo.remove(relation);
+    await this.cache.bumpVersion(CACHE_NAMESPACE);
     return { message: 'Participant removed successfully' };
   }
 
@@ -1047,6 +1152,7 @@ export class ChallengesService {
 
     challenge.status = 'closed';
     await this.challengeRepo.save(challenge);
+    await this.cache.bumpVersion(CACHE_NAMESPACE);
     return { message: 'Challenge closed successfully' };
   }
 
@@ -1189,6 +1295,7 @@ export class ChallengesService {
     relation.status = status;
 
     const updatedRelation = await this.challengeUserMapRepo.save(relation);
+    await this.cache.bumpVersion(CACHE_NAMESPACE);
 
     return {
       message,

@@ -111,7 +111,7 @@ Justificación: la sección **"Caso pendiente de decisión de producto"** (más 
 - Escritura: `WorkoutLogService.resolvePostVisibility()` en [workout-log.service.ts](../../src/workout-log/workout-log.service.ts) — se ejecuta dentro de `createWorkout()`, antes de llamar a `WorkoutPostsService.create()`.
 - Lectura: `WorkoutPostsService.challengePrivacyFilter()` en [workout-posts.service.ts](../../src/workout-posts/workout-posts.service.ts) — reutilizado por `getFeed()`, `getUserPosts()` (vía `fetchPaginatedPhotos()`) y `getChallengePhotos()`/`getUserPhotos()` (vía `fetchPhotos()`), para que la regla no dependa de qué endpoint la lea.
 - El filtro de lectura es intencionalmente redundante con el de escritura: cubre posts creados antes de este fix y el caso en que un challenge se vuelve privado después de que ya existían posts públicos asociados.
-- **Gap conocido, fuera de alcance de este cierre**: `WorkoutPostsService.findMosaicByChallenge()` (`GET /workout-posts/mosaic`) no aplica ningún filtro de `visibility` (ni siquiera el básico `'public'`/`'private'` de un post, mucho menos el de challenge) — es un problema preexistente y más amplio que F8, no cubierto aquí. Se recomienda una revisión aparte.
+- **RESUELTO en B2 (2026-10-02, ver `docs/security/B2-SEGURIDAD-Y-LEGAL.md`)**: `WorkoutPostsService.findMosaicByChallenge()` (`GET /workout-posts/mosaic`) no aplica ningún filtro de `visibility` (ni siquiera el básico `'public'`/`'private'` de un post, mucho menos el de challenge) — es un problema preexistente y más amplio que F8, no cubierto aquí. Se recomienda una revisión aparte.
 - **Gap conocido, fuera de alcance de este cierre**: no existe ningún guard de membresía en `GET /challenges/:id` — cualquier usuario autenticado puede leer los metadatos de un challenge privado si conoce su ID, independientemente de este fix (que solo protege *posts*, no el propio challenge). Se recomienda una revisión aparte de autorización en `ChallengesController`.
 
 ### Casos agregados — Badges y Challenge Invites (CP-32 en adelante)
@@ -190,6 +190,8 @@ Justificación: nuevo alcance sobre el módulo existente `src/workout-posts/`, s
 
 **Decisión de modelo de datos (sin ambigüedad — ver el CLAUDE.md del proyecto y el propio init-schema):** un solo tipo de reacción (`like`), una reacción por usuario por post (enforced por la PK compuesta `(workout_post_id, user_id)`), comentarios planos (sin respuestas anidadas), y cada usuario solo puede eliminar su propia reacción/comentario (`assertOwnership()`, mismo helper que ya usa `spaces.service.ts`).
 
+> **Actualizado en Sprint 8 (B3):** esta decisión quedó superada. Los comentarios ahora se moderan de forma síncrona antes de guardarse con `ModerationService.assertTextAllowed()` (ver CP-67 y [`docs/moderacion-automatica.md`](../moderacion-automatica.md)). Chats y spaces siguen sin moderación, a propósito. El texto original se conserva abajo como historial.
+
 **Decisión sobre moderación de comentarios (gap identificado, no resuelto — mismo patrón que Chats/Spaces documentaron para sus propios mensajes):** `ModerationService.validateWorkoutImage()` (`src/openai/moderation.service.ts`) requiere un `imageUrl` obligatorio — fue construido específicamente para moderar la imagen de un `workout_post`, no existe ningún contrato de moderación de solo-texto en este repositorio. La Moderation API que construye Esteban (Bloque 4) tampoco existe todavía aquí (mismo hallazgo ya registrado en la sección de Chats, arriba). Crear un comentario (`WorkoutPostCommentsService.create()`) deliberadamente NO llama a ningún servicio de moderación — documentado directamente como comentario sobre el método, mismo punto de integración que `ChatsService.sendMessage()`/`SpacesService.sendMessage()` ya dejaron marcado para cuando ese contrato exista.
 
 | ID | Funcionalidad | Tipo | Prueba | Condiciones/Entrada | Resultado esperado | Prioridad | Cobertura automatizada | Estado |
@@ -223,7 +225,7 @@ Justificación: nuevo alcance sobre el módulo existente `src/workout-posts/`, s
 - Cualquier prueba de integración/sistema end-to-end (`POST /workout-posts/:postId/reactions`, `POST .../comments`, etc. contra un servidor real) — mismo gap ya documentado para CP-16/CP-17/Chats/Spaces.
 
 **Riesgos y decisiones explícitamente NO tomadas en este cierre:**
-- **Moderación de comentarios**: ver la decisión documentada arriba — no hay contrato de moderación de solo-texto disponible; crear un comentario nunca llama a `ModerationService`. Punto de integración documentado directamente sobre `WorkoutPostCommentsService.create()`.
+- **Moderación de comentarios**: ~~no hay contrato de moderación de solo-texto disponible~~. **Resuelto en Sprint 8 (B3)**, ver CP-67.
 - **Visibilidad `'followers'` en reacciones/comentarios**: el gate de acceso implementado (`assertPostVisibleToUser`) solo bloquea reaccionar/comentar en un post `'private'` ajeno — no replica la regla completa de "solo seguidores activos" que sí aplica a la lectura de posts (`getUserPosts`/B3). Decisión deliberada para no tener que inyectar `FollowsService` en dos servicios nuevos por una brecha más angosta (un no-seguidor podría reaccionar/comentar un post `'followers'`) que el caso `'private'`, que es inequívocamente incorrecto sin importar la relación de follow. Documentado como limitación conocida, no como bug.
 - **Comentarios anidados/respuestas**: fuera de alcance — el modelo es plano por decisión explícita (ver arriba), consistente con "usar el modelo más simple" cuando no hay una decisión de equipo distinta.
 
@@ -246,6 +248,34 @@ Justificación: reporte de usuario probando la app localmente — una foto subid
 | Lint dirigido | `eslint` sobre los archivos modificados | `npx eslint src/workout-posts/workout-posts.service.ts src/workout-posts/feed.controller.ts src/workout-posts/workout-posts.service.spec.ts` | Sin errores nuevos (1 error preexistente en `workout-posts.service.spec.ts`, ya documentado arriba, no tocado por este fix) | Aprobado | — |
 
 **No ejecutado en esta sesión:** ninguna prueba de integración/sistema contra la base real de Azure (mismo gap ya documentado en el resto de este documento); el índice usado por el `EXISTS` sobre `user_follows` (`PRIMARY KEY (follower_user_id, followed_user_id)`) ya existía desde `database/init/2026-07-07-00-init-schema.sql`, sin necesidad de migración nueva.
+
+---
+
+### Casos agregados — Sprint 8, Bloque 3: Moderación automática de texto (CP-65 a CP-70)
+
+Justificación: B3 agrega moderación **automática, síncrona y preventiva** (antes de guardar) de texto público y persistente, reutilizando `ModerationService` (`omni-moderation-latest`) mediante un método hermano de `validateWorkoutImage()`: `validateText()` y `assertTextAllowed()`. Detalle de dónde se aplica, las decisiones (síncrono, fail-closed) y lo que queda fuera (chats y spaces a propósito): [`docs/moderacion-automatica.md`](../moderacion-automatica.md). No modifica el modelo de reportes y penalizaciones de B2.
+
+| ID | Funcionalidad | Tipo | Prueba | Condiciones/Entrada | Resultado esperado | Prioridad | Cobertura automatizada | Estado |
+|---|---|---|---|---|---|---|---|---|
+| CP-65 | Challenges | Funcional | Crear challenge con texto aceptado/rechazado | `name`/`description`/`instructions` | Una sola llamada de moderación con los 3 campos, **antes** de abrir la transacción. Si se marca: `400` `code: CONTENT_REJECTED` y nunca se abre la transacción. Si OpenAI falla: `503` y no se guarda nada | Alta | `challenges.service.spec.ts` → describe *"create — text moderation (B3)"* (3 tests) | Ejecutado — Aprobado |
+| CP-66 | Challenges | Funcional | Editar challenge | `PATCH /challenges/:id` parcial | Solo se moderan los campos de texto presentes. Si se marca: `400` y no hay `save`. Un no-dueño recibe `403` **sin** gastar llamada de moderación | Alta | `challenges.service.spec.ts` → describe `update` (3 tests nuevos) | Ejecutado — Aprobado |
+| CP-67 | Comentarios | Funcional | Comentar con texto aceptado/rechazado | `POST /workout-posts/:postId/comments` | Se modera después de 404/403/`is_hidden` (esos casos no llaman a moderación) y antes de `save`. Si se marca: `400 CONTENT_REJECTED`, no se crea ni se guarda. Si OpenAI falla: `503`, no se guarda | Alta | `workout-post-comments.service.spec.ts` → describe `create` (2 tests nuevos + 3 existentes ampliados) | Ejecutado — Aprobado |
+| CP-68 | Perfil | Funcional | Editar bio | `PATCH /users/me/profile` | Una bio no vacía se modera antes de escribir el perfil. Si se marca: `400`, no se guarda **ningún** campo. Si OpenAI falla: `503`. Sin bio o con bio vacía (la borra): no se llama a moderación | Alta | `users.service.spec.ts` → describe `updateProfile` (4 tests nuevos) | Ejecutado — Aprobado |
+| CP-69 | Moderación | Funcional | Contrato de `validateText`/`assertTextAllowed` | Textos vacíos, uno o varios textos, marcados o no, error de API, sin API key | Vacíos: no llama a la API. Varios textos: una llamada `input: string[]` con `omni-moderation-latest`, marcado si cualquiera lo está, categorías sin duplicados. Error de API: `503`. Sin key: `500`. Marcado: `400 { message, error, code: 'CONTENT_REJECTED' }`. `validateWorkoutImage` sin cambios | Alta | `moderation.service.spec.ts` (10 tests, nuevo) | Ejecutado — Aprobado |
+| CP-70 | Posts | Funcional | Sin moderación duplicada del caption | Crear post con foto + caption | `WorkoutPostsService.create()` no llama a la moderación de texto: el caption se sigue moderando junto con la foto en el batch (`validateWorkoutImage`) | Media | `workout-posts.service.spec.ts` → *"create — no duplicated caption moderation (B3)"* | Ejecutado — Aprobado |
+
+**Limitación documentada (no es un caso de prueba):** "post de solo texto / día de descanso". En `development`, `rest-day.tsx` no envía texto, `WorkoutLogService.createWorkout()` no crea post en días de descanso y `workout_posts.image_url` es `NOT NULL`, así que hoy **no hay texto persistido que moderar**. No se tocó la lógica de B5 ni se crearon migraciones. Ver `docs/moderacion-automatica.md`.
+
+**Resultados de ejecución (Sprint 8 — B3):**
+
+| Casos | Comando | Resultado | Estado |
+|---|---|---|---|
+| CP-65 – CP-70 | `npx jest src/openai src/challenges src/users src/workout-posts` | Todos los tests nuevos y modificados de B3 pasan | Aprobado |
+| Suite completa | `npm test` | 39 suites, 700 tests: **698 pasan, 2 fallan**. Las 2 fallas son **preexistentes** y ajenas a B3 (`workout-posts.service.spec.ts`: *"…while the moderation gate is disabled"*). Esos tests asumen `MODERATION_GATE_ENABLED = false`, pero el gate ya se reactivó (`true`), así que fallan igual en `development` sin los cambios de B3 | Aprobado con observación |
+| Lint | `eslint` sin `--fix` sobre `src` y `test` | Sin errores nuevos: 101 errores / 39 warnings, frente a 104 / 38 de base. El warning nuevo es un `{} as any` en `workout-post-reports.service.spec.ts`, mismo patrón que las líneas vecinas | Aprobado |
+| Build | `npm run build` | Sin errores | Aprobado |
+
+**No ejecutado en esta sesión:** llamadas reales a OpenAI con textos aceptados y rechazados. Desde el entorno de desarrollo no había salida de red a `api.openai.com`. Se verifican manualmente con el snippet de PowerShell del documento del sprint o probando la app contra el backend desplegado.
 
 ---
 
@@ -330,4 +360,4 @@ La primera tabla corresponde al Sprint B2 (Posts/Feed) original — comandos eje
 3. Capa de lectura (segunda capa, independiente de que la escritura haya fallado o el post sea anterior a este fix): `WorkoutPostsService.challengePrivacyFilter()`, aplicado a `getFeed()`, `getUserPosts()` y `getChallengePhotos()`/`getUserPhotos()` por igual, para que la regla no dependa del endpoint.
 4. `GET /workout-posts/user/:userId` queda explícitamente cubierto (CP-31): un viewer que no es miembro del challenge no ve el post aunque sea `'public'`; un miembro activo del challenge (o el propio autor) sí.
 
-**Gaps identificados pero fuera de alcance de este cierre** (quedan como riesgo documentado, no como bug de F8): `GET /workout-posts/mosaic` no filtra por visibilidad en absoluto (ni la del post ni la del challenge), y no existe ningún guard de membresía en `GET /challenges/:id`. Ver notas de implementación en la sección de CP-29/30/31.
+**Gaps identificados pero fuera de alcance de este cierre** (quedan como riesgo documentado, no como bug de F8): `GET /workout-posts/mosaic` no filtraba por visibilidad en absoluto (corregido en B2) (ni la del post ni la del challenge), y no existe ningún guard de membresía en `GET /challenges/:id`. Ver notas de implementación en la sección de CP-29/30/31.
