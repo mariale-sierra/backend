@@ -14,6 +14,13 @@ import {
   getCurrentStreakDaysForUsers,
   getLoggedTodayUserIds,
 } from '../workout-log/workout-log-streak.util';
+import { NotificationsService } from '../notifications/notifications.service';
+
+// B3: emitters call notify()/notifyMany() fire-and-forget; never throws.
+const notificationsService = {
+  notify: jest.fn().mockResolvedValue(null),
+  notifyMany: jest.fn().mockResolvedValue(undefined),
+};
 
 // getFriendStreaks' own batching (one grouped query per data source, not one
 // per followed user) is workout-log-streak.util's job and is covered by
@@ -70,6 +77,7 @@ describe('FollowsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FollowsService,
+        { provide: NotificationsService, useValue: notificationsService },
         { provide: getRepositoryToken(UserFollow), useValue: followRepo },
         { provide: getRepositoryToken(User), useValue: userRepo },
         { provide: getRepositoryToken(UserProfile), useValue: profileRepo },
@@ -420,14 +428,57 @@ describe('FollowsService', () => {
       ]);
 
       expect(followRepo.createQueryBuilder).toHaveBeenCalledTimes(1);
-      expect(qb.where).toHaveBeenCalledWith('f.follower_user_id = :viewerUserId', {
-        viewerUserId: 'user-1',
-      });
+      expect(qb.where).toHaveBeenCalledWith(
+        'f.follower_user_id = :viewerUserId',
+        {
+          viewerUserId: 'user-1',
+        },
+      );
       expect(qb.andWhere).toHaveBeenCalledWith(
         'f.followed_user_id IN (:...candidateUserIds)',
         { candidateUserIds: ['user-2', 'user-3'] },
       );
       expect(result).toEqual(new Set(['user-2']));
+    });
+  });
+
+  describe('notifications (B3)', () => {
+    beforeEach(() => notificationsService.notify.mockClear());
+
+    it('notifies the followed user once the follow is saved', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'user-2' });
+      followRepo.findOne.mockResolvedValue(null);
+      followRepo.create.mockImplementation((row: object) => row);
+      followRepo.save.mockResolvedValue({});
+
+      await service.follow('user-1', 'user-2');
+
+      expect(notificationsService.notify).toHaveBeenCalledWith({
+        recipientUserId: 'user-2',
+        actorUserId: 'user-1',
+        type: 'new_follower',
+        entity: { type: 'user', id: 'user-1' },
+      });
+    });
+
+    it('also notifies when an old follow is reactivated', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'user-2' });
+      followRepo.findOne.mockResolvedValue({ is_active: false });
+      followRepo.save.mockResolvedValue({});
+
+      await service.follow('user-1', 'user-2');
+
+      expect(notificationsService.notify).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not notify when the follow fails (already following)', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'user-2' });
+      followRepo.findOne.mockResolvedValue({ is_active: true });
+
+      await expect(service.follow('user-1', 'user-2')).rejects.toThrow(
+        ConflictException,
+      );
+      expect(notificationsService.notify).not.toHaveBeenCalled();
     });
   });
 });

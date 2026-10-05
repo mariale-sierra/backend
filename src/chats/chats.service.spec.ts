@@ -10,6 +10,13 @@ import { DirectConversation } from './entities/direct-conversation.entity';
 import { DirectConversationMember } from './entities/direct-conversation-member.entity';
 import { DirectMessage } from './entities/direct-message.entity';
 import { User } from '../users/entities/user.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+
+// B3: emitters call notify()/notifyMany() fire-and-forget; never throws.
+const notificationsService = {
+  notify: jest.fn().mockResolvedValue(null),
+  notifyMany: jest.fn().mockResolvedValue(undefined),
+};
 
 const createMockQueryBuilder = () => {
   const qb: Record<string, jest.Mock> = {};
@@ -75,6 +82,7 @@ describe('ChatsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ChatsService,
+        { provide: NotificationsService, useValue: notificationsService },
         {
           provide: getRepositoryToken(DirectConversation),
           useValue: conversationRepo,
@@ -538,6 +546,62 @@ describe('ChatsService', () => {
         userId: 'user-1',
       });
       expect(result.updated).toBe(3);
+    });
+  });
+
+  describe('notifications (B3)', () => {
+    const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+    beforeEach(() => {
+      notificationsService.notifyMany.mockClear();
+      memberRepo.findOne.mockResolvedValue({
+        direct_conversation_id: 'conv-1',
+        user_id: 'user-1',
+        status: 'accepted',
+      });
+      messageRepo.save.mockImplementation((m) =>
+        Promise.resolve({ ...m, id: 42, sent_at: new Date(), read_at: null }),
+      );
+    });
+
+    it('notifies the other participant of an active conversation (no message text)', async () => {
+      conversationRepo.findOne.mockResolvedValue({ id: 'conv-1' });
+      memberRepo.find.mockResolvedValue([
+        { user_id: 'user-1' },
+        { user_id: 'user-2' },
+      ]);
+
+      await service.sendMessage('user-1', 'conv-1', 'private words');
+      await flush();
+
+      expect(notificationsService.notifyMany).toHaveBeenCalledWith(['user-2'], {
+        actorUserId: 'user-1',
+        type: 'direct_message',
+        entity: { type: 'direct_conversation', id: 'conv-1' },
+      });
+    });
+
+    it('does not notify the person who declined (soft-deleted) the conversation', async () => {
+      conversationRepo.findOne.mockResolvedValue(null);
+      memberRepo.find.mockResolvedValue([
+        { user_id: 'user-1' },
+        { user_id: 'user-2' },
+      ]);
+
+      await service.sendMessage('user-1', 'conv-1', 'hola');
+      await flush();
+
+      expect(notificationsService.notifyMany).not.toHaveBeenCalled();
+    });
+
+    it('still delivers the message when looking up recipients fails', async () => {
+      conversationRepo.findOne.mockRejectedValue(new Error('db down'));
+      memberRepo.find.mockResolvedValue([]);
+
+      const result = await service.sendMessage('user-1', 'conv-1', 'hola');
+      await flush();
+
+      expect(result.id).toBe(42);
     });
   });
 });

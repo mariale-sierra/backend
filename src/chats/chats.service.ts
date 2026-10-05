@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -16,6 +17,7 @@ import {
   LastMessagePreviewDto,
 } from './dto/conversation-summary.dto';
 import { ConversationParticipantDto } from './dto/conversation-participant.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   DEFAULT_MESSAGES_LIMIT,
   MAX_MESSAGES_LIMIT,
@@ -28,6 +30,8 @@ export interface ListMessagesResult {
 
 @Injectable()
 export class ChatsService {
+  private readonly logger = new Logger(ChatsService.name);
+
   constructor(
     @InjectRepository(DirectConversation)
     private conversationRepo: Repository<DirectConversation>,
@@ -37,6 +41,7 @@ export class ChatsService {
     private messageRepo: Repository<DirectMessage>,
     @InjectRepository(User)
     private userRepo: Repository<User>,
+    private notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -172,7 +177,43 @@ export class ChatsService {
       message_text: content,
     });
     const saved = await this.messageRepo.save(message);
+    void this.notifyConversation(conversationId, userId);
     return this.toMessageDto(saved);
+  }
+
+  /**
+   * Fire-and-forget: notifies the other participant(s) of an ACTIVE
+   * conversation — a declined (soft-deleted) one never notifies the person
+   * who declined it. No message text travels with the notification; a
+   * burst of messages refreshes the same unread notification.
+   */
+  private async notifyConversation(
+    conversationId: string,
+    senderId: string,
+  ): Promise<void> {
+    try {
+      const [conversation, members] = await Promise.all([
+        this.conversationRepo.findOne({
+          where: { id: conversationId, is_active: true },
+        }),
+        this.memberRepo.find({
+          where: { direct_conversation_id: conversationId },
+        }),
+      ]);
+      if (!conversation) return;
+      await this.notificationsService.notifyMany(
+        members.map((m) => m.user_id).filter((id) => id !== senderId),
+        {
+          actorUserId: senderId,
+          type: 'direct_message',
+          entity: { type: 'direct_conversation', id: conversationId },
+        },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `notification fan-out failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   /** Marks every unread message from the OTHER participant as read. */

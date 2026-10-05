@@ -8,6 +8,7 @@ import { In, Repository } from 'typeorm';
 import { WorkoutPostLike } from './entities/workout-post-like.entity';
 import { WorkoutPost } from './entities/workout-post.entity';
 import { assertPostVisibleToUser } from './workout-post-visibility.util';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export interface ReactionSummary {
   count: number;
@@ -21,6 +22,7 @@ export class WorkoutPostReactionsService {
     private likeRepo: Repository<WorkoutPostLike>,
     @InjectRepository(WorkoutPost)
     private postRepo: Repository<WorkoutPost>,
+    private notificationsService: NotificationsService,
   ) {}
 
   /** Only one reaction type exists ('like'), enforced one-per-user-per-post
@@ -38,7 +40,7 @@ export class WorkoutPostReactionsService {
   }
 
   async react(postId: string, userId: string): Promise<{ message: string }> {
-    await this.loadReactablePost(postId, userId);
+    const post = await this.loadReactablePost(postId, userId);
 
     const existing = await this.likeRepo.findOne({
       where: { workout_post_id: postId, user_id: userId },
@@ -64,6 +66,15 @@ export class WorkoutPostReactionsService {
       throw error;
     }
 
+    // The owner can always see their own post; loadReactablePost already
+    // refused hidden posts. Several likes in a row collapse into the same
+    // unread notification (see NotificationsService.notify).
+    void this.notificationsService.notify({
+      recipientUserId: post.user_id,
+      actorUserId: userId,
+      type: 'post_reaction',
+      entity: { type: 'workout_post', id: post.id },
+    });
     return { message: 'Reaction added' };
   }
 

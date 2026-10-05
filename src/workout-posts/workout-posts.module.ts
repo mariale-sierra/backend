@@ -18,6 +18,7 @@ import { ContentReport } from './entities/content-report.entity';
 import { UserPenalty } from './entities/user-penalty.entity';
 import { OpenAiModule } from '../openai/openai.module';
 import { FollowsModule } from '../follows/follows.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { FollowsModule } from '../follows/follows.module';
     ]),
     OpenAiModule,
     FollowsModule,
+    NotificationsModule,
   ],
   controllers: [
     WorkoutPostsController,

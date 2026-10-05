@@ -10,6 +10,13 @@ import { WorkoutPostCommentsService } from './workout-post-comments.service';
 import { WorkoutPostComment } from './entities/workout-post-comment.entity';
 import { WorkoutPost } from './entities/workout-post.entity';
 import { ModerationService } from '../openai/moderation.service';
+import { NotificationsService } from '../notifications/notifications.service';
+
+// B3: emitters call notify()/notifyMany() fire-and-forget; never throws.
+const notificationsService = {
+  notify: jest.fn().mockResolvedValue(null),
+  notifyMany: jest.fn().mockResolvedValue(undefined),
+};
 
 const createMockCommentRepo = () => ({
   create: jest.fn((data: Record<string, unknown>) => data),
@@ -47,6 +54,7 @@ describe('WorkoutPostCommentsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WorkoutPostCommentsService,
+        { provide: NotificationsService, useValue: notificationsService },
         { provide: ModerationService, useValue: moderationService },
         {
           provide: getRepositoryToken(WorkoutPostComment),
@@ -282,6 +290,53 @@ describe('WorkoutPostCommentsService', () => {
 
       expect(result.get('post-1')).toBe(2);
       expect(qb.andWhere).toHaveBeenCalledWith('c.is_active = true');
+    });
+  });
+
+  describe('notifications (B3)', () => {
+    beforeEach(() => notificationsService.notify.mockClear());
+
+    it('notifies the post owner with ids only, never the comment text', async () => {
+      postRepo.findOne.mockResolvedValue(publicPost);
+      commentRepo.save.mockResolvedValue({ id: 10 });
+      commentRepo.findOne.mockResolvedValue({
+        id: 10,
+        workout_post_id: POST_ID,
+        user_id: USER_ID,
+        comment_text: 'secret text',
+        created_at: new Date(),
+        author: { id: USER_ID, username: 'bob' },
+      });
+
+      await service.create(POST_ID, USER_ID, 'secret text');
+
+      expect(notificationsService.notify).toHaveBeenCalledWith({
+        recipientUserId: OWNER_ID,
+        actorUserId: USER_ID,
+        type: 'post_comment',
+        entity: { type: 'workout_post', id: POST_ID },
+        data: { commentId: '10' },
+      });
+      expect(
+        JSON.stringify(notificationsService.notify.mock.calls),
+      ).not.toContain('secret text');
+    });
+
+    it('does not notify when moderation rejects the comment', async () => {
+      postRepo.findOne.mockResolvedValue(publicPost);
+      moderationService.assertTextAllowed.mockRejectedValue(
+        new BadRequestException(),
+      );
+      await expect(service.create(POST_ID, USER_ID, 'x')).rejects.toThrow();
+      expect(notificationsService.notify).not.toHaveBeenCalled();
+    });
+
+    it('does not notify about a private post the commenter cannot see', async () => {
+      postRepo.findOne.mockResolvedValue(privatePost);
+      await expect(service.create(POST_ID, OTHER_USER_ID, 'x')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(notificationsService.notify).not.toHaveBeenCalled();
     });
   });
 });

@@ -8,6 +8,13 @@ import {
 import { WorkoutPostReactionsService } from './workout-post-reactions.service';
 import { WorkoutPostLike } from './entities/workout-post-like.entity';
 import { WorkoutPost } from './entities/workout-post.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+
+// B3: emitters call notify()/notifyMany() fire-and-forget; never throws.
+const notificationsService = {
+  notify: jest.fn().mockResolvedValue(null),
+  notifyMany: jest.fn().mockResolvedValue(undefined),
+};
 
 const createMockLikeRepo = () => ({
   findOne: jest.fn(),
@@ -42,6 +49,7 @@ describe('WorkoutPostReactionsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WorkoutPostReactionsService,
+        { provide: NotificationsService, useValue: notificationsService },
         { provide: getRepositoryToken(WorkoutPostLike), useValue: likeRepo },
         { provide: getRepositoryToken(WorkoutPost), useValue: postRepo },
       ],
@@ -207,6 +215,53 @@ describe('WorkoutPostReactionsService', () => {
 
       expect(result.get('post-1')).toBe(4);
       expect(result.has('post-2')).toBe(false);
+    });
+  });
+
+  describe('notifications (B3)', () => {
+    beforeEach(() => notificationsService.notify.mockClear());
+
+    it('notifies the post owner about a new reaction', async () => {
+      postRepo.findOne.mockResolvedValue(publicPost);
+      likeRepo.findOne.mockResolvedValue(null);
+      likeRepo.save.mockResolvedValue({});
+
+      await service.react(POST_ID, USER_ID);
+
+      expect(notificationsService.notify).toHaveBeenCalledWith({
+        recipientUserId: OWNER_ID,
+        actorUserId: USER_ID,
+        type: 'post_reaction',
+        entity: { type: 'workout_post', id: POST_ID },
+      });
+    });
+
+    it('does not notify for a post the user cannot see', async () => {
+      postRepo.findOne.mockResolvedValue(privatePost);
+      await expect(service.react(POST_ID, USER_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(notificationsService.notify).not.toHaveBeenCalled();
+    });
+
+    it('does not notify for a duplicate (double tap) reaction', async () => {
+      postRepo.findOne.mockResolvedValue(publicPost);
+      likeRepo.findOne.mockResolvedValue({ workout_post_id: POST_ID });
+      await expect(service.react(POST_ID, USER_ID)).rejects.toThrow();
+      expect(notificationsService.notify).not.toHaveBeenCalled();
+    });
+
+    it('still succeeds when the notification layer fails', async () => {
+      postRepo.findOne.mockResolvedValue(publicPost);
+      likeRepo.findOne.mockResolvedValue(null);
+      likeRepo.save.mockResolvedValue({});
+      // notify() swallows its own errors by contract; even a misbehaving
+      // implementation that resolved to garbage must not affect the action.
+      notificationsService.notify.mockResolvedValueOnce(undefined);
+
+      await expect(service.react(POST_ID, USER_ID)).resolves.toEqual({
+        message: 'Reaction added',
+      });
     });
   });
 });

@@ -27,6 +27,13 @@ import {
   ChallengeVisibility,
   CreateChallengeDto,
 } from './dto/create-challenge.dto';
+import { NotificationsService } from '../notifications/notifications.service';
+
+// B3: emitters call notify()/notifyMany() fire-and-forget; never throws.
+const notificationsService = {
+  notify: jest.fn().mockResolvedValue(null),
+  notifyMany: jest.fn().mockResolvedValue(undefined),
+};
 
 // findAll()/findOne() delegate the dominant-category computation entirely to
 // this util — its own SQL/tie-break logic is covered by
@@ -129,6 +136,7 @@ describe('ChallengesService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ChallengesService,
+        { provide: NotificationsService, useValue: notificationsService },
         { provide: RedisCacheService, useValue: cache },
         { provide: getRepositoryToken(Challenge), useValue: challengeRepo },
         { provide: getRepositoryToken(User), useValue: userRepo },
@@ -807,6 +815,30 @@ describe('ChallengesService', () => {
       );
       return { requestRepo, userMapRepo };
     }
+
+    it.each([true, false])(
+      'notifies the requester after the response is committed (approve=%s)',
+      async (approve) => {
+        notificationsService.notify.mockClear();
+        challengeRepo.findOne.mockResolvedValue(baseChallenge());
+        mockTransaction({ request: { ...PENDING_REQUEST } });
+
+        await service.respondToChallengeJoinRequest(
+          OWNER_ID,
+          CHALLENGE_ID,
+          'request-1',
+          approve,
+        );
+
+        expect(notificationsService.notify).toHaveBeenCalledWith({
+          recipientUserId: OTHER_USER_ID,
+          actorUserId: OWNER_ID,
+          type: 'challenge_join_response',
+          entity: { type: 'challenge', id: CHALLENGE_ID },
+          data: { approved: String(approve) },
+        });
+      },
+    );
 
     it('should approve a pending request and create a new active participant relation', async () => {
       challengeRepo.findOne.mockResolvedValue(baseChallenge());
@@ -2078,6 +2110,130 @@ describe('ChallengesService', () => {
         'cycleDay.day_in_cycle = :dayInCycle',
         { dayInCycle: 4 },
       );
+    });
+  });
+
+  describe('notifications (B3)', () => {
+    const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+    beforeEach(() => {
+      notificationsService.notify.mockClear();
+      notificationsService.notifyMany.mockClear();
+    });
+
+    it('tells the owner someone joined their public challenge', async () => {
+      userRepo.findOne.mockResolvedValue({ id: OTHER_USER_ID });
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      challengeUserMapRepo.findOne.mockResolvedValue(null);
+      challengeUserMapRepo.create.mockImplementation((d: object) => d);
+      challengeUserMapRepo.save.mockImplementation((m: object) =>
+        Promise.resolve(m),
+      );
+
+      await service.joinChallenge(OTHER_USER_ID, CHALLENGE_ID);
+
+      expect(notificationsService.notify).toHaveBeenCalledWith({
+        recipientUserId: OWNER_ID,
+        actorUserId: OTHER_USER_ID,
+        type: 'challenge_participant_joined',
+        entity: { type: 'challenge', id: CHALLENGE_ID },
+      });
+    });
+
+    it('asks the owner to review a request to join a private challenge', async () => {
+      userRepo.findOne.mockResolvedValue({ id: OTHER_USER_ID });
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        visibility: 'private',
+      });
+      challengeUserMapRepo.findOne.mockResolvedValue(null);
+      challengeJoinRequestRepo.findOne.mockResolvedValue(null);
+      challengeJoinRequestRepo.create.mockImplementation((d: object) => d);
+      challengeJoinRequestRepo.save.mockImplementation((r: object) =>
+        Promise.resolve({ id: 'request-1', ...r }),
+      );
+
+      await service.joinChallenge(OTHER_USER_ID, CHALLENGE_ID);
+
+      expect(notificationsService.notify).toHaveBeenCalledWith({
+        recipientUserId: OWNER_ID,
+        actorUserId: OTHER_USER_ID,
+        type: 'challenge_join_request',
+        entity: { type: 'challenge', id: CHALLENGE_ID },
+      });
+    });
+
+    it('does not notify anyone when joining a closed challenge fails', async () => {
+      userRepo.findOne.mockResolvedValue({ id: OTHER_USER_ID });
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        status: 'closed',
+      });
+      await expect(
+        service.joinChallenge(OTHER_USER_ID, CHALLENGE_ID),
+      ).rejects.toThrow();
+      expect(notificationsService.notify).not.toHaveBeenCalled();
+    });
+
+    it('tells a removed participant they were removed', async () => {
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        visibility: 'public',
+      });
+      challengeUserMapRepo.findOne.mockResolvedValue({
+        challenge_id: CHALLENGE_ID,
+        user_id: OTHER_USER_ID,
+      });
+
+      await service.removeChallengeParticipant(
+        OWNER_ID,
+        CHALLENGE_ID,
+        OTHER_USER_ID,
+      );
+
+      expect(notificationsService.notify).toHaveBeenCalledWith({
+        recipientUserId: OTHER_USER_ID,
+        actorUserId: OWNER_ID,
+        type: 'challenge_removed',
+        entity: { type: 'challenge', id: CHALLENGE_ID },
+      });
+    });
+
+    it('tells the owner and every active participant a challenge was closed, with no actor', async () => {
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        status: 'open',
+      });
+      challengeRepo.save.mockImplementation((c: object) => Promise.resolve(c));
+      challengeUserMapRepo.find.mockResolvedValue([{ user_id: OTHER_USER_ID }]);
+
+      await service.closeChallenge(CHALLENGE_ID);
+      await flush();
+
+      expect(challengeUserMapRepo.find).toHaveBeenCalledWith({
+        where: { challenge_id: CHALLENGE_ID, status: 'active' },
+      });
+      expect(notificationsService.notifyMany).toHaveBeenCalledWith(
+        [OWNER_ID, OTHER_USER_ID],
+        {
+          type: 'challenge_closed',
+          entity: { type: 'challenge', id: CHALLENGE_ID },
+        },
+      );
+    });
+
+    it('still closes the challenge when the participants lookup fails', async () => {
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        status: 'open',
+      });
+      challengeRepo.save.mockImplementation((c: object) => Promise.resolve(c));
+      challengeUserMapRepo.find.mockRejectedValue(new Error('db down'));
+
+      await expect(service.closeChallenge(CHALLENGE_ID)).resolves.toEqual({
+        message: 'Challenge closed successfully',
+      });
+      await flush();
     });
   });
 });

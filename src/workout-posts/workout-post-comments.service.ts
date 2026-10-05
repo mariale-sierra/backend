@@ -7,6 +7,7 @@ import { CommentDto } from './dto/comment.dto';
 import { assertOwnership } from '../auth/utils/assert-ownership';
 import { assertPostVisibleToUser } from './workout-post-visibility.util';
 import { ModerationService } from '../openai/moderation.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export const DEFAULT_COMMENTS_LIMIT = 20;
 export const MAX_COMMENTS_LIMIT = 50;
@@ -24,6 +25,7 @@ export class WorkoutPostCommentsService {
     @InjectRepository(WorkoutPost)
     private postRepo: Repository<WorkoutPost>,
     private moderationService: ModerationService,
+    private notificationsService: NotificationsService,
   ) {}
 
   private async loadCommentablePost(
@@ -51,7 +53,7 @@ export class WorkoutPostCommentsService {
     userId: string,
     content: string,
   ): Promise<CommentDto> {
-    await this.loadCommentablePost(postId, userId);
+    const post = await this.loadCommentablePost(postId, userId);
     await this.moderationService.assertTextAllowed(content);
 
     const comment = this.commentRepo.create({
@@ -60,6 +62,15 @@ export class WorkoutPostCommentsService {
       comment_text: content,
     });
     const saved = await this.commentRepo.save(comment);
+
+    // Only ids travel with the notification, never the comment text.
+    void this.notificationsService.notify({
+      recipientUserId: post.user_id,
+      actorUserId: userId,
+      type: 'post_comment',
+      entity: { type: 'workout_post', id: post.id },
+      data: { commentId: String(saved.id) },
+    });
 
     const withAuthor = await this.commentRepo.findOne({
       where: { id: saved.id },

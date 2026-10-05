@@ -9,6 +9,7 @@ import { SpaceMessage } from './entities/space-message.entity';
 import { ExerciseCategory } from '../exercises/entities/exercise-category.entity';
 import { User } from '../users/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { AuthModule } from '../auth/auth.module';
       User,
     ]),
     forwardRef(() => AuthModule),
+    NotificationsModule,
   ],
   controllers: [SpacesController],
   providers: [SpacesService],

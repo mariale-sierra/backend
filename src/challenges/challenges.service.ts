@@ -15,6 +15,7 @@ import { UpdateChallengeDto } from './dto/update-challenge.dto';
 import { User } from '../users/entities/user.entity';
 import { ChallengeUserMap } from './entities/challenge-user-map.entity';
 import { ChallengeJoinRequest } from './entities/challenge-join-request.entity';
+import { NotificationsService } from '../notifications/notifications.service';
 import { ChallengeJoinRequestResponseDto } from './dto/challenge-join-request-response.dto';
 import { ChallengeAuthorDto } from './dto/challenge-author.dto';
 import { DataSource } from 'typeorm';
@@ -90,6 +91,7 @@ export class ChallengesService {
     private challengeJoinRequestRepo: Repository<ChallengeJoinRequest>,
     private moderationService: ModerationService,
     private readonly cache: RedisCacheService,
+    private notificationsService: NotificationsService,
   ) {}
 
   private async cacheKey(suffix: string): Promise<string> {
@@ -955,6 +957,12 @@ export class ChallengesService {
             status: 'pending',
           }),
         );
+        void this.notificationsService.notify({
+          recipientUserId: challenge.created_by_user_id,
+          actorUserId: userId,
+          type: 'challenge_join_request',
+          entity: { type: 'challenge', id: challengeId },
+        });
         return {
           status: 'requested' as const,
           message: 'Join request sent',
@@ -981,6 +989,12 @@ export class ChallengesService {
 
     await this.challengeUserMapRepo.save(join);
     await this.cache.bumpVersion(CACHE_NAMESPACE);
+    void this.notificationsService.notify({
+      recipientUserId: challenge.created_by_user_id,
+      actorUserId: userId,
+      type: 'challenge_participant_joined',
+      entity: { type: 'challenge', id: challengeId },
+    });
 
     return {
       status: 'joined' as const,
@@ -1033,6 +1047,7 @@ export class ChallengesService {
       'Only the owner can respond to join requests',
     );
 
+    let requesterId: string | undefined;
     const response = await this.dataSource.transaction(async (manager) => {
       const requestRepo = manager.getRepository(ChallengeJoinRequest);
       const request = await requestRepo
@@ -1053,6 +1068,7 @@ export class ChallengesService {
       request.responded_at = new Date();
       request.responded_by_user_id = userId;
       await requestRepo.save(request);
+      requesterId = request.user_id;
 
       if (approve) {
         const userMapRepo = manager.getRepository(ChallengeUserMap);
@@ -1083,6 +1099,16 @@ export class ChallengesService {
 
     if (approve) {
       await this.cache.bumpVersion(CACHE_NAMESPACE);
+    }
+    // After commit: a rolled-back response must never notify.
+    if (requesterId) {
+      void this.notificationsService.notify({
+        recipientUserId: requesterId,
+        actorUserId: userId,
+        type: 'challenge_join_response',
+        entity: { type: 'challenge', id: challengeId },
+        data: { approved: String(approve) },
+      });
     }
     return response;
   }
@@ -1131,6 +1157,12 @@ export class ChallengesService {
 
     await this.challengeUserMapRepo.remove(relation);
     await this.cache.bumpVersion(CACHE_NAMESPACE);
+    void this.notificationsService.notify({
+      recipientUserId: targetUserId,
+      actorUserId: userId,
+      type: 'challenge_removed',
+      entity: { type: 'challenge', id: challengeId },
+    });
     return { message: 'Participant removed successfully' };
   }
 
@@ -1153,7 +1185,31 @@ export class ChallengesService {
     challenge.status = 'closed';
     await this.challengeRepo.save(challenge);
     await this.cache.bumpVersion(CACHE_NAMESPACE);
+    void this.notifyChallengeClosed(challenge);
     return { message: 'Challenge closed successfully' };
+  }
+
+  /**
+   * Fire-and-forget: everyone still in the challenge plus its creator. No
+   * actor — it's an admin action, and which admin did it isn't shown.
+   */
+  private async notifyChallengeClosed(challenge: Challenge): Promise<void> {
+    try {
+      const members = await this.challengeUserMapRepo.find({
+        where: { challenge_id: challenge.id, status: 'active' },
+      });
+      await this.notificationsService.notifyMany(
+        [challenge.created_by_user_id, ...members.map((m) => m.user_id)],
+        {
+          type: 'challenge_closed',
+          entity: { type: 'challenge', id: challenge.id },
+        },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `challenge_closed fan-out failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   async leaveChallenge(userId: string, challengeId: string) {

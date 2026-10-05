@@ -7,6 +7,7 @@ import { DirectConversationMember } from './entities/direct-conversation-member.
 import { DirectMessage } from './entities/direct-message.entity';
 import { User } from '../users/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { AuthModule } from '../auth/auth.module';
       User,
     ]),
     forwardRef(() => AuthModule),
+    NotificationsModule,
   ],
   controllers: [ChatsController],
   providers: [ChatsService],

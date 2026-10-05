@@ -286,17 +286,23 @@ function buildHarness() {
     ),
   };
 
+  const notificationsService = {
+    notify: jest.fn().mockResolvedValue(null),
+    notifyMany: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new WorkoutPostReportsService(
     reportRepo as any,
     penaltyRepo as any,
     postRepo as any,
     commentRepo as any,
     dataSource as any,
+    notificationsService as any,
   );
 
   return {
     service,
     postRepo,
+    notificationsService,
     get store() {
       return store;
     },
@@ -412,6 +418,7 @@ describe('WorkoutPostReportsService', () => {
         {} as any,
         h.postRepo as any,
         {} as any, // ModerationService (B3) — unused by list()
+        {} as any, // NotificationsService — unused by list()
       );
       await expect(commentsService.list(POST_ID, REPORTER, {})).rejects.toThrow(
         NotFoundException,
@@ -636,6 +643,80 @@ describe('WorkoutPostReportsService', () => {
       await report('post', POST_ID);
       await expect(report('post', POST_ID)).rejects.toThrow(ConflictException);
       expect(h.store.reports).toHaveLength(1);
+    });
+  });
+
+  describe('notifications (B3)', () => {
+    it('tells every reporter of the content it was reviewed and the author it was hidden (no admin, no content)', async () => {
+      await h.service.create(REPORTER, {
+        targetType: 'comment',
+        targetId: '7',
+        reason: 'harassment',
+        details: 'private details',
+      });
+      await h.service.create(REPORTER_2, {
+        targetType: 'comment',
+        targetId: '7',
+        reason: 'harassment',
+      });
+
+      await h.service.resolve(1, ADMIN, { action: 'hide', penalize: true });
+
+      const calls = h.notificationsService.notify.mock.calls.map(
+        (c: unknown[]) => c[0],
+      );
+      expect(calls).toEqual([
+        {
+          recipientUserId: REPORTER,
+          type: 'report_resolved',
+          entity: { type: 'content_report', id: 1 },
+          data: { outcome: 'actioned' },
+        },
+        {
+          recipientUserId: REPORTER_2,
+          type: 'report_resolved',
+          entity: { type: 'content_report', id: 2 },
+          data: { outcome: 'actioned' },
+        },
+        expect.objectContaining({
+          type: 'content_hidden',
+          data: { targetType: 'comment', strike: 'true' },
+        }),
+      ]);
+      const serialized = JSON.stringify(calls);
+      expect(serialized).not.toContain(ADMIN);
+      expect(serialized).not.toContain('private details');
+      expect(serialized).not.toContain('rude comment');
+    });
+
+    it('only tells the reporter on a dismissal (the author never hears about it)', async () => {
+      await h.service.create(REPORTER, {
+        targetType: 'post',
+        targetId: POST_ID,
+        reason: 'spam',
+      });
+      await h.service.resolve(1, ADMIN, { action: 'dismiss' });
+
+      expect(h.notificationsService.notify).toHaveBeenCalledTimes(1);
+      expect(h.notificationsService.notify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientUserId: REPORTER,
+          data: { outcome: 'dismissed' },
+        }),
+      );
+    });
+
+    it('does not notify when the resolution rolls back', async () => {
+      await h.service.create(REPORTER, {
+        targetType: 'post',
+        targetId: POST_ID,
+        reason: 'spam',
+      });
+      h.failPenalties();
+      await expect(
+        h.service.resolve(1, ADMIN, { action: 'hide', penalize: true }),
+      ).rejects.toThrow('db down');
+      expect(h.notificationsService.notify).not.toHaveBeenCalled();
     });
   });
 });
