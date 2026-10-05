@@ -181,6 +181,129 @@ describe('WorkoutLogService', () => {
       expect(dataSource.transaction).toHaveBeenCalled();
     });
 
+    // B5: ck_workout_logs_challenge_requires_local_day
+    // (2026-09-28-02-workout-logs-local-day-not-null-for-challenges.sql)
+    // backs this up at the DB level — a challenge row with local_day NULL
+    // would sail straight through the partial unique index with zero
+    // protection (PostgreSQL treats every NULL as distinct in a unique
+    // index), silently reopening the exact race B5 closes. This test pins
+    // the application-level half of that invariant so a future change that
+    // forgets to compute it fails a unit test before it ever reaches the DB.
+    it('always sets localDay on the row when challengeId is set', async () => {
+      challengeRepo.findOne.mockResolvedValue(OPEN_CHALLENGE);
+      workoutRepo.findOne
+        .mockResolvedValueOnce(null) // no existing log today
+        .mockResolvedValueOnce({ id: 99, userId: OWNER_ID }); // this.findOne() at the end
+      const createEntity = jest
+        .fn()
+        .mockReturnValue({ id: 99, userId: OWNER_ID });
+      dataSource.transaction.mockImplementation(async (cb) =>
+        cb({
+          create: createEntity,
+          save: jest.fn().mockResolvedValue({ id: 99, userId: OWNER_ID }),
+          getRepository: jest.fn(),
+        }),
+      );
+
+      await service.createWorkout({
+        userId: OWNER_ID,
+        challengeId: 'challenge-1',
+        imageUrl: 'https://example.com/x.jpg',
+      });
+
+      expect(createEntity).toHaveBeenCalledWith(
+        WorkoutLog,
+        expect.objectContaining({
+          localDay: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        }),
+      );
+    });
+
+    it('leaves localDay unset when there is no challengeId (matches the partial index scope)', async () => {
+      workoutRepo.findOne.mockResolvedValueOnce({ id: 99, userId: OWNER_ID });
+      const createEntity = jest
+        .fn()
+        .mockReturnValue({ id: 99, userId: OWNER_ID });
+      dataSource.transaction.mockImplementation(async (cb) =>
+        cb({
+          create: createEntity,
+          save: jest.fn().mockResolvedValue({ id: 99, userId: OWNER_ID }),
+          getRepository: jest.fn(),
+        }),
+      );
+
+      await service.createWorkout({
+        userId: OWNER_ID,
+        imageUrl: 'https://example.com/x.jpg',
+      });
+
+      expect(createEntity).toHaveBeenCalledWith(
+        WorkoutLog,
+        expect.objectContaining({ localDay: undefined }),
+      );
+    });
+
+    // B5: the transaction's 23505 -> 409 translation must key off the exact
+    // constraint name, not just the error code — this same transaction also
+    // writes WorkoutLogExerciseTarget/-Set/-SetTarget rows (each with their
+    // own unique index) and the workout_posts row (unique on
+    // workout_log_id), so a bare `code === '23505'` check would mislabel a
+    // real data bug in any of those as "You already logged progress today".
+    describe('23505 handling is scoped to uq_workout_logs_user_challenge_local_day', () => {
+      beforeEach(() => {
+        challengeRepo.findOne.mockResolvedValue(OPEN_CHALLENGE);
+        workoutRepo.findOne.mockResolvedValue(null); // no existing log today
+      });
+
+      it('translates a violation of uq_workout_logs_user_challenge_local_day into the 409', async () => {
+        const pgError = Object.assign(new Error('duplicate key'), {
+          code: '23505',
+          constraint: 'uq_workout_logs_user_challenge_local_day',
+        });
+        dataSource.transaction.mockRejectedValue(pgError);
+
+        await expect(
+          service.createWorkout({
+            userId: OWNER_ID,
+            challengeId: 'challenge-1',
+            imageUrl: 'https://example.com/x.jpg',
+          }),
+        ).rejects.toThrow(ConflictException);
+      });
+
+      it('does NOT translate a 23505 from an unrelated constraint — it propagates as-is', async () => {
+        const pgError = Object.assign(new Error('duplicate key'), {
+          code: '23505',
+          constraint: 'uq_workout_log_exercise_targets',
+        });
+        dataSource.transaction.mockRejectedValue(pgError);
+
+        await expect(
+          service.createWorkout({
+            userId: OWNER_ID,
+            challengeId: 'challenge-1',
+            imageUrl: 'https://example.com/x.jpg',
+          }),
+        ).rejects.toBe(pgError);
+      });
+
+      it('does NOT translate a non-23505 error even if it happens to carry that constraint name', async () => {
+        const otherError = Object.assign(new Error('connection reset'), {
+          code: '57P01',
+          constraint: 'uq_workout_logs_user_challenge_local_day',
+        });
+        dataSource.transaction.mockRejectedValue(otherError);
+
+        await expect(
+          service.createWorkout({
+            userId: OWNER_ID,
+            challengeId: 'challenge-1',
+            imageUrl: 'https://example.com/x.jpg',
+          }),
+        ).rejects.toBe(otherError);
+      });
+    });
+
     // New guard rails added alongside the private-challenge join-request
     // feature and the admin close-challenge action: logging progress against
     // a challenge that doesn't exist, or one that's been closed, must be

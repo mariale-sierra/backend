@@ -274,10 +274,22 @@ export class WorkoutLogService {
       // uq_workout_logs_user_challenge_local_day backs this up at the DB
       // level — translate the race-condition duplicate into the same 409
       // the pre-check above gives, same pattern as
-      // ChallengeInvitesService.create / FollowsService.follow. Only
-      // relevant to the challenge-progress path: that's the only case with
-      // a matching partial unique index (WHERE challenge_id IS NOT NULL).
-      if (dto.challengeId && (error as { code?: string })?.code === '23505') {
+      // ChallengeInvitesService.create / FollowsService.follow.
+      //
+      // The constraint name is checked explicitly, not just the 23505 code:
+      // this same transaction also inserts WorkoutLogExerciseTarget/-Set/
+      // -SetTarget rows (each with their own unique index, e.g.
+      // uq_workout_log_exercise_targets on (workout_log_exercise_id,
+      // metric_type_id)) and the workout_posts row (unique on
+      // workout_log_id). A 23505 from any of those would be a genuine data
+      // bug, not a duplicate-progress race, and must not be mislabeled as
+      // "You already logged progress today" just because dto.challengeId
+      // happens to be set.
+      const pgError = error as { code?: string; constraint?: string };
+      if (
+        pgError?.code === '23505' &&
+        pgError?.constraint === 'uq_workout_logs_user_challenge_local_day'
+      ) {
         throw new ConflictException('You already logged progress today');
       }
       throw error;
