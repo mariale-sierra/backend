@@ -58,6 +58,7 @@ async function bootstrap() {
     .addTag('Workout Post Reactions', 'Reacciones (likes) sobre publicaciones')
     .addTag('Workout Post Comments', 'Comentarios sobre publicaciones')
     .addTag('Badges', 'Badges de actividad calculados al vuelo')
+    .addTag('Notifications', 'Bandeja, preferencias y tokens push (B3)')
     .addBearerAuth()
     .build();
 
