@@ -189,6 +189,8 @@ export class AccountDeletionService {
         ['direct_messages', 'user_id'],
         ['direct_conversation_members', 'user_id'],
         ['notifications', 'recipient_user_id'],
+        ['device_push_tokens', 'user_id'],
+        ['notification_preferences', 'user_id'],
       ];
       for (const [table, column] of purgeTables) {
         await manager.query(`DELETE FROM havit.${table} WHERE ${column} = $1`, [
