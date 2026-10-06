@@ -106,7 +106,12 @@ export class RoutineService {
     dto: AddRoutineExerciseDto,
     userId: string,
   ) {
-    const routine = await this.routineRepo.findOneBy({ id: routineId });
+    // B4: a deactivated routine (is_active = false) can't be edited — it is
+    // treated as nonexistent here, same as findAll()/findOne().
+    const routine = await this.routineRepo.findOneBy({
+      id: routineId,
+      is_active: true,
+    });
     if (!routine) throw new NotFoundException('Routine not found');
 
     // Only enforced when the routine has a recorded owner — many existing
@@ -295,5 +300,19 @@ export class RoutineService {
       routine_id: today.routine_id,
       exercises,
     };
+  }
+
+  async deactivateRoutine(id: number, userId: string): Promise<void> {
+    const routine = await this.routineRepo.findOne({
+      where: { id, is_active: true },
+    });
+    if (!routine) {
+      throw new NotFoundException('Routine not found');
+    }
+    if (routine.createdByUserId !== userId) {
+      throw new ForbiddenException('You do not own this routine');
+    }
+    routine.is_active = false;
+    await this.routineRepo.save(routine);
   }
 }

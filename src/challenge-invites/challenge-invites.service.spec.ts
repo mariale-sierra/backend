@@ -150,6 +150,17 @@ describe('ChallengeInvitesService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
+    it('should not invite to a challenge its creator soft-deleted (B4)', async () => {
+      challengeRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.create(SENDER, CHALLENGE, RECIPIENT),
+      ).rejects.toThrow(NotFoundException);
+      expect(challengeRepo.findOne).toHaveBeenCalledWith({
+        where: { id: CHALLENGE, is_active: true },
+      });
+    });
+
     it('should throw NotFoundException when the recipient does not exist or is inactive', async () => {
       challengeRepo.findOne.mockResolvedValue(baseChallenge());
       userRepo.findOne.mockResolvedValue(null);
@@ -238,8 +249,27 @@ describe('ChallengeInvitesService', () => {
         ...pendingInvite(),
         status: 'accepted',
       });
+      // B4: accept() requires the challenge to still be active.
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
       return { txInviteRepo, txMemberRepo };
     };
+
+    it('should not accept an invite to a challenge its creator soft-deleted (B4)', async () => {
+      const { txInviteRepo, txMemberRepo } = arrangeTransaction(
+        pendingInvite(),
+        null,
+      );
+      challengeRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.accept(INVITE_ID, RECIPIENT)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(challengeRepo.findOne).toHaveBeenCalledWith({
+        where: { id: CHALLENGE, is_active: true },
+      });
+      expect(txInviteRepo.save).not.toHaveBeenCalled();
+      expect(txMemberRepo.save).not.toHaveBeenCalled();
+    });
 
     it('should mark the invite accepted and add the member inside one transaction', async () => {
       const { txInviteRepo, txMemberRepo } = arrangeTransaction(

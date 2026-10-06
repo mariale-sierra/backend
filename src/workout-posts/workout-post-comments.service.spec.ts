@@ -11,6 +11,7 @@ import { WorkoutPostComment } from './entities/workout-post-comment.entity';
 import { WorkoutPost } from './entities/workout-post.entity';
 import { ModerationService } from '../openai/moderation.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { User } from '../users/entities/user.entity';
 
 // B3: emitters call notify()/notifyMany() fire-and-forget; never throws.
 const notificationsService = {
@@ -34,6 +35,8 @@ describe('WorkoutPostCommentsService', () => {
   let moderationService: { assertTextAllowed: jest.Mock };
   let commentRepo: ReturnType<typeof createMockCommentRepo>;
   let postRepo: ReturnType<typeof createMockPostRepo>;
+  // B4: moderator (global admin) lookup for comment deletion.
+  let userRepo: { findOne: jest.Mock };
 
   const POST_ID = 'post-1';
   const OWNER_ID = 'owner-1';
@@ -46,6 +49,9 @@ describe('WorkoutPostCommentsService', () => {
   beforeEach(async () => {
     commentRepo = createMockCommentRepo();
     postRepo = createMockPostRepo();
+    userRepo = {
+      findOne: jest.fn().mockResolvedValue({ id: 'x', is_admin: false }),
+    };
 
     moderationService = {
       assertTextAllowed: jest.fn().mockResolvedValue(undefined),
@@ -61,6 +67,7 @@ describe('WorkoutPostCommentsService', () => {
           useValue: commentRepo,
         },
         { provide: getRepositoryToken(WorkoutPost), useValue: postRepo },
+        { provide: getRepositoryToken(User), useValue: userRepo },
       ],
     }).compile();
 
@@ -76,6 +83,17 @@ describe('WorkoutPostCommentsService', () => {
       );
       expect(commentRepo.save).not.toHaveBeenCalled();
       expect(moderationService.assertTextAllowed).not.toHaveBeenCalled();
+    });
+
+    it('should only look up active posts, so a soft-deleted post (B4) cannot be commented on', async () => {
+      postRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.create(POST_ID, USER_ID, 'hola')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(postRepo.findOne).toHaveBeenCalledWith({
+        where: { id: POST_ID, is_hidden: false, is_active: true },
+      });
     });
 
     it('should throw ForbiddenException when the post is private and the user is not its owner', async () => {
@@ -263,6 +281,65 @@ describe('WorkoutPostCommentsService', () => {
         expect.objectContaining({ is_active: false }),
       );
       expect(result).toEqual({ message: 'Comment deleted' });
+    });
+
+    // Sprint 9 B4: author OR moderator. "Moderator" = the existing global
+    // admin (users.is_admin), looked up fresh like AdminGuard does.
+    it('should let the author delete without any admin lookup', async () => {
+      commentRepo.findOne.mockResolvedValue({
+        id: 1,
+        workout_post_id: POST_ID,
+        user_id: USER_ID,
+        is_active: true,
+      });
+      commentRepo.save.mockImplementation((c: unknown) => Promise.resolve(c));
+
+      await service.remove(POST_ID, 1, USER_ID);
+
+      expect(userRepo.findOne).not.toHaveBeenCalled();
+      expect(commentRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ is_active: false }),
+      );
+    });
+
+    it("should let a moderator (global admin) soft-delete someone else's comment", async () => {
+      commentRepo.findOne.mockResolvedValue({
+        id: 1,
+        workout_post_id: POST_ID,
+        user_id: OTHER_USER_ID,
+        is_active: true,
+        is_hidden: false,
+      });
+      commentRepo.save.mockImplementation((c: unknown) => Promise.resolve(c));
+      userRepo.findOne.mockResolvedValue({ id: USER_ID, is_admin: true });
+
+      const result = await service.remove(POST_ID, 1, USER_ID);
+
+      expect(userRepo.findOne).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        select: ['id', 'is_admin'],
+      });
+      // Soft delete only — is_hidden (report resolution) is a separate concept.
+      expect(commentRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ is_active: false, is_hidden: false }),
+      );
+      expect(result).toEqual({ message: 'Comment deleted' });
+    });
+
+    it('should forbid a regular non-author user, checking admin status first', async () => {
+      commentRepo.findOne.mockResolvedValue({
+        id: 1,
+        workout_post_id: POST_ID,
+        user_id: OTHER_USER_ID,
+        is_active: true,
+      });
+      userRepo.findOne.mockResolvedValue({ id: USER_ID, is_admin: false });
+
+      await expect(service.remove(POST_ID, 1, USER_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(userRepo.findOne).toHaveBeenCalled();
+      expect(commentRepo.save).not.toHaveBeenCalled();
     });
   });
 

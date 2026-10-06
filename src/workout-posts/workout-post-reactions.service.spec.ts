@@ -68,6 +68,17 @@ describe('WorkoutPostReactionsService', () => {
       expect(likeRepo.save).not.toHaveBeenCalled();
     });
 
+    it('should only look up active posts, so a soft-deleted post (B4) cannot be reacted to', async () => {
+      postRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.react(POST_ID, USER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(postRepo.findOne).toHaveBeenCalledWith({
+        where: { id: POST_ID, is_hidden: false, is_active: true },
+      });
+    });
+
     it('should throw ForbiddenException when the post is private and the user is not its owner', async () => {
       postRepo.findOne.mockResolvedValue(privatePost);
 

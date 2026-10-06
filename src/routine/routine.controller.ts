@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Body, Param, Req } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Delete,
+  Body,
+  Param,
+  Req,
+  ParseIntPipe,
+} from '@nestjs/common';
 import { RoutineService } from './routine.service';
 import {
   ApiTags,
@@ -97,5 +106,23 @@ export class RoutineController {
       user.sub,
       resolveRequestTimezone(req),
     );
+  }
+
+  @Delete(':id')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID de la rutina' })
+  @ApiOperation({
+    summary: 'Desactivar una rutina',
+    description:
+      'Desactiva una rutina del usuario autenticado. Soft delete: preserva el historial de workout logs.',
+  })
+  @ApiResponse({ status: 200, description: 'Rutina desactivada exitosamente' })
+  @ApiResponse({ status: 403, description: 'No eres el dueño de esta rutina' })
+  @ApiResponse({ status: 404, description: 'Rutina no encontrada' })
+  deactivateRoutine(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.routineService.deactivateRoutine(id, user.sub);
   }
 }

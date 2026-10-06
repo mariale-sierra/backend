@@ -38,6 +38,16 @@ import {
 // this module as "do not cache" for the unrelated daily-uniqueness check.
 const WORKOUT_LOG_LIST_TTL_SECONDS = 15;
 
+/** Sprint 9 (B4): a soft-deleted post (is_active = false) must not come back
+ * through the `posts` relation of a workout log either. Filtered after load
+ * rather than as a relation `where`, which would drop the whole workout log
+ * when it has no active post. */
+function activePosts<T extends { is_active: boolean }>(
+  posts?: T[],
+): T[] | undefined {
+  return posts?.filter((post) => post.is_active);
+}
+
 @Injectable()
 export class WorkoutLogService {
   constructor(
@@ -97,7 +107,7 @@ export class WorkoutLogService {
 
     if (dto.challengeId) {
       challenge = await this.challengeRepo.findOne({
-        where: { id: dto.challengeId },
+        where: { id: dto.challengeId, is_active: true },
       });
       if (!challenge) throw new NotFoundException('Challenge not found');
 
@@ -435,6 +445,7 @@ export class WorkoutLogService {
       );
     }
 
+    if (workout.posts) workout.posts = activePosts(workout.posts);
     return workout;
   }
 
@@ -514,7 +525,11 @@ export class WorkoutLogService {
     const byId = new Map(workouts.map((w) => [w.id, w]));
     const data = ids
       .map((id) => byId.get(id))
-      .filter((w): w is WorkoutLog => !!w);
+      .filter((w): w is WorkoutLog => !!w)
+      .map((w) => {
+        if (w.posts) w.posts = activePosts(w.posts);
+        return w;
+      });
 
     const last = page[page.length - 1];
     const nextCursor =

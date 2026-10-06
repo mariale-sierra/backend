@@ -10,6 +10,7 @@ import { IsNull, Not, Repository } from 'typeorm';
 import { DirectConversation } from './entities/direct-conversation.entity';
 import { DirectConversationMember } from './entities/direct-conversation-member.entity';
 import { DirectMessage } from './entities/direct-message.entity';
+import { DirectConversationHiddenBy } from './entities/direct-conversation-hidden-by.entity';
 import { User } from '../users/entities/user.entity';
 import { MessageDto } from './dto/message.dto';
 import {
@@ -18,6 +19,7 @@ import {
 } from './dto/conversation-summary.dto';
 import { ConversationParticipantDto } from './dto/conversation-participant.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { assertOwnership } from '../auth/utils/assert-ownership';
 import {
   DEFAULT_MESSAGES_LIMIT,
   MAX_MESSAGES_LIMIT,
@@ -39,6 +41,8 @@ export class ChatsService {
     private memberRepo: Repository<DirectConversationMember>,
     @InjectRepository(DirectMessage)
     private messageRepo: Repository<DirectMessage>,
+    @InjectRepository(DirectConversationHiddenBy)
+    private hiddenRepo: Repository<DirectConversationHiddenBy>,
     @InjectRepository(User)
     private userRepo: Repository<User>,
     private notificationsService: NotificationsService,
@@ -89,14 +93,25 @@ export class ChatsService {
     return summary;
   }
 
+  /**
+   * The viewer's conversations, minus the ones THEY hid (B4,
+   * hideConversation) — the other participant's list is unaffected. Filtered
+   * here rather than in buildConversationSummary() so that explicitly
+   * reopening a hidden chat (findOrCreateDirectConversation) still works.
+   */
   async listConversations(userId: string): Promise<ConversationSummaryDto[]> {
-    const memberships = await this.memberRepo.find({
-      where: { user_id: userId },
-    });
-    if (memberships.length === 0) return [];
+    const [memberships, hidden] = await Promise.all([
+      this.memberRepo.find({ where: { user_id: userId } }),
+      this.hiddenRepo.find({ where: { user_id: userId } }),
+    ]);
+    const hiddenIds = new Set(hidden.map((h) => h.direct_conversation_id));
+    const visible = memberships.filter(
+      (m) => !hiddenIds.has(m.direct_conversation_id),
+    );
+    if (visible.length === 0) return [];
 
     const summaries = await Promise.all(
-      memberships.map((m) =>
+      visible.map((m) =>
         this.buildConversationSummary(m.direct_conversation_id, userId),
       ),
     );
@@ -160,6 +175,13 @@ export class ChatsService {
   ): Promise<MessageDto> {
     await this.assertMembership(conversationId, userId);
 
+    // B4: a globally inactive conversation (declineRequest) stays dead — a
+    // new message must never resurrect it. Same 404 as a non-member gets.
+    const conversation = await this.conversationRepo.findOne({
+      where: { id: conversationId, is_active: true },
+    });
+    if (!conversation) throw new NotFoundException('Conversation not found');
+
     // A pending recipient can already read (assertMembership alone covers
     // that) but can't reply until they accept the request — the frontend
     // already hides the composer for this state, this is defense in depth
@@ -177,8 +199,86 @@ export class ChatsService {
       message_text: content,
     });
     const saved = await this.messageRepo.save(message);
+    // Only AFTER the message is actually persisted: new activity brings a
+    // hidden chat back for whoever hid it (1:1, so both participants).
+    await this.clearHiddenBy(conversationId);
     void this.notifyConversation(conversationId, userId);
     return this.toMessageDto(saved);
+  }
+
+  /**
+   * B4: the sender deletes ONE of their own messages. Soft delete
+   * (is_active = false + save) — the conversation, the other messages and the
+   * history stay. The message must belong to `conversationId` (a message id
+   * from another conversation is a 404, same as a missing or already-deleted
+   * one); only its sender may delete it (403 otherwise).
+   */
+  async deleteMessage(
+    userId: string,
+    conversationId: string,
+    messageId: number,
+  ): Promise<void> {
+    await this.assertMembership(conversationId, userId);
+
+    const message = await this.messageRepo.findOne({
+      where: {
+        id: messageId,
+        direct_conversation_id: conversationId,
+        is_active: true,
+      },
+    });
+    if (!message) throw new NotFoundException('Message not found');
+    assertOwnership(
+      message.user_id,
+      userId,
+      'You can only delete your own messages',
+    );
+
+    message.is_active = false;
+    await this.messageRepo.save(message);
+  }
+
+  /**
+   * B4: removes the conversation from the CALLER's list only — the other
+   * participant keeps it, and no message or conversation row is touched
+   * (unlike declineRequest, which is global). Idempotent: hiding an
+   * already-hidden conversation is a no-op, including under a concurrent
+   * double request (23505 on the composite PK).
+   */
+  async hideConversation(
+    userId: string,
+    conversationId: string,
+  ): Promise<void> {
+    await this.assertMembership(conversationId, userId);
+
+    const existing = await this.hiddenRepo.findOne({
+      where: { direct_conversation_id: conversationId, user_id: userId },
+    });
+    if (existing) return;
+
+    try {
+      await this.hiddenRepo.save(
+        this.hiddenRepo.create({
+          direct_conversation_id: conversationId,
+          user_id: userId,
+        }),
+      );
+    } catch (error) {
+      if ((error as { code?: string })?.code === '23505') return;
+      throw error;
+    }
+  }
+
+  /** Best-effort: the message is already saved, so a failure here only
+   * leaves the chat hidden — logged, never turned into a failed send. */
+  private async clearHiddenBy(conversationId: string): Promise<void> {
+    try {
+      await this.hiddenRepo.delete({ direct_conversation_id: conversationId });
+    } catch (error) {
+      this.logger.warn(
+        `could not unhide conversation ${conversationId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   /**

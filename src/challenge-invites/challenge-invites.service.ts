@@ -44,7 +44,7 @@ export class ChallengeInvitesService {
     }
 
     const challenge = await this.challengeRepo.findOne({
-      where: { id: challengeId },
+      where: { id: challengeId, is_active: true },
     });
     if (!challenge) throw new NotFoundException('Challenge not found');
 
@@ -173,6 +173,13 @@ export class ChallengeInvitesService {
         );
       }
       this.assertPending(invite);
+
+      // B4: an invite to a challenge its creator has since soft-deleted can
+      // no longer bring anyone (back) into it.
+      const challenge = await this.challengeRepo.findOne({
+        where: { id: invite.challenge_id, is_active: true },
+      });
+      if (!challenge) throw new NotFoundException('Challenge not found');
 
       invite.status = 'accepted';
       invite.responded_at = new Date();

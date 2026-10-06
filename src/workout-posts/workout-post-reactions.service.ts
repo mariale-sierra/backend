@@ -32,7 +32,7 @@ export class WorkoutPostReactionsService {
     userId: string,
   ): Promise<WorkoutPost> {
     const post = await this.postRepo.findOne({
-      where: { id: postId, is_hidden: false },
+      where: { id: postId, is_hidden: false, is_active: true },
     });
     if (!post) throw new NotFoundException('Workout post not found');
     assertPostVisibleToUser(post, userId);

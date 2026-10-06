@@ -623,6 +623,9 @@ export class UsersService {
       .createQueryBuilder('cu')
       .leftJoinAndSelect('cu.challenge', 'challenge')
       .where('cu.user_id = :userId', { userId })
+      // B4: a challenge its creator deleted no longer lists (the membership
+      // row itself is preserved as history).
+      .andWhere('challenge.is_active = true')
       .orderBy('cu.joined_at', 'DESC')
       .getMany();
 

@@ -47,4 +47,11 @@ export class Challenge {
   // row at migration time; a UUID PK alone isn't chronologically ordered.
   @Column({ type: 'timestamptz', default: () => 'now()' })
   created_at!: Date;
+
+  // Sprint 9, B4 — owner soft delete (2026-10-06-02-add-challenges-is-active.sql).
+  // `false` means the creator deleted it: every read treats it as nonexistent,
+  // while challenge_user_map, join requests and workout history are kept.
+  // Independent of `status` (open/closed is the functional lifecycle).
+  @Column({ default: true })
+  is_active!: boolean;
 }

@@ -63,6 +63,7 @@ function seed(): Store {
         caption: 'leg day',
         image_url: 'https://img/1.jpg',
         is_hidden: false,
+        is_active: true,
       },
       {
         id: PRIVATE_POST_ID,
@@ -71,6 +72,7 @@ function seed(): Store {
         caption: null,
         image_url: 'https://img/2.jpg',
         is_hidden: false,
+        is_active: true,
       },
     ],
     comments: [
@@ -419,6 +421,7 @@ describe('WorkoutPostReportsService', () => {
         h.postRepo as any,
         {} as any, // ModerationService (B3) — unused by list()
         {} as any, // NotificationsService — unused by list()
+        {} as never, // User repo (B4 moderator lookup) — unused by list()
       );
       await expect(commentsService.list(POST_ID, REPORTER, {})).rejects.toThrow(
         NotFoundException,
@@ -615,6 +618,18 @@ describe('WorkoutPostReportsService', () => {
 
     it('404s for a deleted comment', async () => {
       await expect(report('comment', '8')).rejects.toThrow(NotFoundException);
+    });
+
+    it('404s for a post its author soft-deleted (B4)', async () => {
+      h.store.posts.find((p) => p.id === POST_ID)!.is_active = false;
+
+      await expect(report('post', POST_ID)).rejects.toThrow(NotFoundException);
+    });
+
+    it('404s for a comment on a post its author soft-deleted (B4)', async () => {
+      h.store.posts.find((p) => p.id === POST_ID)!.is_active = false;
+
+      await expect(report('comment', '7')).rejects.toThrow(NotFoundException);
     });
 
     it('404s for a comment that does not exist', async () => {

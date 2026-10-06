@@ -73,7 +73,7 @@ export class WorkoutPostReportsService {
         throw new BadRequestException('targetId must be a post UUID');
       }
       const post = await this.postRepo.findOne({
-        where: { id: targetId, is_hidden: false },
+        where: { id: targetId, is_hidden: false, is_active: true },
       });
       if (!post) throw new NotFoundException('Workout post not found');
       assertPostVisibleToUser(post, reporterId);
@@ -87,7 +87,12 @@ export class WorkoutPostReportsService {
       where: { id: Number(targetId), is_active: true, is_hidden: false },
       relations: { post: true },
     });
-    if (!comment || !comment.post || comment.post.is_hidden) {
+    if (
+      !comment ||
+      !comment.post ||
+      comment.post.is_hidden ||
+      !comment.post.is_active
+    ) {
       throw new NotFoundException('Comment not found');
     }
     assertPostVisibleToUser(comment.post, reporterId);

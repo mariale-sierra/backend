@@ -230,3 +230,30 @@ describe('WorkoutPostsController.getLatestChallengePhoto', () => {
     expect(result).toBe(photo);
   });
 });
+
+describe('WorkoutPostsController.remove (B4)', () => {
+  let controller: WorkoutPostsController;
+  let service: { remove: jest.Mock };
+
+  const viewer: AuthenticatedUser = {
+    sub: 'viewer-1',
+    email: 'v@v.com',
+    username: 'viewer',
+  };
+
+  beforeEach(() => {
+    service = {
+      remove: jest.fn().mockResolvedValue({ message: 'Workout post deleted' }),
+    };
+    controller = new WorkoutPostsController(
+      service as unknown as WorkoutPostsService,
+    );
+  });
+
+  it('should delete on behalf of the JWT-derived user, never a body/param user id', async () => {
+    const result = await controller.remove('post-1', viewer);
+
+    expect(service.remove).toHaveBeenCalledWith('post-1', 'viewer-1');
+    expect(result).toEqual({ message: 'Workout post deleted' });
+  });
+});

@@ -728,12 +728,13 @@ export class ChallengesService {
     // query builder — row is "earlier" if its created_at is strictly less,
     // or equal with a strictly smaller id as a deterministic tie-break.
     const cursorDate = cursor ? new Date(cursor.createdAt) : undefined;
+    // is_active: B4 — challenges their creator deleted never list.
     const where = cursor
       ? [
-          { created_at: LessThan(cursorDate!) },
-          { created_at: cursorDate!, id: LessThan(cursor.id) },
+          { created_at: LessThan(cursorDate!), is_active: true },
+          { created_at: cursorDate!, id: LessThan(cursor.id), is_active: true },
         ]
-      : {};
+      : { is_active: true };
 
     const rows = await this.challengeRepo.find({
       where,
@@ -808,7 +809,9 @@ export class ChallengesService {
   }
 
   private async findOneUncached(id: string) {
-    const challenge = await this.challengeRepo.findOne({ where: { id } });
+    const challenge = await this.challengeRepo.findOne({
+      where: { id, is_active: true },
+    });
     if (!challenge) throw new NotFoundException('Challenge not found');
 
     const [enriched] = await this.attachCategoriesAndLocations([challenge]);
@@ -841,7 +844,7 @@ export class ChallengesService {
    */
   async getChallengeAuthor(challengeId: string): Promise<ChallengeAuthorDto> {
     const challenge = await this.challengeRepo.findOne({
-      where: { id: challengeId },
+      where: { id: challengeId, is_active: true },
     });
     if (!challenge) throw new NotFoundException('Challenge not found');
 
@@ -870,7 +873,9 @@ export class ChallengesService {
     updateChallengeDto: UpdateChallengeDto,
     userId: string,
   ) {
-    const challenge = await this.challengeRepo.findOne({ where: { id } });
+    const challenge = await this.challengeRepo.findOne({
+      where: { id, is_active: true },
+    });
     if (!challenge) throw new NotFoundException('Challenge not found');
     assertOwnership(challenge.created_by_user_id, userId);
 
@@ -893,11 +898,17 @@ export class ChallengesService {
   }
 
   async remove(id: string, userId: string) {
-    const challenge = await this.challengeRepo.findOne({ where: { id } });
+    const challenge = await this.challengeRepo.findOne({
+      where: { id, is_active: true },
+    });
     if (!challenge) throw new NotFoundException('Challenge not found');
     assertOwnership(challenge.created_by_user_id, userId);
 
-    await this.challengeRepo.remove(challenge);
+    // B4: soft delete only. A hard remove() cascaded away challenge_user_map,
+    // join requests and cycle days and orphaned workout history; now the row
+    // stays and every read treats is_active = false as nonexistent.
+    challenge.is_active = false;
+    await this.challengeRepo.save(challenge);
     await this.cache.bumpVersion(CACHE_NAMESPACE);
     return { message: 'Challenge deleted successfully' };
   }
@@ -916,7 +927,7 @@ export class ChallengesService {
     if (!user) throw new NotFoundException('User not found');
 
     const challenge = await this.challengeRepo.findOne({
-      where: { id: challengeId },
+      where: { id: challengeId, is_active: true },
     });
     if (!challenge) throw new NotFoundException('Challenge not found');
 
@@ -1009,7 +1020,7 @@ export class ChallengesService {
     challengeId: string,
   ): Promise<ChallengeJoinRequestResponseDto[]> {
     const challenge = await this.challengeRepo.findOne({
-      where: { id: challengeId },
+      where: { id: challengeId, is_active: true },
     });
     if (!challenge) throw new NotFoundException('Challenge not found');
     assertOwnership(
@@ -1038,7 +1049,7 @@ export class ChallengesService {
     approve: boolean,
   ): Promise<ChallengeJoinRequestResponseDto> {
     const challenge = await this.challengeRepo.findOne({
-      where: { id: challengeId },
+      where: { id: challengeId, is_active: true },
     });
     if (!challenge) throw new NotFoundException('Challenge not found');
     assertOwnership(
@@ -1128,7 +1139,7 @@ export class ChallengesService {
     targetUserId: string,
   ): Promise<{ message: string }> {
     const challenge = await this.challengeRepo.findOne({
-      where: { id: challengeId },
+      where: { id: challengeId, is_active: true },
     });
     if (!challenge) throw new NotFoundException('Challenge not found');
     assertOwnership(
@@ -1175,7 +1186,7 @@ export class ChallengesService {
    */
   async closeChallenge(challengeId: string): Promise<{ message: string }> {
     const challenge = await this.challengeRepo.findOne({
-      where: { id: challengeId },
+      where: { id: challengeId, is_active: true },
     });
     if (!challenge) throw new NotFoundException('Challenge not found');
     if (challenge.status === 'closed') {
@@ -1237,7 +1248,7 @@ export class ChallengesService {
     userId: string,
   ) {
     const challenge = await this.challengeRepo.findOne({
-      where: { id: challengeId },
+      where: { id: challengeId, is_active: true },
     });
 
     if (!challenge) {
@@ -1305,7 +1316,7 @@ export class ChallengesService {
     message: string,
   ) {
     const challenge = await this.challengeRepo.findOne({
-      where: { id: challengeId },
+      where: { id: challengeId, is_active: true },
     });
 
     if (!challenge) {
@@ -1361,7 +1372,7 @@ export class ChallengesService {
 
   async findUsersByChallenge(challengeId: string) {
     const challenge = await this.challengeRepo.findOne({
-      where: { id: challengeId },
+      where: { id: challengeId, is_active: true },
     });
 
     if (!challenge) {
@@ -1421,7 +1432,7 @@ export class ChallengesService {
     if (!relation) return null;
 
     const challenge = await this.challengeRepo.findOne({
-      where: { id: challengeId },
+      where: { id: challengeId, is_active: true },
     });
     if (!challenge) return null;
 
@@ -1494,7 +1505,7 @@ export class ChallengesService {
     }
 
     const challenge = await this.challengeRepo.findOne({
-      where: { id: challengeId },
+      where: { id: challengeId, is_active: true },
     });
     if (!challenge) {
       throw new NotFoundException('Challenge not found');
@@ -1601,7 +1612,7 @@ export class ChallengesService {
 
     // buscar challenge
     const challenge = await this.challengeRepo.findOne({
-      where: { id: challengeId },
+      where: { id: challengeId, is_active: true },
     });
 
     if (!challenge) {

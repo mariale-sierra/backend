@@ -1,13 +1,17 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { WorkoutPostComment } from './entities/workout-post-comment.entity';
 import { WorkoutPost } from './entities/workout-post.entity';
 import { CommentDto } from './dto/comment.dto';
-import { assertOwnership } from '../auth/utils/assert-ownership';
 import { assertPostVisibleToUser } from './workout-post-visibility.util';
 import { ModerationService } from '../openai/moderation.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { User } from '../users/entities/user.entity';
 
 export const DEFAULT_COMMENTS_LIMIT = 20;
 export const MAX_COMMENTS_LIMIT = 50;
@@ -26,6 +30,9 @@ export class WorkoutPostCommentsService {
     private postRepo: Repository<WorkoutPost>,
     private moderationService: ModerationService,
     private notificationsService: NotificationsService,
+    // B4: moderator (global admin) lookup for comment deletion.
+    @InjectRepository(User)
+    private userRepo: Repository<User>,
   ) {}
 
   private async loadCommentablePost(
@@ -33,7 +40,7 @@ export class WorkoutPostCommentsService {
     userId: string,
   ): Promise<WorkoutPost> {
     const post = await this.postRepo.findOne({
-      where: { id: postId, is_hidden: false },
+      where: { id: postId, is_hidden: false, is_active: true },
     });
     if (!post) throw new NotFoundException('Workout post not found');
     assertPostVisibleToUser(post, userId);
@@ -118,6 +125,14 @@ export class WorkoutPostCommentsService {
     return { comments: page.map((c) => this.toCommentDto(c)), nextAfter };
   }
 
+  /**
+   * Soft delete (is_active = false) by the comment's author OR a moderator.
+   * Sprint 9 B4: "moderator" is the app's existing global admin
+   * (`users.is_admin` — the same role AdminGuard gates the report queue,
+   * close-challenge and bans behind), looked up fresh from the database like
+   * AdminGuard does, never trusted from the JWT. Only queried when the caller
+   * isn't the author. Independent of `is_hidden` (report resolution).
+   */
   async remove(
     postId: string,
     commentId: number,
@@ -127,16 +142,22 @@ export class WorkoutPostCommentsService {
       where: { id: commentId, workout_post_id: postId, is_active: true },
     });
     if (!comment) throw new NotFoundException('Comment not found');
-    assertOwnership(
-      comment.user_id,
-      userId,
-      'You can only delete your own comments',
-    );
+    if (comment.user_id !== userId && !(await this.isAdmin(userId))) {
+      throw new ForbiddenException('You can only delete your own comments');
+    }
 
     comment.is_active = false;
     await this.commentRepo.save(comment);
 
     return { message: 'Comment deleted' };
+  }
+
+  private async isAdmin(userId: string): Promise<boolean> {
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      select: ['id', 'is_admin'],
+    });
+    return user?.is_admin === true;
   }
 
   /** Comment counts for many posts at once (Feed), one grouped query instead

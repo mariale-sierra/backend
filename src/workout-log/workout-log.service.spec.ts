@@ -324,6 +324,22 @@ describe('WorkoutLogService', () => {
         expect(dataSource.transaction).not.toHaveBeenCalled();
       });
 
+      it('should refuse logging progress to a challenge its creator soft-deleted (B4)', async () => {
+        challengeRepo.findOne.mockResolvedValue(null);
+
+        await expect(
+          service.createWorkout({
+            userId: OWNER_ID,
+            challengeId: 'deleted-challenge',
+            imageUrl: 'https://example.com/x.jpg',
+          }),
+        ).rejects.toThrow(NotFoundException);
+        expect(challengeRepo.findOne).toHaveBeenCalledWith({
+          where: { id: 'deleted-challenge', is_active: true },
+        });
+        expect(dataSource.transaction).not.toHaveBeenCalled();
+      });
+
       it('should throw BadRequestException when the challenge is closed', async () => {
         challengeRepo.findOne.mockResolvedValue({
           id: 'challenge-1',
@@ -731,6 +747,21 @@ describe('WorkoutLogService', () => {
       await expect(service.findOne(999, OWNER_ID)).rejects.toThrow(
         NotFoundException,
       );
+    });
+
+    it('should not return posts its author soft-deleted (B4) through the posts relation', async () => {
+      workoutRepo.findOne.mockResolvedValue({
+        id: 1,
+        userId: OWNER_ID,
+        posts: [
+          { id: 'post-active', is_active: true },
+          { id: 'post-deleted', is_active: false },
+        ],
+      });
+
+      const workout = await service.findOne(1, OWNER_ID);
+
+      expect(workout.posts).toEqual([{ id: 'post-active', is_active: true }]);
     });
   });
 

@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { WorkoutPostsService } from './workout-posts.service';
 import {
   WorkoutPost,
@@ -16,6 +16,8 @@ import { encodeCursor } from '../common/pagination.util';
 const createMockWorkoutPostRepo = () => ({
   create: jest.fn(),
   save: jest.fn(),
+  // remove()'s (B4) own lookup of the post to soft-delete.
+  findOne: jest.fn(),
   update: jest.fn(),
   // processPendingModerationBatch()'s own lookup of still-pending posts.
   find: jest.fn().mockResolvedValue([]),
@@ -996,6 +998,120 @@ describe('WorkoutPostsService', () => {
       expect(photos[0].metrics).toEqual([
         { label: 'Bench Press', value: '3 × 45 kg' },
       ]);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Sprint 9 (B4): an author deletes their own post — soft delete only
+  // (is_active = false), and a deleted post disappears from every read path.
+  // ---------------------------------------------------------------------
+  describe('remove (B4 soft delete)', () => {
+    const POST_ID = '5b1e7c1a-0000-4000-8000-000000000001';
+
+    it('should soft-delete the owner’s post: is_active=false via save(), never a physical delete', async () => {
+      const post = { id: POST_ID, user_id: VIEWER_ID, is_active: true };
+      postRepo.findOne.mockResolvedValue(post);
+      postRepo.save.mockImplementation((p: unknown) => Promise.resolve(p));
+
+      const result = await service.remove(POST_ID, VIEWER_ID);
+
+      expect(postRepo.findOne).toHaveBeenCalledWith({
+        where: { id: POST_ID, is_active: true },
+      });
+      expect(postRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ id: POST_ID, is_active: false }),
+      );
+      expect(postRepo.update).not.toHaveBeenCalled();
+      expect(result).toEqual({ message: 'Workout post deleted' });
+    });
+
+    it('should not touch is_hidden (admin moderation is a separate concept)', async () => {
+      const post = {
+        id: POST_ID,
+        user_id: VIEWER_ID,
+        is_active: true,
+        is_hidden: false,
+      };
+      postRepo.findOne.mockResolvedValue(post);
+      postRepo.save.mockImplementation((p: unknown) => Promise.resolve(p));
+
+      await service.remove(POST_ID, VIEWER_ID);
+
+      expect(postRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ is_active: false, is_hidden: false }),
+      );
+    });
+
+    it('should throw ForbiddenException when someone else tries to delete it, without saving', async () => {
+      postRepo.findOne.mockResolvedValue({
+        id: POST_ID,
+        user_id: OTHER_USER_ID,
+        is_active: true,
+      });
+
+      await expect(service.remove(POST_ID, VIEWER_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(postRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should throw NotFoundException for a missing or already-deleted post, without saving', async () => {
+      postRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.remove(POST_ID, VIEWER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(postRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should exclude soft-deleted posts from the feed', async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getFeed({ limit: 20, viewerId: VIEWER_ID });
+
+      const [sql] = postRepo.manager.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain('p.is_active = true');
+    });
+
+    it('should exclude soft-deleted posts from the challenge gallery and /mine', async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getChallengePhotos('challenge-1', VIEWER_ID);
+      await service.getUserPhotos(VIEWER_ID);
+
+      for (const [sql] of postRepo.manager.query.mock.calls as Array<
+        [string, unknown[]]
+      >) {
+        expect(sql).toContain('p.is_active = true');
+      }
+    });
+
+    it('should exclude soft-deleted posts from paginated user posts, even for their own author', async () => {
+      userRepo.findOne.mockResolvedValue({ id: VIEWER_ID, is_active: true });
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getUserPosts(VIEWER_ID, VIEWER_ID, { limit: 20 });
+
+      const [sql] = postRepo.manager.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain('p.is_active = true');
+    });
+
+    it('should exclude soft-deleted posts from the challenge mosaic', async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.findMosaicByChallenge('challenge-1', VIEWER_ID);
+
+      const [sql] = postRepo.manager.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain('p.is_active = true');
+    });
+
+    it('should not spend a moderation run on soft-deleted pending posts', async () => {
+      await service.processPendingModerationBatch();
+
+      const [options] = postRepo.find.mock.calls[0] as [
+        { where: Record<string, unknown> },
+      ];
+      expect(options.where).toMatchObject({ is_active: true });
     });
   });
 });
