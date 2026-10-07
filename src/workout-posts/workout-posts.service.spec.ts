@@ -134,7 +134,7 @@ describe('WorkoutPostsService', () => {
   // "hasn't had its first attempt yet") auto-approves as a safety valve.
   // ---------------------------------------------------------------------
   describe('create', () => {
-    it('should create posts already approved, with no OpenAI call, while the moderation gate is disabled', async () => {
+    it('should create posts pending, with no synchronous OpenAI call, since the moderation gate is enabled', async () => {
       postRepo.create.mockReturnValue({} as WorkoutPost);
       postRepo.save.mockImplementation((post: WorkoutPost) =>
         Promise.resolve(post),
@@ -148,10 +148,7 @@ describe('WorkoutPostsService', () => {
       expect(moderationService.validateWorkoutImage).not.toHaveBeenCalled();
       expect(saved).toEqual(
         expect.objectContaining({
-          moderationStatus: WorkoutPostModerationStatus.APPROVED,
-          moderationReason: expect.stringContaining(
-            'desactivada temporalmente',
-          ),
+          moderationStatus: WorkoutPostModerationStatus.PENDING,
         }),
       );
     });
@@ -193,34 +190,33 @@ describe('WorkoutPostsService', () => {
       } as WorkoutPost;
     }
 
-    // MODERATION_GATE_ENABLED is currently false (team decision, 2026-09:
-    // OpenAI quota exhausted — see the service's own doc comment), so the
-    // real per-post entry point auto-approves everything unconditionally,
-    // with no OpenAI call, regardless of content or age.
-    it('should auto-approve every pending post directly, with no OpenAI call, while the moderation gate is disabled', async () => {
+    // MODERATION_GATE_ENABLED is true again (moderation re-enabled after the
+    // OpenAI rate limit was resolved), so the batch sends each pending post
+    // through the real OpenAI-backed moderation.
+    it('should moderate each pending post through OpenAI while the moderation gate is enabled', async () => {
       postRepo.find.mockResolvedValue([
         pendingPost({ id: 'post-1', created_at: new Date() }),
       ]);
+      moderationService.validateWorkoutImage.mockResolvedValue({
+        flagged: false,
+        flaggedCategories: [],
+      });
 
       await service.processPendingModerationBatch();
 
-      expect(moderationService.validateWorkoutImage).not.toHaveBeenCalled();
+      expect(moderationService.validateWorkoutImage).toHaveBeenCalledWith(
+        'https://example.com/a.jpg',
+        'day 1',
+      );
       expect(postRepo.update).toHaveBeenCalledWith(
         'post-1',
         expect.objectContaining({
           moderationStatus: WorkoutPostModerationStatus.APPROVED,
-          moderationReason: expect.stringContaining(
-            'desactivada temporalmente',
-          ),
         }),
       );
     });
 
-    // The real OpenAI-backed logic (moderatePostViaAi) is preserved, not
-    // deleted, for when the gate gets flipped back on — but it's no longer
-    // reachable through the public processPendingModerationBatch() entry
-    // point while the gate is off, so these call it directly to keep it
-    // covered.
+    // moderatePostViaAi is exercised directly here to cover its failure paths.
     describe('moderatePostViaAi (preserved for when the gate is re-enabled)', () => {
       it('should auto-approve a post that has been pending for over 2 hours when the moderation service keeps failing', async () => {
         const staleDate = new Date(Date.now() - 3 * 60 * 60 * 1000); // 3h old
