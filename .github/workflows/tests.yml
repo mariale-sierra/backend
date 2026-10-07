@@ -63,9 +63,11 @@ jobs:
           --json --outputFile=reports/unit.json
 
       - name: Pruebas de integración (servicios contra Postgres real)
+        if: ${{ !cancelled() }}
         run: npx jest --ci integration --json --outputFile=reports/integration-db.json
 
       - name: Pruebas de integración y regresión de la API (HTTP + Postgres)
+        if: ${{ !cancelled() }}
         run: npm run test:e2e -- --ci --json --outputFile=reports/integration-api.json
 
       - name: Resumen de resultados
