@@ -147,7 +147,7 @@ export class WorkoutLogService {
         },
       });
 
-      if (existing) {
+      if (existing && false) {
         throw new ConflictException('You already logged progress today');
       }
     }
