@@ -15,6 +15,9 @@ import { WorkoutPostCommentsService } from './workout-post-comments.service';
 import { WorkoutPostReportsController } from './workout-post-reports.controller';
 import { WorkoutPostReportsService } from './workout-post-reports.service';
 import { ContentReport } from './entities/content-report.entity';
+import { Hashtag } from './entities/hashtag.entity';
+import { WorkoutPostHashtag } from './entities/workout-post-hashtag.entity';
+import { HashtagsService } from './hashtags/hashtags.service';
 import { UserPenalty } from './entities/user-penalty.entity';
 import { OpenAiModule } from '../openai/openai.module';
 import { FollowsModule } from '../follows/follows.module';
@@ -28,6 +31,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
       WorkoutPostComment,
       ContentReport,
       UserPenalty,
+      Hashtag,
+      WorkoutPostHashtag,
       WorkoutLog,
       User,
     ]),
@@ -47,6 +52,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     WorkoutPostReactionsService,
     WorkoutPostCommentsService,
     WorkoutPostReportsService,
+    HashtagsService,
   ],
   exports: [WorkoutPostsService],
 })

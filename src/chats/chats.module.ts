@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ChatsService } from './chats.service';
+import { SharedContentService } from './shared-content.service';
 import { ChatsController } from './chats.controller';
 import { DirectConversation } from './entities/direct-conversation.entity';
 import { DirectConversationMember } from './entities/direct-conversation-member.entity';
@@ -23,7 +24,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     NotificationsModule,
   ],
   controllers: [ChatsController],
-  providers: [ChatsService],
+  providers: [ChatsService, SharedContentService],
   exports: [ChatsService],
 })
 export class ChatsModule {}

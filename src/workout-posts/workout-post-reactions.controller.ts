@@ -5,17 +5,26 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   ApiBearerAuth,
   ApiConflictResponse,
+  ApiHeader,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
-import { WorkoutPostReactionsService } from './workout-post-reactions.service';
+import {
+  ReactorDto,
+  WorkoutPostReactionsService,
+} from './workout-post-reactions.service';
+import { CursorPaginationQueryDto } from '../common/cursor-pagination-query.dto';
+import { decodeCursor, DEFAULT_PAGE_LIMIT } from '../common/pagination.util';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 
@@ -70,5 +79,37 @@ export class WorkoutPostReactionsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.reactionsService.getSummary(postId, user.sub);
+  }
+
+  @Get('users')
+  @ApiParam({ name: 'postId', description: 'ID (UUID) del workout post' })
+  @ApiOperation({
+    summary: 'Quién reaccionó a una publicación',
+    description:
+      'Usuarios que reaccionaron a :postId, más recientes primero. Paginado con cursor (header X-Next-Cursor).',
+  })
+  @ApiHeader({
+    name: 'X-Next-Cursor',
+    required: false,
+    description: 'Presente solo si existe una página siguiente',
+  })
+  @ApiOkResponse({ type: ReactorDto, isArray: true })
+  @ApiNotFoundResponse({ description: 'Publicación no encontrada' })
+  async listReactors(
+    @Param('postId', new ParseUUIDPipe()) postId: string,
+    @Query() query: CursorPaginationQueryDto,
+    @Res({ passthrough: true }) res: Response,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const { reactors, nextCursor } = await this.reactionsService.listReactors(
+      postId,
+      user.sub,
+      {
+        limit: query.limit ?? DEFAULT_PAGE_LIMIT,
+        cursor: query.cursor ? decodeCursor(query.cursor, 'uuid') : undefined,
+      },
+    );
+    if (nextCursor) res.setHeader('X-Next-Cursor', nextCursor);
+    return reactors;
   }
 }

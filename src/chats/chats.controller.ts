@@ -91,7 +91,11 @@ export class ChatsController {
 
   @Post(':id/messages')
   @ApiParam({ name: 'id', description: 'ID (UUID) de la conversación' })
-  @ApiOperation({ summary: 'Enviar un mensaje en una conversación' })
+  @ApiOperation({
+    summary: 'Enviar un mensaje en una conversación',
+    description:
+      'Texto, o una publicación (workoutPostId) o un challenge (challengeId) compartido, con texto opcional. El remitente debe poder ver la publicación que comparte (404 si no).',
+  })
   @ApiOkResponse({ type: MessageDto })
   @ApiNotFoundResponse({
     description: 'Conversación no encontrada o el usuario no es participante',
@@ -105,7 +109,15 @@ export class ChatsController {
     @Body() dto: SendMessageDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.chatsService.sendMessage(user.sub, conversationId, dto.content);
+    return this.chatsService.sendMessage(
+      user.sub,
+      conversationId,
+      dto.content,
+      {
+        workoutPostId: dto.workoutPostId,
+        challengeId: dto.challengeId,
+      },
+    );
   }
 
   @Delete(':id/messages/:messageId')

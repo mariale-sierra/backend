@@ -19,11 +19,18 @@ import {
 } from './dto/conversation-summary.dto';
 import { ConversationParticipantDto } from './dto/conversation-participant.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SharedContentService } from './shared-content.service';
 import { assertOwnership } from '../auth/utils/assert-ownership';
 import {
   DEFAULT_MESSAGES_LIMIT,
   MAX_MESSAGES_LIMIT,
 } from './dto/messages-query.dto';
+
+/** What a message carries besides its text (Sprint 10, B5) — at most one. */
+export interface SharedContentInput {
+  workoutPostId?: string;
+  challengeId?: string;
+}
 
 export interface ListMessagesResult {
   messages: MessageDto[];
@@ -46,6 +53,7 @@ export class ChatsService {
     @InjectRepository(User)
     private userRepo: Repository<User>,
     private notificationsService: NotificationsService,
+    private sharedContentService: SharedContentService,
   ) {}
 
   /**
@@ -154,7 +162,7 @@ export class ChatsService {
     const nextBefore = hasMore ? page[page.length - 1].id : null;
 
     // Reversed to oldest-first — the natural order for rendering a thread.
-    const messages = page.reverse().map((m) => this.toMessageDto(m));
+    const messages = await this.toMessageDtos(page.reverse(), userId);
 
     return { messages, nextBefore };
   }
@@ -171,8 +179,19 @@ export class ChatsService {
   async sendMessage(
     userId: string,
     conversationId: string,
-    content: string,
+    content: string | undefined,
+    shared: SharedContentInput = {},
   ): Promise<MessageDto> {
+    const text = content?.trim() ?? '';
+    if (shared.workoutPostId && shared.challengeId) {
+      throw new BadRequestException(
+        'A message can share a workout post or a challenge, not both',
+      );
+    }
+    if (!text && !shared.workoutPostId && !shared.challengeId) {
+      throw new BadRequestException('content cannot be empty');
+    }
+
     await this.assertMembership(conversationId, userId);
 
     // B4: a globally inactive conversation (declineRequest) stays dead — a
@@ -193,17 +212,37 @@ export class ChatsService {
       throw new ForbiddenException('Accept this request before replying');
     }
 
+    // The sender must be able to see what they share — sharing never
+    // widens a post's audience (SharedContentService re-checks it per
+    // viewer on every read anyway).
+    if (shared.workoutPostId) {
+      await this.sharedContentService.assertPostShareable(
+        shared.workoutPostId,
+        userId,
+      );
+    }
+    if (shared.challengeId) {
+      await this.sharedContentService.assertChallengeShareable(
+        shared.challengeId,
+      );
+    }
+
     const message = this.messageRepo.create({
       direct_conversation_id: conversationId,
       user_id: userId,
-      message_text: content,
+      // message_text is NOT NULL in the schema: a share without a comment
+      // is stored as '' (MessageDto.content '' + sharedPost/sharedChallenge).
+      message_text: text ? content : '',
+      workout_post_id: shared.workoutPostId ?? null,
+      challenge_id: shared.challengeId ?? null,
     });
     const saved = await this.messageRepo.save(message);
     // Only AFTER the message is actually persisted: new activity brings a
     // hidden chat back for whoever hid it (1:1, so both participants).
     await this.clearHiddenBy(conversationId);
     void this.notifyConversation(conversationId, userId);
-    return this.toMessageDto(saved);
+    const [dto] = await this.toMessageDtos([saved], userId);
+    return dto;
   }
 
   /**
@@ -524,17 +563,46 @@ export class ChatsService {
     dto.content = message.message_text;
     dto.senderId = message.user_id;
     dto.sentAt = message.sent_at;
+    dto.kind = message.workout_post_id
+      ? 'post'
+      : message.challenge_id
+        ? 'challenge'
+        : 'text';
     return dto;
   }
 
-  private toMessageDto(message: DirectMessage): MessageDto {
-    const dto = new MessageDto();
-    dto.id = message.id;
-    dto.conversationId = message.direct_conversation_id;
-    dto.senderId = message.user_id;
-    dto.content = message.message_text;
-    dto.sentAt = message.sent_at;
-    dto.readAt = message.read_at ?? null;
-    return dto;
+  /** Batched: one previews query per content type for the whole page, each
+   * resolved for `viewerId` (see SharedContentService). */
+  private async toMessageDtos(
+    messages: DirectMessage[],
+    viewerId: string,
+  ): Promise<MessageDto[]> {
+    const postIds = messages
+      .map((m) => m.workout_post_id)
+      .filter((id): id is string => !!id);
+    const challengeIds = messages
+      .map((m) => m.challenge_id)
+      .filter((id): id is string => !!id);
+    const [posts, challenges] = await Promise.all([
+      this.sharedContentService.resolvePosts(postIds, viewerId),
+      this.sharedContentService.resolveChallenges(challengeIds),
+    ]);
+
+    return messages.map((message) => {
+      const dto = new MessageDto();
+      dto.id = message.id;
+      dto.conversationId = message.direct_conversation_id;
+      dto.senderId = message.user_id;
+      dto.content = message.message_text;
+      dto.sentAt = message.sent_at;
+      dto.readAt = message.read_at ?? null;
+      dto.sharedPost = message.workout_post_id
+        ? (posts.get(message.workout_post_id) ?? null)
+        : null;
+      dto.sharedChallenge = message.challenge_id
+        ? (challenges.get(message.challenge_id) ?? null)
+        : null;
+      return dto;
+    });
   }
 }

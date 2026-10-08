@@ -11,6 +11,7 @@ import { ModerationService } from '../openai/moderation.service';
 import { FollowsService } from '../follows/follows.service';
 import { WorkoutPostReactionsService } from './workout-post-reactions.service';
 import { WorkoutPostCommentsService } from './workout-post-comments.service';
+import { HashtagsService } from './hashtags/hashtags.service';
 import { encodeCursor } from '../common/pagination.util';
 
 const createMockWorkoutPostRepo = () => ({
@@ -41,6 +42,11 @@ describe('WorkoutPostsService', () => {
   let reactionsService: {
     getCountsForPosts: jest.Mock;
     getReactedPostIds: jest.Mock;
+    getRecentReactorsForPosts: jest.Mock;
+  };
+  let hashtagsService: {
+    syncPostHashtags: jest.Mock;
+    getTagsForPosts: jest.Mock;
   };
   let commentsService: { getCountsForPosts: jest.Mock };
   let moderationService: {
@@ -66,6 +72,12 @@ describe('WorkoutPostsService', () => {
     reactionsService = {
       getCountsForPosts: jest.fn().mockResolvedValue(new Map()),
       getReactedPostIds: jest.fn().mockResolvedValue(new Set()),
+      getRecentReactorsForPosts: jest.fn().mockResolvedValue(new Map()),
+    };
+    // B5: no hashtags on any post unless a test says otherwise.
+    hashtagsService = {
+      syncPostHashtags: jest.fn().mockResolvedValue([]),
+      getTagsForPosts: jest.fn().mockResolvedValue(new Map()),
     };
     commentsService = {
       getCountsForPosts: jest.fn().mockResolvedValue(new Map()),
@@ -85,6 +97,7 @@ describe('WorkoutPostsService', () => {
         { provide: FollowsService, useValue: followsService },
         { provide: WorkoutPostReactionsService, useValue: reactionsService },
         { provide: WorkoutPostCommentsService, useValue: commentsService },
+        { provide: HashtagsService, useValue: hashtagsService },
       ],
     }).compile();
 
@@ -172,6 +185,28 @@ describe('WorkoutPostsService', () => {
 
       expect(moderationService.validateText).not.toHaveBeenCalled();
       expect(moderationService.assertTextAllowed).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('create — hashtags (B5)', () => {
+    it('should sync the caption hashtags for the saved post through the same manager', async () => {
+      postRepo.create.mockReturnValue({} as WorkoutPost);
+      postRepo.save.mockImplementation((post: WorkoutPost) =>
+        Promise.resolve({ ...post, id: 'post-9' }),
+      );
+      const txRepo = postRepo;
+      const manager = { getRepository: jest.fn(() => txRepo) };
+
+      await service.create(
+        { user_id: 'author-1', image_url: 'x', caption: 'día 3 #legday' },
+        manager as never,
+      );
+
+      expect(hashtagsService.syncPostHashtags).toHaveBeenCalledWith(
+        'post-9',
+        'día 3 #legday',
+        manager,
+      );
     });
   });
 
@@ -358,6 +393,44 @@ describe('WorkoutPostsService', () => {
       expect(posts[0].likes_count).toBe(0);
       expect(posts[0].liked_by_me).toBe(false);
       expect(posts[0].comments_count).toBe(0);
+      expect(posts[0].recent_reactors).toEqual([]);
+      expect(posts[0].hashtags).toEqual([]);
+    });
+
+    it('should attach recent reactors and hashtags from their batched lookups (B5)', async () => {
+      postRepo.manager.query.mockResolvedValue([feedRow({ id: '1' })]);
+      reactionsService.getRecentReactorsForPosts.mockResolvedValue(
+        new Map([
+          [
+            '1',
+            [
+              {
+                id: 'u-2',
+                username: 'bob',
+                displayName: 'Bob',
+                profileImageUrl: null,
+              },
+            ],
+          ],
+        ]),
+      );
+      hashtagsService.getTagsForPosts.mockResolvedValue(
+        new Map([['1', ['legday', 'running']]]),
+      );
+
+      const { posts } = await service.getFeed({
+        limit: 20,
+        viewerId: VIEWER_ID,
+      });
+
+      expect(reactionsService.getRecentReactorsForPosts).toHaveBeenCalledWith(
+        ['1'],
+        VIEWER_ID,
+      );
+      expect(posts[0].recent_reactors).toEqual([
+        { id: 'u-2', username: 'bob', display_name: 'Bob', avatar_url: null },
+      ]);
+      expect(posts[0].hashtags).toEqual(['legday', 'running']);
     });
 
     it('should populate likes_count/comments_count/liked_by_me from the batched reactions/comments lookups (Bloque 3)', async () => {

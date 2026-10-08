@@ -13,6 +13,13 @@ export class LastMessagePreviewDto {
 
   @ApiProperty({ description: 'Fecha de envío' })
   sentAt!: Date;
+
+  @ApiProperty({
+    description:
+      "Qué contiene el mensaje: 'text', 'post' (comparte una publicación) o 'challenge' (comparte un challenge) — para mostrar \"Compartió una publicación\" cuando content está vacío",
+    enum: ['text', 'post', 'challenge'],
+  })
+  kind!: 'text' | 'post' | 'challenge';
 }
 
 export class ConversationSummaryDto {

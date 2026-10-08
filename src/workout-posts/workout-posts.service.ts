@@ -15,6 +15,7 @@ import { getLocalMidnightUtc } from '../common/timezone.util';
 import { assertOwnership } from '../auth/utils/assert-ownership';
 import { WorkoutPostReactionsService } from './workout-post-reactions.service';
 import { WorkoutPostCommentsService } from './workout-post-comments.service';
+import { HashtagsService } from './hashtags/hashtags.service';
 
 /** Shape consumed by the frontend (types/challenge.ts ChallengePhoto). */
 export interface ChallengePhoto {
@@ -49,6 +50,16 @@ export interface FeedPostContract {
   liked_by_me?: boolean;
   /** Comment count — see WorkoutPostCommentsService (Bloque 3). */
   comments_count?: number;
+  /** Up to 3 people who reacted (followed users first, never the viewer) —
+   * the reaction redesign (Sprint 10, B5) shows who, not how many. */
+  recent_reactors?: Array<{
+    id: string;
+    username: string;
+    display_name: string | null;
+    avatar_url: string | null;
+  }>;
+  /** Hashtags parsed from the caption, lowercase, without '#' (B5). */
+  hashtags?: string[];
 }
 
 interface PhotoRow {
@@ -105,6 +116,7 @@ export class WorkoutPostsService {
     private followsService: FollowsService,
     private reactionsService: WorkoutPostReactionsService,
     private commentsService: WorkoutPostCommentsService,
+    private hashtagsService: HashtagsService,
   ) {}
 
   private async supportsModerationColumns() {
@@ -168,7 +180,15 @@ export class WorkoutPostsService {
     // post was stuck as 'pending' (never shown) with nothing to retry it
     // again. Batching on a timer smooths the request rate and gives every
     // pending post another chance every cycle.
-    return repo.save(post);
+    const saved = await repo.save(post);
+    // Same manager as the post itself: inside createWorkout's transaction a
+    // failure here rolls the post back too, instead of leaving it untagged.
+    await this.hashtagsService.syncPostHashtags(
+      saved.id,
+      saved.caption,
+      manager ?? this.repo.manager,
+    );
+    return saved;
   }
 
   /**
@@ -851,14 +871,24 @@ export class WorkoutPostsService {
     // stays optional only so existing callers/tests that don't care about
     // per-viewer reaction state don't need to thread one through.
     const postIds = pageRows.map((r) => String(r.id));
-    const [likesCountByPost, commentsCountByPost, reactedPostIds] =
-      await Promise.all([
-        this.reactionsService.getCountsForPosts(postIds),
-        this.commentsService.getCountsForPosts(postIds),
-        options.viewerId
-          ? this.reactionsService.getReactedPostIds(postIds, options.viewerId)
-          : Promise.resolve(new Set<string>()),
-      ]);
+    const [
+      likesCountByPost,
+      commentsCountByPost,
+      reactedPostIds,
+      recentReactorsByPost,
+      hashtagsByPost,
+    ] = await Promise.all([
+      this.reactionsService.getCountsForPosts(postIds),
+      this.commentsService.getCountsForPosts(postIds),
+      options.viewerId
+        ? this.reactionsService.getReactedPostIds(postIds, options.viewerId)
+        : Promise.resolve(new Set<string>()),
+      this.reactionsService.getRecentReactorsForPosts(
+        postIds,
+        options.viewerId,
+      ),
+      this.hashtagsService.getTagsForPosts(postIds),
+    ]);
 
     const posts: FeedPostContract[] = pageRows.map((r) => {
       const id = String(r.id);
@@ -883,6 +913,13 @@ export class WorkoutPostsService {
         likes_count: likesCountByPost.get(id) ?? 0,
         liked_by_me: reactedPostIds.has(id),
         comments_count: commentsCountByPost.get(id) ?? 0,
+        recent_reactors: (recentReactorsByPost.get(id) ?? []).map((r) => ({
+          id: r.id,
+          username: r.username,
+          display_name: r.displayName,
+          avatar_url: r.profileImageUrl,
+        })),
+        hashtags: hashtagsByPost.get(id) ?? [],
       };
     });
 

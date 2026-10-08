@@ -73,6 +73,22 @@ describe('ChatsController', () => {
       'user-1',
       'conv-1',
       'hola',
+      { workoutPostId: undefined, challengeId: undefined },
+    );
+  });
+
+  it('should forward shared content (B5) to the service', async () => {
+    await controller.sendMessage(
+      'conv-1',
+      { workoutPostId: 'post-1' },
+      currentUser,
+    );
+
+    expect(service.sendMessage).toHaveBeenCalledWith(
+      'user-1',
+      'conv-1',
+      undefined,
+      { workoutPostId: 'post-1', challengeId: undefined },
     );
   });
 

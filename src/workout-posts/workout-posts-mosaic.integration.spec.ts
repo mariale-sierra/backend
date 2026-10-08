@@ -23,6 +23,7 @@ const url = process.env.B2_TEST_DB_URL;
       null as any,
       null as any,
       null as any,
+      null as any,
     );
     const mkUser = async () => {
       const id = randomUUID();

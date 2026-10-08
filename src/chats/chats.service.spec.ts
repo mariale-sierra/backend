@@ -12,12 +12,22 @@ import { DirectMessage } from './entities/direct-message.entity';
 import { DirectConversationHiddenBy } from './entities/direct-conversation-hidden-by.entity';
 import { User } from '../users/entities/user.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SharedContentService } from './shared-content.service';
 
 // B3: emitters call notify()/notifyMany() fire-and-forget; never throws.
 const notificationsService = {
   notify: jest.fn().mockResolvedValue(null),
   notifyMany: jest.fn().mockResolvedValue(undefined),
 };
+
+// B5: shared post/challenge previews. Default: nothing shared resolves to
+// an empty map, and anything shared is visible to the sender.
+const createMockSharedContentService = () => ({
+  assertPostShareable: jest.fn().mockResolvedValue(undefined),
+  assertChallengeShareable: jest.fn().mockResolvedValue(undefined),
+  resolvePosts: jest.fn().mockResolvedValue(new Map()),
+  resolveChallenges: jest.fn().mockResolvedValue(new Map()),
+});
 
 const createMockQueryBuilder = () => {
   const qb: Record<string, jest.Mock> = {};
@@ -83,8 +93,10 @@ describe('ChatsService', () => {
   let messageRepo: ReturnType<typeof createMockMessageRepo>;
   let userRepo: ReturnType<typeof createMockUserRepo>;
   let hiddenRepo: ReturnType<typeof createMockHiddenRepo>;
+  let sharedContentService: ReturnType<typeof createMockSharedContentService>;
 
   beforeEach(async () => {
+    sharedContentService = createMockSharedContentService();
     conversationRepo = createMockConversationRepo();
     memberRepo = createMockMemberRepo();
     messageRepo = createMockMessageRepo();
@@ -95,6 +107,7 @@ describe('ChatsService', () => {
       providers: [
         ChatsService,
         { provide: NotificationsService, useValue: notificationsService },
+        { provide: SharedContentService, useValue: sharedContentService },
         {
           provide: getRepositoryToken(DirectConversation),
           useValue: conversationRepo,
@@ -456,6 +469,96 @@ describe('ChatsService', () => {
       await expect(
         service.sendMessage('user-1', 'conv-1', 'hola'),
       ).resolves.toMatchObject({ id: 42 });
+    });
+
+    describe('sharing content (B5)', () => {
+      beforeEach(() => {
+        memberRepo.findOne.mockResolvedValue({
+          direct_conversation_id: 'conv-1',
+          user_id: 'user-1',
+          status: 'accepted',
+        });
+        messageRepo.save.mockImplementation((m) =>
+          Promise.resolve({ ...m, id: 7, sent_at: new Date(), read_at: null }),
+        );
+      });
+
+      it('shares a post with no text, stored as an empty message_text', async () => {
+        const preview = { id: 'post-1', available: true };
+        sharedContentService.resolvePosts.mockResolvedValue(
+          new Map([['post-1', preview]]),
+        );
+
+        const result = await service.sendMessage(
+          'user-1',
+          'conv-1',
+          undefined,
+          {
+            workoutPostId: 'post-1',
+          },
+        );
+
+        expect(sharedContentService.assertPostShareable).toHaveBeenCalledWith(
+          'post-1',
+          'user-1',
+        );
+        expect(messageRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message_text: '',
+            workout_post_id: 'post-1',
+            challenge_id: null,
+          }),
+        );
+        expect(result.sharedPost).toBe(preview);
+        expect(result.sharedChallenge).toBeNull();
+      });
+
+      it('shares a challenge together with a comment', async () => {
+        await service.sendMessage('user-1', 'conv-1', '¡Únete!', {
+          challengeId: 'ch-1',
+        });
+
+        expect(
+          sharedContentService.assertChallengeShareable,
+        ).toHaveBeenCalledWith('ch-1');
+        expect(messageRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message_text: '¡Únete!',
+            workout_post_id: null,
+            challenge_id: 'ch-1',
+          }),
+        );
+      });
+
+      it('does not persist a post the sender cannot see', async () => {
+        sharedContentService.assertPostShareable.mockRejectedValue(
+          new NotFoundException('Workout post not found'),
+        );
+
+        await expect(
+          service.sendMessage('user-1', 'conv-1', undefined, {
+            workoutPostId: 'post-private',
+          }),
+        ).rejects.toThrow(NotFoundException);
+        expect(messageRepo.save).not.toHaveBeenCalled();
+      });
+
+      it('rejects sharing a post and a challenge in the same message', async () => {
+        await expect(
+          service.sendMessage('user-1', 'conv-1', undefined, {
+            workoutPostId: 'post-1',
+            challengeId: 'ch-1',
+          }),
+        ).rejects.toThrow(BadRequestException);
+        expect(messageRepo.save).not.toHaveBeenCalled();
+      });
+
+      it('rejects a message with neither text nor shared content', async () => {
+        await expect(
+          service.sendMessage('user-1', 'conv-1', '   '),
+        ).rejects.toThrow(BadRequestException);
+        expect(messageRepo.save).not.toHaveBeenCalled();
+      });
     });
   });
 
