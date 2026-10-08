@@ -440,7 +440,7 @@ export class ChallengesController {
   @ApiOperation({
     summary: 'Eliminar desafío',
     description:
-      'Elimina un desafío existente. Solo el creador del desafío puede eliminarlo.',
+      'Elimina (soft delete, is_active = false) un desafío existente. Solo el creador puede eliminarlo. Se conservan participantes, solicitudes e historial de entrenamientos; el desafío deja de aparecer y de aceptar operaciones. Distinto de cerrar (status = closed).',
   })
   @ApiResponse({ status: 200, description: 'Desafío eliminado exitosamente' })
   @ApiResponse({ status: 401, description: 'No autorizado' })

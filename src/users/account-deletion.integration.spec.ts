@@ -104,6 +104,30 @@ describeDb('AccountDeletionService (real Postgres)', () => {
       `INSERT INTO havit.user_follows (follower_user_id, followed_user_id) VALUES ($1, $2)`,
       [other, id],
     );
+    // B3: push tokens, preferences and notifications (as recipient and as actor).
+    await ds.query(
+      `INSERT INTO havit.device_push_tokens (user_id, token, platform)
+       VALUES ($1, $2, 'ios')`,
+      [id, `ExponentPushToken[${id}]`],
+    );
+    await ds.query(
+      `INSERT INTO havit.notification_preferences (user_id, notification_type_id, push_enabled)
+       SELECT $1, id, false FROM havit.notification_types WHERE code = 'post_reaction'`,
+      [id],
+    );
+    await ds.query(
+      `INSERT INTO havit.notifications
+         (recipient_user_id, actor_user_id, notification_type_id, related_entity_type, related_entity_id)
+       SELECT $1::uuid, $2::uuid, id, 'user', $2::text FROM havit.notification_types WHERE code = 'new_follower'`,
+      [id, other],
+    );
+    const [{ id: actorNotificationId }] = await ds.query(
+      `INSERT INTO havit.notifications
+         (recipient_user_id, actor_user_id, notification_type_id, related_entity_type, related_entity_id)
+       SELECT $1::uuid, $2::uuid, id, 'user', $2::text FROM havit.notification_types WHERE code = 'new_follower'
+       RETURNING id`,
+      [other, id],
+    );
 
     await service.requestDeletion(id, 'password123');
     // Not due yet: the cron must leave it alone.
@@ -147,6 +171,27 @@ describeDb('AccountDeletionService (real Postgres)', () => {
         )[0].n,
       ),
     ).toBe(0);
+    expect(
+      await count(
+        `SELECT count(*) n FROM havit.device_push_tokens WHERE user_id = $1`,
+      ),
+    ).toBe(0);
+    expect(
+      await count(
+        `SELECT count(*) n FROM havit.notification_preferences WHERE user_id = $1`,
+      ),
+    ).toBe(0);
+    expect(
+      await count(
+        `SELECT count(*) n FROM havit.notifications WHERE recipient_user_id = $1`,
+      ),
+    ).toBe(0);
+    // The other user's notification survives, with the actor anonymized.
+    const [actorNotification] = await ds.query(
+      `SELECT actor_user_id FROM havit.notifications WHERE id = $1`,
+      [actorNotificationId],
+    );
+    expect(actorNotification.actor_user_id).toBeNull();
 
     const [user] = await ds.query(`SELECT * FROM havit.users WHERE id = $1`, [
       id,

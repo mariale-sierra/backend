@@ -12,8 +12,10 @@ import { DecodedCursor, encodeCursor } from '../common/pagination.util';
 import { formatPrimaryMetric, MetricValueRow } from './metric-display.util';
 import { FollowsService } from '../follows/follows.service';
 import { getLocalMidnightUtc } from '../common/timezone.util';
+import { assertOwnership } from '../auth/utils/assert-ownership';
 import { WorkoutPostReactionsService } from './workout-post-reactions.service';
 import { WorkoutPostCommentsService } from './workout-post-comments.service';
+import { HashtagsService } from './hashtags/hashtags.service';
 
 /** Shape consumed by the frontend (types/challenge.ts ChallengePhoto). */
 export interface ChallengePhoto {
@@ -48,6 +50,16 @@ export interface FeedPostContract {
   liked_by_me?: boolean;
   /** Comment count — see WorkoutPostCommentsService (Bloque 3). */
   comments_count?: number;
+  /** Up to 3 people who reacted (followed users first, never the viewer) —
+   * the reaction redesign (Sprint 10, B5) shows who, not how many. */
+  recent_reactors?: Array<{
+    id: string;
+    username: string;
+    display_name: string | null;
+    avatar_url: string | null;
+  }>;
+  /** Hashtags parsed from the caption, lowercase, without '#' (B5). */
+  hashtags?: string[];
 }
 
 interface PhotoRow {
@@ -104,6 +116,7 @@ export class WorkoutPostsService {
     private followsService: FollowsService,
     private reactionsService: WorkoutPostReactionsService,
     private commentsService: WorkoutPostCommentsService,
+    private hashtagsService: HashtagsService,
   ) {}
 
   private async supportsModerationColumns() {
@@ -167,7 +180,35 @@ export class WorkoutPostsService {
     // post was stuck as 'pending' (never shown) with nothing to retry it
     // again. Batching on a timer smooths the request rate and gives every
     // pending post another chance every cycle.
-    return repo.save(post);
+    const saved = await repo.save(post);
+    // Same manager as the post itself: inside createWorkout's transaction a
+    // failure here rolls the post back too, instead of leaving it untagged.
+    await this.hashtagsService.syncPostHashtags(
+      saved.id,
+      saved.caption,
+      manager ?? this.repo.manager,
+    );
+    return saved;
+  }
+
+  /**
+   * Borrado propio de un post (Sprint 9, B4). Soft delete: `is_active = false`
+   * + save(), nunca remove()/DELETE físico — los comentarios, reacciones y el
+   * workout_log que evidencia se conservan. Un post ya eliminado (o
+   * inexistente) es 404; uno ajeno, 403. `is_hidden` (moderación de admin) no
+   * se toca: son conceptos distintos.
+   */
+  async remove(postId: string, userId: string): Promise<{ message: string }> {
+    const post = await this.repo.findOne({
+      where: { id: postId, is_active: true },
+    });
+    if (!post) throw new NotFoundException('Workout post not found');
+    assertOwnership(post.user_id, userId, 'You can only delete your own posts');
+
+    post.is_active = false;
+    await this.repo.save(post);
+
+    return { message: 'Workout post deleted' };
   }
 
   /**
@@ -200,7 +241,10 @@ export class WorkoutPostsService {
       const concurrency = 3;
 
       const posts = await this.repo.find({
-        where: { moderationStatus: WorkoutPostModerationStatus.PENDING },
+        where: {
+          moderationStatus: WorkoutPostModerationStatus.PENDING,
+          is_active: true,
+        },
         order: { created_at: 'ASC' },
         take: batchSize,
       });
@@ -363,7 +407,7 @@ export class WorkoutPostsService {
        FROM havit.workout_posts p
        JOIN havit.workout_logs wl ON wl.id = p.workout_log_id
        LEFT JOIN havit.challenges c ON c.id = wl.challenge_id
-       WHERE wl.challenge_id = $1 AND p.is_hidden = false
+       WHERE wl.challenge_id = $1 AND p.is_hidden = false AND p.is_active = true
          ${moderationFilter} ${this.postVisibilityFilter(viewerParamIndex)}
        ORDER BY p.created_at DESC`,
       params,
@@ -543,7 +587,7 @@ export class WorkoutPostsService {
        LEFT JOIN havit.challenges c ON c.id = wl.challenge_id
        LEFT JOIN havit.challenge_user_map cum
               ON cum.challenge_id = wl.challenge_id AND cum.user_id = p.user_id
-       WHERE ${whereClause} AND p.is_hidden = false ${moderationFilter} ${visibilityFilter}
+       WHERE ${whereClause} AND p.is_hidden = false AND p.is_active = true ${moderationFilter} ${visibilityFilter}
        ORDER BY p.created_at DESC`,
       params,
     );
@@ -659,7 +703,7 @@ export class WorkoutPostsService {
        LEFT JOIN havit.challenges c ON c.id = wl.challenge_id
        LEFT JOIN havit.challenge_user_map cum
               ON cum.challenge_id = wl.challenge_id AND cum.user_id = p.user_id
-       WHERE ${baseWhereClause} AND p.is_hidden = false ${moderationFilter} ${visibilityFilter} ${challengePrivacyFilter} ${cursorFilter}
+       WHERE ${baseWhereClause} AND p.is_hidden = false AND p.is_active = true ${moderationFilter} ${visibilityFilter} ${challengePrivacyFilter} ${cursorFilter}
        ORDER BY p.created_at DESC, p.id DESC
        LIMIT $${limitParamIndex}`,
       params,
@@ -734,6 +778,11 @@ export class WorkoutPostsService {
    * never surface as public content, and Feed has no per-viewer context in
    * which to make a membership exception).
    *
+   * A post whose challenge its creator deleted (B4 soft delete,
+   * `challenges.is_active = false`) never appears either — every other read
+   * treats a deleted challenge as nonexistent, and the feed card links to
+   * the post's challenge (B5), which would otherwise open a 404.
+   *
    * The JOIN to `challenges` is intentionally an INNER JOIN, so a post whose
    * workout_log has no challenge_id would silently be excluded here. That's
    * safe today only because every current post-creation path requires a
@@ -796,7 +845,9 @@ export class WorkoutPostsService {
        WHERE ${visibilityFilter}
          AND p.moderation_status = 'approved'
          AND p.is_hidden = false
+         AND p.is_active = true
          AND c.visibility != 'private'
+         AND c.is_active = true
          ${cursorFilter}
        ORDER BY p.created_at DESC, p.id DESC
        LIMIT $${limitParamIndex}`,
@@ -826,14 +877,24 @@ export class WorkoutPostsService {
     // stays optional only so existing callers/tests that don't care about
     // per-viewer reaction state don't need to thread one through.
     const postIds = pageRows.map((r) => String(r.id));
-    const [likesCountByPost, commentsCountByPost, reactedPostIds] =
-      await Promise.all([
-        this.reactionsService.getCountsForPosts(postIds),
-        this.commentsService.getCountsForPosts(postIds),
-        options.viewerId
-          ? this.reactionsService.getReactedPostIds(postIds, options.viewerId)
-          : Promise.resolve(new Set<string>()),
-      ]);
+    const [
+      likesCountByPost,
+      commentsCountByPost,
+      reactedPostIds,
+      recentReactorsByPost,
+      hashtagsByPost,
+    ] = await Promise.all([
+      this.reactionsService.getCountsForPosts(postIds),
+      this.commentsService.getCountsForPosts(postIds),
+      options.viewerId
+        ? this.reactionsService.getReactedPostIds(postIds, options.viewerId)
+        : Promise.resolve(new Set<string>()),
+      this.reactionsService.getRecentReactorsForPosts(
+        postIds,
+        options.viewerId,
+      ),
+      this.hashtagsService.getTagsForPosts(postIds),
+    ]);
 
     const posts: FeedPostContract[] = pageRows.map((r) => {
       const id = String(r.id);
@@ -858,6 +919,13 @@ export class WorkoutPostsService {
         likes_count: likesCountByPost.get(id) ?? 0,
         liked_by_me: reactedPostIds.has(id),
         comments_count: commentsCountByPost.get(id) ?? 0,
+        recent_reactors: (recentReactorsByPost.get(id) ?? []).map((r) => ({
+          id: r.id,
+          username: r.username,
+          display_name: r.displayName,
+          avatar_url: r.profileImageUrl,
+        })),
+        hashtags: hashtagsByPost.get(id) ?? [],
       };
     });
 

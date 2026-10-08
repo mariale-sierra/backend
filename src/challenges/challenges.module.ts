@@ -8,6 +8,7 @@ import { ChallengeUserMap } from './entities/challenge-user-map.entity';
 import { ChallengeJoinRequest } from './entities/challenge-join-request.entity';
 import { AuthModule } from '../auth/auth.module';
 import { OpenAiModule } from '../openai/openai.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { WorkoutLogModule } from '../workout-log/workout-log.module';
 import { ChallengeCycleDay } from './entities/challenge-cycle-days.entity';
@@ -57,6 +58,7 @@ import { RoutineExerciseSetTarget } from '../routine/entities/routine-exercise-s
     AuthModule,
     WorkoutLogModule,
     OpenAiModule,
+    NotificationsModule,
   ],
   controllers: [ChallengesController],
   providers: [ChallengesService],

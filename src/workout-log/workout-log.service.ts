@@ -38,6 +38,16 @@ import {
 // this module as "do not cache" for the unrelated daily-uniqueness check.
 const WORKOUT_LOG_LIST_TTL_SECONDS = 15;
 
+/** Sprint 9 (B4): a soft-deleted post (is_active = false) must not come back
+ * through the `posts` relation of a workout log either. Filtered after load
+ * rather than as a relation `where`, which would drop the whole workout log
+ * when it has no active post. */
+function activePosts<T extends { is_active: boolean }>(
+  posts?: T[],
+): T[] | undefined {
+  return posts?.filter((post) => post.is_active);
+}
+
 @Injectable()
 export class WorkoutLogService {
   constructor(
@@ -97,7 +107,7 @@ export class WorkoutLogService {
 
     if (dto.challengeId) {
       challenge = await this.challengeRepo.findOne({
-        where: { id: dto.challengeId },
+        where: { id: dto.challengeId, is_active: true },
       });
       if (!challenge) throw new NotFoundException('Challenge not found');
 
@@ -274,10 +284,22 @@ export class WorkoutLogService {
       // uq_workout_logs_user_challenge_local_day backs this up at the DB
       // level — translate the race-condition duplicate into the same 409
       // the pre-check above gives, same pattern as
-      // ChallengeInvitesService.create / FollowsService.follow. Only
-      // relevant to the challenge-progress path: that's the only case with
-      // a matching partial unique index (WHERE challenge_id IS NOT NULL).
-      if (dto.challengeId && (error as { code?: string })?.code === '23505') {
+      // ChallengeInvitesService.create / FollowsService.follow.
+      //
+      // The constraint name is checked explicitly, not just the 23505 code:
+      // this same transaction also inserts WorkoutLogExerciseTarget/-Set/
+      // -SetTarget rows (each with their own unique index, e.g.
+      // uq_workout_log_exercise_targets on (workout_log_exercise_id,
+      // metric_type_id)) and the workout_posts row (unique on
+      // workout_log_id). A 23505 from any of those would be a genuine data
+      // bug, not a duplicate-progress race, and must not be mislabeled as
+      // "You already logged progress today" just because dto.challengeId
+      // happens to be set.
+      const pgError = error as { code?: string; constraint?: string };
+      if (
+        pgError?.code === '23505' &&
+        pgError?.constraint === 'uq_workout_logs_user_challenge_local_day'
+      ) {
         throw new ConflictException('You already logged progress today');
       }
       throw error;
@@ -423,6 +445,7 @@ export class WorkoutLogService {
       );
     }
 
+    if (workout.posts) workout.posts = activePosts(workout.posts);
     return workout;
   }
 
@@ -502,7 +525,11 @@ export class WorkoutLogService {
     const byId = new Map(workouts.map((w) => [w.id, w]));
     const data = ids
       .map((id) => byId.get(id))
-      .filter((w): w is WorkoutLog => !!w);
+      .filter((w): w is WorkoutLog => !!w)
+      .map((w) => {
+        if (w.posts) w.posts = activePosts(w.posts);
+        return w;
+      });
 
     const last = page[page.length - 1];
     const nextCursor =

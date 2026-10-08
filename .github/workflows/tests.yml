@@ -1,0 +1,85 @@
+name: Tests
+
+# Pruebas unitarias, de integración y de regresión. Corren en el runner de
+# GitHub con su propio Postgres desechable: nunca tocan la base de Azure ni el
+# servidor de producción (el deploy.yml es otro workflow, solo para main).
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [development, main]
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: havit
+          POSTGRES_PASSWORD: havit
+          POSTGRES_DB: havit_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U havit -d havit_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USERNAME: havit
+      DB_PASSWORD: havit
+      DB_DATABASE: havit_test
+      DB_SSL: 'false'
+      JWT_SECRET: ci-test-secret
+      B2_TEST_DB_URL: postgres://havit:havit@localhost:5432/havit_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Aplicar migraciones (mismo runner que producción)
+        run: npm run db:migrate
+
+      - name: Preparar carpeta de reportes
+        run: mkdir -p reports
+
+      - name: Pruebas unitarias
+        run: >-
+          env -u B2_TEST_DB_URL npx jest --ci --coverage
+          --json --outputFile=reports/unit.json
+
+      - name: Pruebas de integración (servicios contra Postgres real)
+        if: ${{ !cancelled() }}
+        run: npx jest --ci integration --json --outputFile=reports/integration-db.json
+
+      - name: Pruebas de integración y regresión de la API (HTTP + Postgres)
+        if: ${{ !cancelled() }}
+        run: npm run test:e2e -- --ci --json --outputFile=reports/integration-api.json
+
+      - name: Resumen de resultados
+        if: always()
+        run: npm run test:ci:summary
+
+      - name: Guardar evidencia (reportes y cobertura)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-evidence
+          path: |
+            reports/
+            coverage/lcov-report/
+          retention-days: 30

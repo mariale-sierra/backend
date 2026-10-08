@@ -12,6 +12,8 @@ describe('ChatsController', () => {
     markConversationRead: jest.Mock;
     acceptRequest: jest.Mock;
     declineRequest: jest.Mock;
+    deleteMessage: jest.Mock;
+    hideConversation: jest.Mock;
   };
 
   const currentUser: AuthenticatedUser = {
@@ -31,6 +33,8 @@ describe('ChatsController', () => {
       markConversationRead: jest.fn().mockResolvedValue({ updated: 0 }),
       acceptRequest: jest.fn().mockResolvedValue({}),
       declineRequest: jest.fn().mockResolvedValue(undefined),
+      deleteMessage: jest.fn().mockResolvedValue(undefined),
+      hideConversation: jest.fn().mockResolvedValue(undefined),
     };
 
     controller = new ChatsController(service as unknown as ChatsService);
@@ -69,6 +73,22 @@ describe('ChatsController', () => {
       'user-1',
       'conv-1',
       'hola',
+      { workoutPostId: undefined, challengeId: undefined },
+    );
+  });
+
+  it('should forward shared content (B5) to the service', async () => {
+    await controller.sendMessage(
+      'conv-1',
+      { workoutPostId: 'post-1' },
+      currentUser,
+    );
+
+    expect(service.sendMessage).toHaveBeenCalledWith(
+      'user-1',
+      'conv-1',
+      undefined,
+      { workoutPostId: 'post-1', challengeId: undefined },
     );
   });
 
@@ -91,5 +111,17 @@ describe('ChatsController', () => {
     await controller.declineRequest('conv-1', currentUser);
 
     expect(service.declineRequest).toHaveBeenCalledWith('user-1', 'conv-1');
+  });
+
+  it('should delete a message on behalf of the authenticated caller (B4)', async () => {
+    await controller.deleteMessage('conv-1', 42, currentUser);
+
+    expect(service.deleteMessage).toHaveBeenCalledWith('user-1', 'conv-1', 42);
+  });
+
+  it('should hide a conversation for the authenticated caller only (B4)', async () => {
+    await controller.hideConversation('conv-1', currentUser);
+
+    expect(service.hideConversation).toHaveBeenCalledWith('user-1', 'conv-1');
   });
 });

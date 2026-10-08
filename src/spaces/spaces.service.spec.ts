@@ -12,6 +12,13 @@ import { SpaceMember } from './entities/space-member.entity';
 import { SpaceJoinRequest } from './entities/space-join-request.entity';
 import { SpaceMessage } from './entities/space-message.entity';
 import { ExerciseCategory } from '../exercises/entities/exercise-category.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+
+// B3: emitters call notify()/notifyMany() fire-and-forget; never throws.
+const notificationsService = {
+  notify: jest.fn().mockResolvedValue(null),
+  notifyMany: jest.fn().mockResolvedValue(undefined),
+};
 
 const createMockRepo = () => ({
   find: jest.fn(),
@@ -67,6 +74,7 @@ describe('SpacesService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SpacesService,
+        { provide: NotificationsService, useValue: notificationsService },
         { provide: getRepositoryToken(Space), useValue: spaceRepo },
         { provide: getRepositoryToken(SpaceMember), useValue: memberRepo },
         {
@@ -640,6 +648,41 @@ describe('SpacesService', () => {
       return { txRequestRepo, txMemberRepo };
     };
 
+    it.each([true, false])(
+      'notifies the requester after the response is committed (approve=%s)',
+      async (approve) => {
+        notificationsService.notify.mockClear();
+        spaceRepo.findOne.mockResolvedValue(basePrivateSpace());
+        arrangeTransaction(pendingRequest(), null);
+
+        await service.respondToJoinRequest(
+          OWNER,
+          SPACE_ID,
+          REQUEST_ID,
+          approve,
+        );
+
+        expect(notificationsService.notify).toHaveBeenCalledWith({
+          recipientUserId: OUTSIDER,
+          actorUserId: OWNER,
+          type: 'space_join_response',
+          entity: { type: 'space', id: SPACE_ID },
+          data: { approved: String(approve) },
+        });
+      },
+    );
+
+    it('does not notify when the request was already answered', async () => {
+      notificationsService.notify.mockClear();
+      spaceRepo.findOne.mockResolvedValue(basePrivateSpace());
+      arrangeTransaction({ ...pendingRequest(), status: 'approved' }, null);
+
+      await expect(
+        service.respondToJoinRequest(OWNER, SPACE_ID, REQUEST_ID, true),
+      ).rejects.toThrow(ConflictException);
+      expect(notificationsService.notify).not.toHaveBeenCalled();
+    });
+
     it('should reject a non-owner responding to a join request', async () => {
       spaceRepo.findOne.mockResolvedValue(basePrivateSpace());
       await expect(
@@ -732,6 +775,66 @@ describe('SpacesService', () => {
       expect(txMemberRepo.create).not.toHaveBeenCalled();
       expect(txMemberRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ is_active: true }),
+      );
+    });
+  });
+
+  describe('notifications (B3)', () => {
+    const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+    beforeEach(() => {
+      notificationsService.notify.mockClear();
+      notificationsService.notifyMany.mockClear();
+    });
+
+    it('notifies the owner about a request to join a private space', async () => {
+      spaceRepo.findOne.mockResolvedValue(basePrivateSpace());
+      memberRepo.findOne.mockResolvedValue(null);
+      joinRequestRepo.findOne.mockResolvedValue(null);
+      joinRequestRepo.create.mockImplementation((r: object) => r);
+      joinRequestRepo.save.mockResolvedValue({});
+      memberRepo.count.mockResolvedValue(1);
+
+      await service.join(OUTSIDER, SPACE_ID).catch(() => undefined);
+
+      expect(notificationsService.notify).toHaveBeenCalledWith({
+        recipientUserId: OWNER,
+        actorUserId: OUTSIDER,
+        type: 'space_join_request',
+        entity: { type: 'space', id: SPACE_ID },
+      });
+    });
+
+    it('fans a group message out to the other active members only', async () => {
+      memberRepo.findOne.mockResolvedValue({ is_active: true });
+      memberRepo.find.mockResolvedValue([
+        { user_id: MEMBER },
+        { user_id: OWNER },
+        { user_id: 'third-uuid' },
+      ]);
+      messageRepo.create.mockImplementation((m: object) => m);
+      messageRepo.save.mockResolvedValue({ id: 42 });
+      messageRepo.findOne.mockResolvedValue({
+        id: 42,
+        space_id: SPACE_ID,
+        user_id: MEMBER,
+        message_text: 'hola',
+        sent_at: new Date(),
+      });
+
+      await service.sendMessage(MEMBER, SPACE_ID, 'hola');
+      await flush();
+
+      expect(memberRepo.find).toHaveBeenCalledWith({
+        where: { space_id: SPACE_ID, is_active: true },
+      });
+      expect(notificationsService.notifyMany).toHaveBeenCalledWith(
+        [OWNER, 'third-uuid'],
+        {
+          actorUserId: MEMBER,
+          type: 'space_message',
+          entity: { type: 'space', id: SPACE_ID },
+        },
       );
     });
   });

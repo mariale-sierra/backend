@@ -11,6 +11,7 @@ import { ChallengeInvite } from './entities/challenge-invite.entity';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
 import { User } from '../users/entities/user.entity';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class ChallengeInvitesService {
@@ -24,6 +25,7 @@ export class ChallengeInvitesService {
     @InjectRepository(User)
     private userRepo: Repository<User>,
     private dataSource: DataSource,
+    private notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -42,7 +44,7 @@ export class ChallengeInvitesService {
     }
 
     const challenge = await this.challengeRepo.findOne({
-      where: { id: challengeId },
+      where: { id: challengeId, is_active: true },
     });
     if (!challenge) throw new NotFoundException('Challenge not found');
 
@@ -102,6 +104,15 @@ export class ChallengeInvitesService {
 
     try {
       const saved = await this.inviteRepo.save(invite);
+      // Opens the invitations inbox; the invite itself is what grants the
+      // recipient a look at the (possibly private) challenge.
+      void this.notificationsService.notify({
+        recipientUserId: recipientUserId,
+        actorUserId: senderUserId,
+        type: 'challenge_invite',
+        entity: { type: 'challenge_invite', id: saved.id },
+        data: { challengeId },
+      });
       return this.findOneWithRelations(saved.id);
     } catch (error) {
       // Unique partial index uq_challenge_invite_pending backs this up at the
@@ -145,7 +156,7 @@ export class ChallengeInvitesService {
    * avoid double-processing under concurrent accepts.
    */
   async accept(inviteId: string, userId: string) {
-    await this.dataSource.transaction(async (manager) => {
+    const accepted = await this.dataSource.transaction(async (manager) => {
       const invite = await manager
         .getRepository(ChallengeInvite)
         .createQueryBuilder('invite')
@@ -162,6 +173,13 @@ export class ChallengeInvitesService {
         );
       }
       this.assertPending(invite);
+
+      // B4: an invite to a challenge its creator has since soft-deleted can
+      // no longer bring anyone (back) into it.
+      const challenge = await this.challengeRepo.findOne({
+        where: { id: invite.challenge_id, is_active: true },
+      });
+      if (!challenge) throw new NotFoundException('Challenge not found');
 
       invite.status = 'accepted';
       invite.responded_at = new Date();
@@ -189,8 +207,10 @@ export class ChallengeInvitesService {
           }),
         );
       }
+      return invite;
     });
 
+    this.notifyInviteResponse(accepted, true);
     return this.findOneWithRelations(inviteId);
   }
 
@@ -206,6 +226,7 @@ export class ChallengeInvitesService {
     invite.status = 'declined';
     invite.responded_at = new Date();
     await this.inviteRepo.save(invite);
+    this.notifyInviteResponse(invite, false);
     return this.findOneWithRelations(inviteId);
   }
 
@@ -220,6 +241,17 @@ export class ChallengeInvitesService {
     invite.responded_at = new Date();
     await this.inviteRepo.save(invite);
     return this.findOneWithRelations(inviteId);
+  }
+
+  /** Tells the sender their invite was answered (after the write is committed). */
+  private notifyInviteResponse(invite: ChallengeInvite, accepted: boolean) {
+    void this.notificationsService.notify({
+      recipientUserId: invite.sender_user_id,
+      actorUserId: invite.recipient_user_id,
+      type: 'challenge_invite_response',
+      entity: { type: 'challenge', id: invite.challenge_id },
+      data: { accepted: String(accepted) },
+    });
   }
 
   private assertPending(invite: ChallengeInvite) {

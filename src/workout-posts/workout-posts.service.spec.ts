@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { WorkoutPostsService } from './workout-posts.service';
 import {
   WorkoutPost,
@@ -11,11 +11,14 @@ import { ModerationService } from '../openai/moderation.service';
 import { FollowsService } from '../follows/follows.service';
 import { WorkoutPostReactionsService } from './workout-post-reactions.service';
 import { WorkoutPostCommentsService } from './workout-post-comments.service';
+import { HashtagsService } from './hashtags/hashtags.service';
 import { encodeCursor } from '../common/pagination.util';
 
 const createMockWorkoutPostRepo = () => ({
   create: jest.fn(),
   save: jest.fn(),
+  // remove()'s (B4) own lookup of the post to soft-delete.
+  findOne: jest.fn(),
   update: jest.fn(),
   // processPendingModerationBatch()'s own lookup of still-pending posts.
   find: jest.fn().mockResolvedValue([]),
@@ -39,6 +42,11 @@ describe('WorkoutPostsService', () => {
   let reactionsService: {
     getCountsForPosts: jest.Mock;
     getReactedPostIds: jest.Mock;
+    getRecentReactorsForPosts: jest.Mock;
+  };
+  let hashtagsService: {
+    syncPostHashtags: jest.Mock;
+    getTagsForPosts: jest.Mock;
   };
   let commentsService: { getCountsForPosts: jest.Mock };
   let moderationService: {
@@ -64,6 +72,12 @@ describe('WorkoutPostsService', () => {
     reactionsService = {
       getCountsForPosts: jest.fn().mockResolvedValue(new Map()),
       getReactedPostIds: jest.fn().mockResolvedValue(new Set()),
+      getRecentReactorsForPosts: jest.fn().mockResolvedValue(new Map()),
+    };
+    // B5: no hashtags on any post unless a test says otherwise.
+    hashtagsService = {
+      syncPostHashtags: jest.fn().mockResolvedValue([]),
+      getTagsForPosts: jest.fn().mockResolvedValue(new Map()),
     };
     commentsService = {
       getCountsForPosts: jest.fn().mockResolvedValue(new Map()),
@@ -83,6 +97,7 @@ describe('WorkoutPostsService', () => {
         { provide: FollowsService, useValue: followsService },
         { provide: WorkoutPostReactionsService, useValue: reactionsService },
         { provide: WorkoutPostCommentsService, useValue: commentsService },
+        { provide: HashtagsService, useValue: hashtagsService },
       ],
     }).compile();
 
@@ -132,7 +147,7 @@ describe('WorkoutPostsService', () => {
   // "hasn't had its first attempt yet") auto-approves as a safety valve.
   // ---------------------------------------------------------------------
   describe('create', () => {
-    it('should create posts already approved, with no OpenAI call, while the moderation gate is disabled', async () => {
+    it('should create posts pending, with no synchronous OpenAI call, since the moderation gate is enabled', async () => {
       postRepo.create.mockReturnValue({} as WorkoutPost);
       postRepo.save.mockImplementation((post: WorkoutPost) =>
         Promise.resolve(post),
@@ -146,10 +161,7 @@ describe('WorkoutPostsService', () => {
       expect(moderationService.validateWorkoutImage).not.toHaveBeenCalled();
       expect(saved).toEqual(
         expect.objectContaining({
-          moderationStatus: WorkoutPostModerationStatus.APPROVED,
-          moderationReason: expect.stringContaining(
-            'desactivada temporalmente',
-          ),
+          moderationStatus: WorkoutPostModerationStatus.PENDING,
         }),
       );
     });
@@ -176,6 +188,28 @@ describe('WorkoutPostsService', () => {
     });
   });
 
+  describe('create — hashtags (B5)', () => {
+    it('should sync the caption hashtags for the saved post through the same manager', async () => {
+      postRepo.create.mockReturnValue({} as WorkoutPost);
+      postRepo.save.mockImplementation((post: WorkoutPost) =>
+        Promise.resolve({ ...post, id: 'post-9' }),
+      );
+      const txRepo = postRepo;
+      const manager = { getRepository: jest.fn(() => txRepo) };
+
+      await service.create(
+        { user_id: 'author-1', image_url: 'x', caption: 'día 3 #legday' },
+        manager as never,
+      );
+
+      expect(hashtagsService.syncPostHashtags).toHaveBeenCalledWith(
+        'post-9',
+        'día 3 #legday',
+        manager,
+      );
+    });
+  });
+
   describe('processPendingModerationBatch', () => {
     function pendingPost(overrides: Partial<WorkoutPost> = {}): WorkoutPost {
       return {
@@ -191,34 +225,33 @@ describe('WorkoutPostsService', () => {
       } as WorkoutPost;
     }
 
-    // MODERATION_GATE_ENABLED is currently false (team decision, 2026-09:
-    // OpenAI quota exhausted — see the service's own doc comment), so the
-    // real per-post entry point auto-approves everything unconditionally,
-    // with no OpenAI call, regardless of content or age.
-    it('should auto-approve every pending post directly, with no OpenAI call, while the moderation gate is disabled', async () => {
+    // MODERATION_GATE_ENABLED is true again (moderation re-enabled after the
+    // OpenAI rate limit was resolved), so the batch sends each pending post
+    // through the real OpenAI-backed moderation.
+    it('should moderate each pending post through OpenAI while the moderation gate is enabled', async () => {
       postRepo.find.mockResolvedValue([
         pendingPost({ id: 'post-1', created_at: new Date() }),
       ]);
+      moderationService.validateWorkoutImage.mockResolvedValue({
+        flagged: false,
+        flaggedCategories: [],
+      });
 
       await service.processPendingModerationBatch();
 
-      expect(moderationService.validateWorkoutImage).not.toHaveBeenCalled();
+      expect(moderationService.validateWorkoutImage).toHaveBeenCalledWith(
+        'https://example.com/a.jpg',
+        'day 1',
+      );
       expect(postRepo.update).toHaveBeenCalledWith(
         'post-1',
         expect.objectContaining({
           moderationStatus: WorkoutPostModerationStatus.APPROVED,
-          moderationReason: expect.stringContaining(
-            'desactivada temporalmente',
-          ),
         }),
       );
     });
 
-    // The real OpenAI-backed logic (moderatePostViaAi) is preserved, not
-    // deleted, for when the gate gets flipped back on — but it's no longer
-    // reachable through the public processPendingModerationBatch() entry
-    // point while the gate is off, so these call it directly to keep it
-    // covered.
+    // moderatePostViaAi is exercised directly here to cover its failure paths.
     describe('moderatePostViaAi (preserved for when the gate is re-enabled)', () => {
       it('should auto-approve a post that has been pending for over 2 hours when the moderation service keeps failing', async () => {
         const staleDate = new Date(Date.now() - 3 * 60 * 60 * 1000); // 3h old
@@ -326,6 +359,15 @@ describe('WorkoutPostsService', () => {
       expect(sql).toContain("c.visibility != 'private'");
     });
 
+    it('should exclude posts whose challenge was deleted by its creator (B4 soft delete)', async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getFeed({ limit: 20, viewerId: VIEWER_ID });
+
+      const [sql] = postRepo.manager.query.mock.calls[0] as [string];
+      expect(sql).toContain('c.is_active = true');
+    });
+
     it('should never populate activity_type (no unambiguous source exists)', async () => {
       postRepo.manager.query.mockResolvedValue([feedRow()]);
 
@@ -360,6 +402,44 @@ describe('WorkoutPostsService', () => {
       expect(posts[0].likes_count).toBe(0);
       expect(posts[0].liked_by_me).toBe(false);
       expect(posts[0].comments_count).toBe(0);
+      expect(posts[0].recent_reactors).toEqual([]);
+      expect(posts[0].hashtags).toEqual([]);
+    });
+
+    it('should attach recent reactors and hashtags from their batched lookups (B5)', async () => {
+      postRepo.manager.query.mockResolvedValue([feedRow({ id: '1' })]);
+      reactionsService.getRecentReactorsForPosts.mockResolvedValue(
+        new Map([
+          [
+            '1',
+            [
+              {
+                id: 'u-2',
+                username: 'bob',
+                displayName: 'Bob',
+                profileImageUrl: null,
+              },
+            ],
+          ],
+        ]),
+      );
+      hashtagsService.getTagsForPosts.mockResolvedValue(
+        new Map([['1', ['legday', 'running']]]),
+      );
+
+      const { posts } = await service.getFeed({
+        limit: 20,
+        viewerId: VIEWER_ID,
+      });
+
+      expect(reactionsService.getRecentReactorsForPosts).toHaveBeenCalledWith(
+        ['1'],
+        VIEWER_ID,
+      );
+      expect(posts[0].recent_reactors).toEqual([
+        { id: 'u-2', username: 'bob', display_name: 'Bob', avatar_url: null },
+      ]);
+      expect(posts[0].hashtags).toEqual(['legday', 'running']);
     });
 
     it('should populate likes_count/comments_count/liked_by_me from the batched reactions/comments lookups (Bloque 3)', async () => {
@@ -996,6 +1076,120 @@ describe('WorkoutPostsService', () => {
       expect(photos[0].metrics).toEqual([
         { label: 'Bench Press', value: '3 × 45 kg' },
       ]);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Sprint 9 (B4): an author deletes their own post — soft delete only
+  // (is_active = false), and a deleted post disappears from every read path.
+  // ---------------------------------------------------------------------
+  describe('remove (B4 soft delete)', () => {
+    const POST_ID = '5b1e7c1a-0000-4000-8000-000000000001';
+
+    it('should soft-delete the owner’s post: is_active=false via save(), never a physical delete', async () => {
+      const post = { id: POST_ID, user_id: VIEWER_ID, is_active: true };
+      postRepo.findOne.mockResolvedValue(post);
+      postRepo.save.mockImplementation((p: unknown) => Promise.resolve(p));
+
+      const result = await service.remove(POST_ID, VIEWER_ID);
+
+      expect(postRepo.findOne).toHaveBeenCalledWith({
+        where: { id: POST_ID, is_active: true },
+      });
+      expect(postRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ id: POST_ID, is_active: false }),
+      );
+      expect(postRepo.update).not.toHaveBeenCalled();
+      expect(result).toEqual({ message: 'Workout post deleted' });
+    });
+
+    it('should not touch is_hidden (admin moderation is a separate concept)', async () => {
+      const post = {
+        id: POST_ID,
+        user_id: VIEWER_ID,
+        is_active: true,
+        is_hidden: false,
+      };
+      postRepo.findOne.mockResolvedValue(post);
+      postRepo.save.mockImplementation((p: unknown) => Promise.resolve(p));
+
+      await service.remove(POST_ID, VIEWER_ID);
+
+      expect(postRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ is_active: false, is_hidden: false }),
+      );
+    });
+
+    it('should throw ForbiddenException when someone else tries to delete it, without saving', async () => {
+      postRepo.findOne.mockResolvedValue({
+        id: POST_ID,
+        user_id: OTHER_USER_ID,
+        is_active: true,
+      });
+
+      await expect(service.remove(POST_ID, VIEWER_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(postRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should throw NotFoundException for a missing or already-deleted post, without saving', async () => {
+      postRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.remove(POST_ID, VIEWER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(postRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should exclude soft-deleted posts from the feed', async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getFeed({ limit: 20, viewerId: VIEWER_ID });
+
+      const [sql] = postRepo.manager.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain('p.is_active = true');
+    });
+
+    it('should exclude soft-deleted posts from the challenge gallery and /mine', async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getChallengePhotos('challenge-1', VIEWER_ID);
+      await service.getUserPhotos(VIEWER_ID);
+
+      for (const [sql] of postRepo.manager.query.mock.calls as Array<
+        [string, unknown[]]
+      >) {
+        expect(sql).toContain('p.is_active = true');
+      }
+    });
+
+    it('should exclude soft-deleted posts from paginated user posts, even for their own author', async () => {
+      userRepo.findOne.mockResolvedValue({ id: VIEWER_ID, is_active: true });
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getUserPosts(VIEWER_ID, VIEWER_ID, { limit: 20 });
+
+      const [sql] = postRepo.manager.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain('p.is_active = true');
+    });
+
+    it('should exclude soft-deleted posts from the challenge mosaic', async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.findMosaicByChallenge('challenge-1', VIEWER_ID);
+
+      const [sql] = postRepo.manager.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain('p.is_active = true');
+    });
+
+    it('should not spend a moderation run on soft-deleted pending posts', async () => {
+      await service.processPendingModerationBatch();
+
+      const [options] = postRepo.find.mock.calls[0] as [
+        { where: Record<string, unknown> },
+      ];
+      expect(options.where).toMatchObject({ is_active: true });
     });
   });
 });

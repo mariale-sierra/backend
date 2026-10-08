@@ -12,6 +12,13 @@ import { ChallengeInvite } from './entities/challenge-invite.entity';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
 import { User } from '../users/entities/user.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+
+// B3: emitters call notify()/notifyMany() fire-and-forget; never throws.
+const notificationsService = {
+  notify: jest.fn().mockResolvedValue(null),
+  notifyMany: jest.fn().mockResolvedValue(undefined),
+};
 
 const createMockRepo = () => ({
   find: jest.fn(),
@@ -63,6 +70,7 @@ describe('ChallengeInvitesService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ChallengeInvitesService,
+        { provide: NotificationsService, useValue: notificationsService },
         { provide: getRepositoryToken(ChallengeInvite), useValue: inviteRepo },
         { provide: getRepositoryToken(Challenge), useValue: challengeRepo },
         { provide: getRepositoryToken(ChallengeUserMap), useValue: memberRepo },
@@ -112,6 +120,21 @@ describe('ChallengeInvitesService', () => {
       expect(result.status).toBe('pending');
     });
 
+    it('notifies the recipient with the invite and challenge ids', async () => {
+      notificationsService.notify.mockClear();
+      arrangeHappyPath();
+
+      await service.create(SENDER, CHALLENGE, RECIPIENT);
+
+      expect(notificationsService.notify).toHaveBeenCalledWith({
+        recipientUserId: RECIPIENT,
+        actorUserId: SENDER,
+        type: 'challenge_invite',
+        entity: { type: 'challenge_invite', id: INVITE_ID },
+        data: { challengeId: CHALLENGE },
+      });
+    });
+
     it('should reject self-invites before touching the database', async () => {
       await expect(service.create(SENDER, CHALLENGE, SENDER)).rejects.toThrow(
         BadRequestException,
@@ -125,6 +148,17 @@ describe('ChallengeInvitesService', () => {
       await expect(
         service.create(SENDER, CHALLENGE, RECIPIENT),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should not invite to a challenge its creator soft-deleted (B4)', async () => {
+      challengeRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.create(SENDER, CHALLENGE, RECIPIENT),
+      ).rejects.toThrow(NotFoundException);
+      expect(challengeRepo.findOne).toHaveBeenCalledWith({
+        where: { id: CHALLENGE, is_active: true },
+      });
     });
 
     it('should throw NotFoundException when the recipient does not exist or is inactive', async () => {
@@ -215,8 +249,27 @@ describe('ChallengeInvitesService', () => {
         ...pendingInvite(),
         status: 'accepted',
       });
+      // B4: accept() requires the challenge to still be active.
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
       return { txInviteRepo, txMemberRepo };
     };
+
+    it('should not accept an invite to a challenge its creator soft-deleted (B4)', async () => {
+      const { txInviteRepo, txMemberRepo } = arrangeTransaction(
+        pendingInvite(),
+        null,
+      );
+      challengeRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.accept(INVITE_ID, RECIPIENT)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(challengeRepo.findOne).toHaveBeenCalledWith({
+        where: { id: CHALLENGE, is_active: true },
+      });
+      expect(txInviteRepo.save).not.toHaveBeenCalled();
+      expect(txMemberRepo.save).not.toHaveBeenCalled();
+    });
 
     it('should mark the invite accepted and add the member inside one transaction', async () => {
       const { txInviteRepo, txMemberRepo } = arrangeTransaction(
@@ -258,6 +311,31 @@ describe('ChallengeInvitesService', () => {
       expect(txMemberRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'active' }),
       );
+    });
+
+    it('notifies the sender once the acceptance is committed', async () => {
+      notificationsService.notify.mockClear();
+      arrangeTransaction(pendingInvite(), null);
+
+      await service.accept(INVITE_ID, RECIPIENT);
+
+      expect(notificationsService.notify).toHaveBeenCalledWith({
+        recipientUserId: SENDER,
+        actorUserId: RECIPIENT,
+        type: 'challenge_invite_response',
+        entity: { type: 'challenge', id: CHALLENGE },
+        data: { accepted: 'true' },
+      });
+    });
+
+    it('does not notify when accepting fails', async () => {
+      notificationsService.notify.mockClear();
+      arrangeTransaction({ ...pendingInvite(), status: 'declined' }, null);
+
+      await expect(service.accept(INVITE_ID, RECIPIENT)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(notificationsService.notify).not.toHaveBeenCalled();
     });
 
     it('should forbid anyone other than the recipient from accepting', async () => {
@@ -312,6 +390,24 @@ describe('ChallengeInvitesService', () => {
         }),
       );
       expect(result.status).toBe('declined');
+    });
+
+    it('notifies the sender that the invite was declined', async () => {
+      notificationsService.notify.mockClear();
+      inviteRepo.findOne
+        .mockResolvedValueOnce(pendingInvite())
+        .mockResolvedValueOnce({ ...pendingInvite(), status: 'declined' });
+      inviteRepo.save.mockImplementation((i: object) => Promise.resolve(i));
+
+      await service.decline(INVITE_ID, RECIPIENT);
+
+      expect(notificationsService.notify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientUserId: SENDER,
+          type: 'challenge_invite_response',
+          data: { accepted: 'false' },
+        }),
+      );
     });
 
     it('should forbid the sender from declining their own invite', async () => {

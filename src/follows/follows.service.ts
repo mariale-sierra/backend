@@ -12,6 +12,7 @@ import { UserProfile } from '../users/entities/user-profile.entity';
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { FollowUserSummaryDto } from './dto/follow-user-summary.dto';
 import { FriendStreakDto } from './dto/friend-streak.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   getCurrentStreakDaysForUsers,
   getLoggedTodayUserIds,
@@ -28,6 +29,7 @@ export class FollowsService {
     private profileRepo: Repository<UserProfile>,
     @InjectRepository(WorkoutLog)
     private workoutRepo: Repository<WorkoutLog>,
+    private notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -61,6 +63,7 @@ export class FollowsService {
       }
       existing.is_active = true;
       await this.followRepo.save(existing);
+      this.notifyNewFollower(followerUserId, followedUserId);
       return { message: 'Now following user' };
     }
 
@@ -82,7 +85,19 @@ export class FollowsService {
       throw error;
     }
 
+    this.notifyNewFollower(followerUserId, followedUserId);
     return { message: 'Now following user' };
+  }
+
+  /** Fire-and-forget: notify() never throws, and the follow is already saved.
+   * A quick unfollow/follow repeat is dropped by notify()'s repeat window. */
+  private notifyNewFollower(followerUserId: string, followedUserId: string) {
+    void this.notificationsService.notify({
+      recipientUserId: followedUserId,
+      actorUserId: followerUserId,
+      type: 'new_follower',
+      entity: { type: 'user', id: followerUserId },
+    });
   }
 
   async unfollow(followerUserId: string, followedUserId: string) {

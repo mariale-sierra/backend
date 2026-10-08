@@ -21,6 +21,7 @@ import {
   ResolveReportResultDto,
 } from './dto/report.dto';
 import { assertPostVisibleToUser } from './workout-post-visibility.util';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export const DEFAULT_REPORTS_LIMIT = 20;
 export const MAX_REPORTS_LIMIT = 50;
@@ -54,6 +55,7 @@ export class WorkoutPostReportsService {
     private commentRepo: Repository<WorkoutPostComment>,
     @InjectDataSource()
     private dataSource: DataSource,
+    private notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -71,7 +73,7 @@ export class WorkoutPostReportsService {
         throw new BadRequestException('targetId must be a post UUID');
       }
       const post = await this.postRepo.findOne({
-        where: { id: targetId, is_hidden: false },
+        where: { id: targetId, is_hidden: false, is_active: true },
       });
       if (!post) throw new NotFoundException('Workout post not found');
       assertPostVisibleToUser(post, reporterId);
@@ -85,7 +87,12 @@ export class WorkoutPostReportsService {
       where: { id: Number(targetId), is_active: true, is_hidden: false },
       relations: { post: true },
     });
-    if (!comment || !comment.post || comment.post.is_hidden) {
+    if (
+      !comment ||
+      !comment.post ||
+      comment.post.is_hidden ||
+      !comment.post.is_active
+    ) {
       throw new NotFoundException('Comment not found');
     }
     assertPostVisibleToUser(comment.post, reporterId);
@@ -282,114 +289,166 @@ export class WorkoutPostReportsService {
       );
     }
     const note = dto.note?.trim() || null;
+    let resolved: ContentReport | undefined;
+    let siblingReporters: Array<{ reportId: number; reporterId: string }> = [];
 
-    return this.dataSource.transaction(async (manager) => {
-      const report = await manager.findOne(ContentReport, {
-        where: { id: reportId },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!report) throw new NotFoundException('Report not found');
-      if (report.status !== 'pending') {
-        throw new ConflictException('Report already resolved');
-      }
-
-      const now = new Date();
-      const hide = dto.action === 'hide';
-      const status = hide ? 'actioned' : 'dismissed';
-      let penaltyRecorded = false;
-      let alsoResolvedReportIds: number[] = [];
-
-      if (hide) {
-        const hiddenFields = {
-          is_hidden: true,
-          hidden_at: now,
-          hidden_reason: `report:${report.id}`,
-        };
-        if (report.target_type === 'post') {
-          await manager.update(
-            WorkoutPost,
-            { id: report.target_id, is_hidden: false },
-            hiddenFields,
-          );
-        } else {
-          await manager.update(
-            WorkoutPostComment,
-            { id: Number(report.target_id), is_hidden: false },
-            hiddenFields,
-          );
+    const result = await this.dataSource.transaction<ResolveReportResultDto>(
+      async (manager) => {
+        const report = await manager.findOne(ContentReport, {
+          where: { id: reportId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!report) throw new NotFoundException('Report not found');
+        if (report.status !== 'pending') {
+          throw new ConflictException('Report already resolved');
         }
 
-        if (penalize) {
-          const inserted: Array<{ id: number }> = await manager.query(
-            `INSERT INTO havit.user_penalties
+        const now = new Date();
+        const hide = dto.action === 'hide';
+        resolved = report;
+        const status = hide ? 'actioned' : 'dismissed';
+        let penaltyRecorded = false;
+        let alsoResolvedReportIds: number[] = [];
+
+        if (hide) {
+          const hiddenFields = {
+            is_hidden: true,
+            hidden_at: now,
+            hidden_reason: `report:${report.id}`,
+          };
+          if (report.target_type === 'post') {
+            await manager.update(
+              WorkoutPost,
+              { id: report.target_id, is_hidden: false },
+              hiddenFields,
+            );
+          } else {
+            await manager.update(
+              WorkoutPostComment,
+              { id: Number(report.target_id), is_hidden: false },
+              hiddenFields,
+            );
+          }
+
+          if (penalize) {
+            const inserted: Array<{ id: number }> = await manager.query(
+              `INSERT INTO havit.user_penalties
                (user_id, report_id, target_type, target_id, penalty_type, reason, issued_by)
              VALUES ($1, $2, $3, $4, 'strike', $5, $6)
              ON CONFLICT (target_type, target_id) DO NOTHING
              RETURNING id`,
-            [
-              report.target_owner_id,
-              report.id,
-              report.target_type,
-              report.target_id,
-              note ?? report.reason,
-              adminId,
-            ],
-          );
-          penaltyRecorded = inserted.length > 0;
-        }
+              [
+                report.target_owner_id,
+                report.id,
+                report.target_type,
+                report.target_id,
+                note ?? report.reason,
+                adminId,
+              ],
+            );
+            penaltyRecorded = inserted.length > 0;
+          }
 
-        // Once the content is hidden, every other pending report about it is
-        // moot — close them in the same transaction so the admin queue
-        // doesn't show already-handled content.
-        const siblings = await manager.find(ContentReport, {
-          where: {
-            target_type: report.target_type,
-            target_id: report.target_id,
-            status: 'pending',
-          },
-          lock: { mode: 'pessimistic_write' },
-        });
-        alsoResolvedReportIds = siblings
-          .map((s) => Number(s.id))
-          .filter((id) => id !== Number(report.id));
-        if (alsoResolvedReportIds.length > 0) {
-          await manager.update(
-            ContentReport,
-            { id: In(alsoResolvedReportIds), status: 'pending' },
-            {
-              status: 'actioned',
-              resolution_action: 'hide',
-              resolution_note: `Resuelto junto con el reporte #${report.id}`,
-              resolved_by: adminId,
-              resolved_at: now,
+          // Once the content is hidden, every other pending report about it is
+          // moot — close them in the same transaction so the admin queue
+          // doesn't show already-handled content.
+          const siblings = await manager.find(ContentReport, {
+            where: {
+              target_type: report.target_type,
+              target_id: report.target_id,
+              status: 'pending',
             },
-          );
+            lock: { mode: 'pessimistic_write' },
+          });
+          alsoResolvedReportIds = siblings
+            .map((s) => Number(s.id))
+            .filter((id) => id !== Number(report.id));
+          siblingReporters = siblings
+            .filter((s) => Number(s.id) !== Number(report.id))
+            .map((s) => ({
+              reportId: Number(s.id),
+              reporterId: s.reporter_id,
+            }));
+          if (alsoResolvedReportIds.length > 0) {
+            await manager.update(
+              ContentReport,
+              { id: In(alsoResolvedReportIds), status: 'pending' },
+              {
+                status: 'actioned',
+                resolution_action: 'hide',
+                resolution_note: `Resuelto junto con el reporte #${report.id}`,
+                resolved_by: adminId,
+                resolved_at: now,
+              },
+            );
+          }
         }
-      }
 
-      const result = await manager.update(
-        ContentReport,
-        { id: report.id, status: 'pending' },
-        {
+        const result = await manager.update(
+          ContentReport,
+          { id: report.id, status: 'pending' },
+          {
+            status,
+            resolution_action: dto.action,
+            resolution_note: note,
+            resolved_by: adminId,
+            resolved_at: now,
+          },
+        );
+        if (result.affected === 0) {
+          throw new ConflictException('Report already resolved');
+        }
+
+        return {
+          reportId: Number(report.id),
           status,
-          resolution_action: dto.action,
-          resolution_note: note,
-          resolved_by: adminId,
-          resolved_at: now,
-        },
-      );
-      if (result.affected === 0) {
-        throw new ConflictException('Report already resolved');
-      }
+          action: dto.action,
+          contentHidden: hide,
+          penaltyRecorded,
+          alsoResolvedReportIds,
+        };
+      },
+    );
 
-      return {
-        reportId: Number(report.id),
-        status,
-        action: dto.action,
-        contentHidden: hide,
-        penaltyRecorded,
-        alsoResolvedReportIds,
-      };
-    });
+    if (resolved) {
+      this.notifyResolution(resolved, result, siblingReporters);
+    }
+    return result;
+  }
+
+  /**
+   * After commit. Reporters learn their report was reviewed (and the
+   * outcome); the author learns their content was hidden and whether it
+   * counted as a strike. No actor: the reviewing admin isn't revealed.
+   * Ids only — never the reported content or the report details.
+   */
+  private notifyResolution(
+    report: ContentReport,
+    result: ResolveReportResultDto,
+    siblingReporters: Array<{ reportId: number; reporterId: string }>,
+  ): void {
+    const reporters = [
+      { reportId: Number(report.id), reporterId: report.reporter_id },
+      ...siblingReporters,
+    ];
+    for (const { reportId, reporterId } of reporters) {
+      void this.notificationsService.notify({
+        recipientUserId: reporterId,
+        type: 'report_resolved',
+        entity: { type: 'content_report', id: reportId },
+        data: { outcome: result.status },
+      });
+    }
+    if (result.contentHidden) {
+      void this.notificationsService.notify({
+        recipientUserId: report.target_owner_id,
+        type: 'content_hidden',
+        entity: { type: 'content_report', id: report.id },
+        data: {
+          targetType: report.target_type,
+          strike: String(result.penaltyRecorded),
+        },
+      });
+    }
   }
 }

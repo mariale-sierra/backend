@@ -23,6 +23,7 @@ const url = process.env.B2_TEST_DB_URL;
       null as any,
       null as any,
       null as any,
+      null as any,
     );
     const mkUser = async () => {
       const id = randomUUID();
@@ -45,10 +46,13 @@ const url = process.env.B2_TEST_DB_URL;
       );
       return id as string;
     };
+    // workout_logs requires local_day when challenge_id is set and allows one
+    // progress per day per challenge, so each post gets its own day.
+    let dayOffset = 0;
     const mkPost = async (ch: string, vis: string) => {
       const [{ id: log }] = await ds.query(
-        `INSERT INTO havit.workout_logs (user_id, challenge_id, started_at, status) VALUES ($1,$2,now(),'completed') RETURNING id`,
-        [a, ch],
+        `INSERT INTO havit.workout_logs (user_id, challenge_id, started_at, local_day, status) VALUES ($1,$2,now(),current_date - $3::int,'completed') RETURNING id`,
+        [a, ch, dayOffset++],
       );
       await ds.query(
         `INSERT INTO havit.workout_posts (workout_log_id, user_id, image_url, visibility, moderation_status) VALUES ($1,$2,'u',$3,'approved')`,

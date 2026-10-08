@@ -1,4 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
+import {
+  SharedChallengePreviewDto,
+  SharedPostPreviewDto,
+} from './shared-content.dto';
 
 export class MessageDto {
   @ApiProperty({ description: 'ID del mensaje' })
@@ -10,7 +14,10 @@ export class MessageDto {
   @ApiProperty({ description: 'ID (UUID) del usuario que envió el mensaje' })
   senderId!: string;
 
-  @ApiProperty({ description: 'Contenido del mensaje' })
+  @ApiProperty({
+    description:
+      'Contenido del mensaje (puede ser vacío si el mensaje solo comparte contenido)',
+  })
   content!: string;
 
   @ApiProperty({ description: 'Fecha de envío' })
@@ -22,4 +29,18 @@ export class MessageDto {
     nullable: true,
   })
   readAt!: Date | null;
+
+  @ApiProperty({
+    type: SharedPostPreviewDto,
+    nullable: true,
+    description: 'Publicación compartida en el mensaje, o null',
+  })
+  sharedPost!: SharedPostPreviewDto | null;
+
+  @ApiProperty({
+    type: SharedChallengePreviewDto,
+    nullable: true,
+    description: 'Challenge compartido en el mensaje, o null',
+  })
+  sharedChallenge!: SharedChallengePreviewDto | null;
 }

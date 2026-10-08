@@ -58,6 +58,15 @@ export class WorkoutPost {
   @Column({ type: 'text', nullable: true })
   hidden_reason?: string | null;
 
+  /**
+   * Borrado propio del autor (Sprint 9, B4): soft delete, nunca DELETE físico,
+   * para conservar comentarios, reacciones y el workout_log al que pertenece.
+   * Independiente de `is_hidden` (moderación de admin). La columna ya existe en
+   * el init schema (`is_active BOOLEAN NOT NULL DEFAULT TRUE`).
+   */
+  @Column({ default: true })
+  is_active!: boolean;
+
   @CreateDateColumn()
   created_at!: Date;
 

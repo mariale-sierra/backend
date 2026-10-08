@@ -7,6 +7,7 @@ import { User } from '../users/entities/user.entity';
 import { UserProfile } from '../users/entities/user-profile.entity';
 import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { AuthModule } from '../auth/auth.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { AuthModule } from '../auth/auth.module';
     // imports FollowsModule).
     TypeOrmModule.forFeature([UserFollow, User, UserProfile, WorkoutLog]),
     forwardRef(() => AuthModule),
+    NotificationsModule,
   ],
   controllers: [FollowsController],
   providers: [FollowsService],

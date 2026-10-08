@@ -170,6 +170,39 @@ describe('RoutineService.addExerciseToRoutine', () => {
     ).rejects.toThrow(NotFoundException);
   });
 
+  // B4: a deactivated routine is treated as nonexistent for edits.
+  it('should not add an exercise to a deactivated routine (NotFound, nothing written)', async () => {
+    // A real `{ id, is_active: true }` lookup finds nothing for an inactive row.
+    routineRepo.findOneBy.mockResolvedValue(null);
+
+    await expect(
+      service.addExerciseToRoutine(ROUTINE_ID, { exerciseId: 7 }, OWNER_ID),
+    ).rejects.toThrow(NotFoundException);
+    expect(routineRepo.findOneBy).toHaveBeenCalledWith({
+      id: ROUTINE_ID,
+      is_active: true,
+    });
+    expect(exerciseRepo.findOneBy).not.toHaveBeenCalled();
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('should still add an exercise to an active routine its owner edits', async () => {
+    mockHappyPathLookups();
+    metricTypeRepo.findOne.mockResolvedValue(REPS_METRIC_TYPE);
+    const { manager, savedRows } = createFakeManager([REPS_METRIC_TYPE]);
+    dataSource.transaction.mockImplementation((cb: (m: unknown) => unknown) =>
+      cb(manager),
+    );
+
+    await service.addExerciseToRoutine(ROUTINE_ID, { exerciseId: 7 }, OWNER_ID);
+
+    expect(routineRepo.findOneBy).toHaveBeenCalledWith({
+      id: ROUTINE_ID,
+      is_active: true,
+    });
+    expect(rowsOfType(savedRows, 'RoutineExercise')).toHaveLength(1);
+  });
+
   it('should reject adding to a routine owned by another user', async () => {
     routineRepo.findOneBy.mockResolvedValue({
       id: ROUTINE_ID,
@@ -436,5 +469,84 @@ describe('RoutineService.getTodayRoutine', () => {
       USER_ID,
       'UTC',
     );
+  });
+});
+
+describe('RoutineService.deactivateRoutine', () => {
+  let service: RoutineService;
+  let routineRepo: ReturnType<typeof createMockRepo>;
+
+  const OWNER_ID = 'owner-1';
+  const OTHER_USER_ID = 'other-2';
+  const ROUTINE_ID = 42;
+
+  beforeEach(async () => {
+    routineRepo = createMockRepo();
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        RoutineService,
+        { provide: ChallengesService, useValue: {} },
+        { provide: DataSource, useValue: { transaction: jest.fn() } },
+        { provide: getRepositoryToken(Routine), useValue: routineRepo },
+        {
+          provide: getRepositoryToken(RoutineExercise),
+          useValue: createMockRepo(),
+        },
+        { provide: getRepositoryToken(Exercise), useValue: createMockRepo() },
+        { provide: getRepositoryToken(Challenge), useValue: createMockRepo() },
+        { provide: getRepositoryToken(MetricType), useValue: createMockRepo() },
+      ],
+    }).compile();
+
+    service = module.get(RoutineService);
+  });
+
+  it('should deactivate a routine when owner calls it', async () => {
+    const routine = {
+      id: ROUTINE_ID,
+      is_active: true,
+      createdByUserId: OWNER_ID,
+    };
+
+    routineRepo.findOne.mockResolvedValue(routine);
+    routineRepo.save.mockResolvedValue({ ...routine, is_active: false });
+
+    await service.deactivateRoutine(ROUTINE_ID, OWNER_ID);
+
+    expect(routineRepo.findOne).toHaveBeenCalledWith({
+      where: { id: ROUTINE_ID, is_active: true },
+    });
+    expect(routine.is_active).toBe(false);
+    expect(routineRepo.save).toHaveBeenCalledWith(routine);
+  });
+
+  it('should throw ForbiddenException when non-owner tries to deactivate', async () => {
+    const routine = {
+      id: ROUTINE_ID,
+      is_active: true,
+      createdByUserId: OWNER_ID,
+    };
+
+    routineRepo.findOne.mockResolvedValue(routine);
+
+    await expect(
+      service.deactivateRoutine(ROUTINE_ID, OTHER_USER_ID),
+    ).rejects.toThrow(ForbiddenException);
+
+    expect(routineRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('should throw NotFoundException when routine does not exist', async () => {
+    routineRepo.findOne.mockResolvedValue(null);
+
+    await expect(
+      service.deactivateRoutine(ROUTINE_ID, OWNER_ID),
+    ).rejects.toThrow(NotFoundException);
+
+    expect(routineRepo.findOne).toHaveBeenCalledWith({
+      where: { id: ROUTINE_ID, is_active: true },
+    });
+    expect(routineRepo.save).not.toHaveBeenCalled();
   });
 });

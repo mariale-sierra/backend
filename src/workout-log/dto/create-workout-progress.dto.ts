@@ -1,5 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsIn, IsOptional, IsString, IsUUID } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
+
+/** Same cap as the app's caption field (Sprint 10, B5 — captions now carry
+ * #hashtags, so the app finally has a caption input). */
+const MAX_CAPTION_LENGTH = 500;
 
 export class CreateWorkoutProgressDto {
   @ApiProperty({
@@ -25,11 +36,14 @@ export class CreateWorkoutProgressDto {
   imageUrl?: string;
 
   @ApiPropertyOptional({
-    description: 'Caption o comentario del progreso',
-    example: 'Día 3 completado',
+    description:
+      'Caption o comentario del progreso. Los #hashtags se guardan aparte (havit.hashtags).',
+    example: 'Día 3 completado #legday',
+    maxLength: MAX_CAPTION_LENGTH,
   })
   @IsOptional()
   @IsString()
+  @MaxLength(MAX_CAPTION_LENGTH)
   caption?: string;
 
   @ApiPropertyOptional({

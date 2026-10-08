@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseIntPipe,
   ParseUUIDPipe,
   Patch,
   Post,
@@ -90,7 +91,11 @@ export class ChatsController {
 
   @Post(':id/messages')
   @ApiParam({ name: 'id', description: 'ID (UUID) de la conversación' })
-  @ApiOperation({ summary: 'Enviar un mensaje en una conversación' })
+  @ApiOperation({
+    summary: 'Enviar un mensaje en una conversación',
+    description:
+      'Texto, o una publicación (workoutPostId) o un challenge (challengeId) compartido, con texto opcional. El remitente debe poder ver la publicación que comparte (404 si no).',
+  })
   @ApiOkResponse({ type: MessageDto })
   @ApiNotFoundResponse({
     description: 'Conversación no encontrada o el usuario no es participante',
@@ -104,7 +109,39 @@ export class ChatsController {
     @Body() dto: SendMessageDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.chatsService.sendMessage(user.sub, conversationId, dto.content);
+    return this.chatsService.sendMessage(
+      user.sub,
+      conversationId,
+      dto.content,
+      {
+        workoutPostId: dto.workoutPostId,
+        challengeId: dto.challengeId,
+      },
+    );
+  }
+
+  @Delete(':id/messages/:messageId')
+  @ApiParam({ name: 'id', description: 'ID (UUID) de la conversación' })
+  @ApiParam({ name: 'messageId', description: 'ID del mensaje' })
+  @ApiOperation({
+    summary: 'Eliminar un mensaje propio',
+    description:
+      'Soft delete (is_active = false) de un mensaje enviado por el usuario autenticado. La conversación y el resto de mensajes se conservan.',
+  })
+  @ApiOkResponse({ description: 'Mensaje eliminado' })
+  @ApiNotFoundResponse({
+    description:
+      'Conversación no encontrada, el usuario no es participante, o el mensaje no existe en esa conversación',
+  })
+  @ApiForbiddenResponse({
+    description: 'Solo quien envió el mensaje puede eliminarlo',
+  })
+  deleteMessage(
+    @Param('id', ParseUUIDPipe) conversationId: string,
+    @Param('messageId', ParseIntPipe) messageId: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.chatsService.deleteMessage(user.sub, conversationId, messageId);
   }
 
   @Patch(':id/read')
@@ -150,5 +187,23 @@ export class ChatsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.chatsService.declineRequest(user.sub, id);
+  }
+
+  @Delete(':id')
+  @ApiParam({ name: 'id', description: 'ID (UUID) de la conversación' })
+  @ApiOperation({
+    summary: 'Eliminar una conversación de mi lista',
+    description:
+      'Oculta la conversación solo para el usuario autenticado; el otro participante la conserva y los mensajes no se borran. Vuelve a aparecer si se envía un mensaje nuevo en ella. Idempotente.',
+  })
+  @ApiOkResponse({ description: 'Conversación ocultada' })
+  @ApiNotFoundResponse({
+    description: 'Conversación no encontrada o el usuario no es participante',
+  })
+  hideConversation(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.chatsService.hideConversation(user.sub, id);
   }
 }

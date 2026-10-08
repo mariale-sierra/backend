@@ -90,17 +90,21 @@ function mockWorkoutQueries(
 }
 
 /** Mocks challengeUserRepo.createQueryBuilder() as used by getUserChallenges
- * (leftJoinAndSelect/where/orderBy/getMany). */
+ * (leftJoinAndSelect/where/andWhere/orderBy/getMany). Returns the builder so
+ * a test can assert on the filters applied. */
 function mockChallengeUserQueryBuilder(
   challengeUserRepo: ReturnType<typeof createMockRepo>,
   relations: unknown[],
 ) {
-  challengeUserRepo.createQueryBuilder.mockReturnValue({
+  const qb = {
     leftJoinAndSelect: jest.fn().mockReturnThis(),
     where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
     orderBy: jest.fn().mockReturnThis(),
     getMany: jest.fn().mockResolvedValue(relations),
-  });
+  };
+  challengeUserRepo.createQueryBuilder.mockReturnValue(qb);
+  return qb;
 }
 
 describe('UsersService', () => {
@@ -946,6 +950,16 @@ describe('UsersService', () => {
         },
       };
     }
+
+    it('should not list challenges their creator soft-deleted (B4)', async () => {
+      const qb = mockChallengeUserQueryBuilder(challengeUserRepo, []);
+      mockWorkoutQueries(workoutRepo, {});
+      challengeCycleDayRepo.find.mockResolvedValue([]);
+
+      await service.getUserChallenges('user-1');
+
+      expect(qb.andWhere).toHaveBeenCalledWith('challenge.is_active = true');
+    });
 
     it('should mark is_rest_day: true when current_day_in_cycle lands on a rest cycle day', async () => {
       mockChallengeUserQueryBuilder(challengeUserRepo, [

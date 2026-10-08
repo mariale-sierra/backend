@@ -81,11 +81,14 @@ export class WorkoutPostCommentsController {
   @ApiParam({ name: 'commentId', description: 'ID del comentario' })
   @ApiOperation({
     summary: 'Eliminar un comentario propio',
-    description: 'El usuario autenticado elimina su propio comentario.',
+    description:
+      'Soft delete (is_active = false) por el autor del comentario o por un moderador (admin global, users.is_admin).',
   })
   @ApiOkResponse({ description: 'Comentario eliminado' })
   @ApiNotFoundResponse({ description: 'Comentario no encontrado' })
-  @ApiForbiddenResponse({ description: 'No es tu comentario' })
+  @ApiForbiddenResponse({
+    description: 'No es tu comentario y no eres moderador',
+  })
   remove(
     @Param('postId', new ParseUUIDPipe()) postId: string,
     @Param('commentId', new ParseIntPipe()) commentId: number,

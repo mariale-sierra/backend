@@ -8,6 +8,13 @@ import {
 import { WorkoutPostReactionsService } from './workout-post-reactions.service';
 import { WorkoutPostLike } from './entities/workout-post-like.entity';
 import { WorkoutPost } from './entities/workout-post.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+
+// B3: emitters call notify()/notifyMany() fire-and-forget; never throws.
+const notificationsService = {
+  notify: jest.fn().mockResolvedValue(null),
+  notifyMany: jest.fn().mockResolvedValue(undefined),
+};
 
 const createMockLikeRepo = () => ({
   findOne: jest.fn(),
@@ -17,6 +24,7 @@ const createMockLikeRepo = () => ({
   count: jest.fn(),
   find: jest.fn(),
   createQueryBuilder: jest.fn(),
+  manager: { query: jest.fn() },
 });
 
 const createMockPostRepo = () => ({
@@ -42,6 +50,7 @@ describe('WorkoutPostReactionsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WorkoutPostReactionsService,
+        { provide: NotificationsService, useValue: notificationsService },
         { provide: getRepositoryToken(WorkoutPostLike), useValue: likeRepo },
         { provide: getRepositoryToken(WorkoutPost), useValue: postRepo },
       ],
@@ -58,6 +67,17 @@ describe('WorkoutPostReactionsService', () => {
         NotFoundException,
       );
       expect(likeRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should only look up active posts, so a soft-deleted post (B4) cannot be reacted to', async () => {
+      postRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.react(POST_ID, USER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(postRepo.findOne).toHaveBeenCalledWith({
+        where: { id: POST_ID, is_hidden: false, is_active: true },
+      });
     });
 
     it('should throw ForbiddenException when the post is private and the user is not its owner', async () => {
@@ -207,6 +227,160 @@ describe('WorkoutPostReactionsService', () => {
 
       expect(result.get('post-1')).toBe(4);
       expect(result.has('post-2')).toBe(false);
+    });
+  });
+
+  describe('notifications (B3)', () => {
+    beforeEach(() => notificationsService.notify.mockClear());
+
+    it('notifies the post owner about a new reaction', async () => {
+      postRepo.findOne.mockResolvedValue(publicPost);
+      likeRepo.findOne.mockResolvedValue(null);
+      likeRepo.save.mockResolvedValue({});
+
+      await service.react(POST_ID, USER_ID);
+
+      expect(notificationsService.notify).toHaveBeenCalledWith({
+        recipientUserId: OWNER_ID,
+        actorUserId: USER_ID,
+        type: 'post_reaction',
+        entity: { type: 'workout_post', id: POST_ID },
+      });
+    });
+
+    it('does not notify for a post the user cannot see', async () => {
+      postRepo.findOne.mockResolvedValue(privatePost);
+      await expect(service.react(POST_ID, USER_ID)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(notificationsService.notify).not.toHaveBeenCalled();
+    });
+
+    it('does not notify for a duplicate (double tap) reaction', async () => {
+      postRepo.findOne.mockResolvedValue(publicPost);
+      likeRepo.findOne.mockResolvedValue({ workout_post_id: POST_ID });
+      await expect(service.react(POST_ID, USER_ID)).rejects.toThrow();
+      expect(notificationsService.notify).not.toHaveBeenCalled();
+    });
+
+    it('still succeeds when the notification layer fails', async () => {
+      postRepo.findOne.mockResolvedValue(publicPost);
+      likeRepo.findOne.mockResolvedValue(null);
+      likeRepo.save.mockResolvedValue({});
+      // notify() swallows its own errors by contract; even a misbehaving
+      // implementation that resolved to garbage must not affect the action.
+      notificationsService.notify.mockResolvedValueOnce(undefined);
+
+      await expect(service.react(POST_ID, USER_ID)).resolves.toEqual({
+        message: 'Reaction added',
+      });
+    });
+  });
+
+  describe('listReactors (B5)', () => {
+    const row = (userId: string, minute: number) => ({
+      workout_post_id: POST_ID,
+      user_id: userId,
+      username: `u-${userId}`,
+      display_name: null,
+      profile_image_url: null,
+      created_at: new Date(
+        `2026-10-07T10:${String(minute).padStart(2, '0')}:00Z`,
+      ),
+    });
+
+    it('applies the same private-post gate as every other reaction endpoint', async () => {
+      postRepo.findOne.mockResolvedValue(privatePost);
+
+      await expect(
+        service.listReactors(POST_ID, USER_ID, { limit: 20 }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(likeRepo.manager.query).not.toHaveBeenCalled();
+    });
+
+    it('returns a page of people and a cursor when there are more', async () => {
+      postRepo.findOne.mockResolvedValue(publicPost);
+      likeRepo.manager.query.mockResolvedValue([
+        row('a', 3),
+        row('b', 2),
+        row('c', 1),
+      ]);
+
+      const result = await service.listReactors(POST_ID, USER_ID, {
+        limit: 2,
+      });
+
+      expect(result.reactors.map((r) => r.id)).toEqual(['a', 'b']);
+      expect(result.reactors[0]).toEqual({
+        id: 'a',
+        username: 'u-a',
+        displayName: null,
+        profileImageUrl: null,
+      });
+      expect(result.nextCursor).toBeDefined();
+      // limit + 1 lookahead row
+      const params = likeRepo.manager.query.mock.calls[0][1] as unknown[];
+      expect(params[params.length - 1]).toBe(3);
+    });
+
+    it('passes the cursor as bound parameters on later pages', async () => {
+      postRepo.findOne.mockResolvedValue(publicPost);
+      likeRepo.manager.query.mockResolvedValue([]);
+
+      const result = await service.listReactors(POST_ID, USER_ID, {
+        limit: 20,
+        cursor: { createdAt: '2026-10-07T10:00:00.000Z', id: 'user-x' },
+      });
+
+      expect(result).toEqual({ reactors: [], nextCursor: undefined });
+      expect(likeRepo.manager.query.mock.calls[0][1]).toEqual([
+        POST_ID,
+        '2026-10-07T10:00:00.000Z',
+        'user-x',
+        21,
+      ]);
+    });
+  });
+
+  describe('getRecentReactorsForPosts (B5)', () => {
+    it('does not query for an empty page', async () => {
+      const result = await service.getRecentReactorsForPosts([], USER_ID);
+      expect(result.size).toBe(0);
+      expect(likeRepo.manager.query).not.toHaveBeenCalled();
+    });
+
+    it('groups the ranked rows per post, excluding nobody client-side', async () => {
+      likeRepo.manager.query.mockResolvedValue([
+        {
+          workout_post_id: 'p1',
+          user_id: 'a',
+          username: 'ana',
+          display_name: 'Ana',
+          profile_image_url: null,
+          created_at: new Date(),
+        },
+        {
+          workout_post_id: 'p2',
+          user_id: 'b',
+          username: 'bob',
+          display_name: null,
+          profile_image_url: 'x.jpg',
+          created_at: new Date(),
+        },
+      ]);
+
+      const result = await service.getRecentReactorsForPosts(
+        ['p1', 'p2'],
+        USER_ID,
+      );
+
+      expect(result.get('p1')?.map((r) => r.username)).toEqual(['ana']);
+      expect(result.get('p2')?.[0].profileImageUrl).toBe('x.jpg');
+      expect(likeRepo.manager.query.mock.calls[0][1]).toEqual([
+        ['p1', 'p2'],
+        USER_ID,
+        3,
+      ]);
     });
   });
 });

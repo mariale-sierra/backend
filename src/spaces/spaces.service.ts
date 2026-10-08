@@ -2,6 +2,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -24,6 +25,7 @@ import {
   MAX_MESSAGES_LIMIT,
 } from './dto/space-messages-query.dto';
 import { assertOwnership } from '../auth/utils/assert-ownership';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export interface ListSpaceMessagesResult {
   messages: SpaceMessageDto[];
@@ -37,6 +39,8 @@ const SPACE_RELATIONS = {
 
 @Injectable()
 export class SpacesService {
+  private readonly logger = new Logger(SpacesService.name);
+
   constructor(
     @InjectRepository(Space)
     private spaceRepo: Repository<Space>,
@@ -49,6 +53,7 @@ export class SpacesService {
     @InjectRepository(ExerciseCategory)
     private categoryRepo: Repository<ExerciseCategory>,
     private dataSource: DataSource,
+    private notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -282,6 +287,12 @@ export class SpacesService {
       throw error;
     }
 
+    void this.notificationsService.notify({
+      recipientUserId: space.created_by_user_id,
+      actorUserId: userId,
+      type: 'space_join_request',
+      entity: { type: 'space', id: spaceId },
+    });
     return { status: 'requested', space: await this.findOne(userId, spaceId) };
   }
 
@@ -382,6 +393,7 @@ export class SpacesService {
       message_text: content,
     });
     const saved = await this.messageRepo.save(message);
+    void this.notifySpaceMembers(spaceId, userId);
 
     // Re-fetched with the sender relation so the response the frontend
     // appends directly to the thread has a fully populated `sender`.
@@ -429,7 +441,8 @@ export class SpacesService {
       'Only the owner can respond to join requests',
     );
 
-    return this.dataSource.transaction(async (manager) => {
+    let requesterId: string | undefined;
+    const response = await this.dataSource.transaction(async (manager) => {
       const requestRepo = manager.getRepository(SpaceJoinRequest);
       const request = await requestRepo
         .createQueryBuilder('r')
@@ -449,6 +462,7 @@ export class SpacesService {
       request.responded_at = new Date();
       request.responded_by_user_id = userId;
       await requestRepo.save(request);
+      requesterId = request.user_id;
 
       if (approve) {
         const memberRepo = manager.getRepository(SpaceMember);
@@ -476,6 +490,46 @@ export class SpacesService {
       });
       return SpaceJoinRequestResponseDto.fromEntity(withUser!);
     });
+
+    // After commit: a rolled-back response must never notify.
+    if (requesterId) {
+      void this.notificationsService.notify({
+        recipientUserId: requesterId,
+        actorUserId: userId,
+        type: 'space_join_response',
+        entity: { type: 'space', id: spaceId },
+        data: { approved: String(approve) },
+      });
+    }
+    return response;
+  }
+
+  /**
+   * Fire-and-forget fan-out of a new group message to every other active
+   * member. One unread notification per space and member at most: a burst
+   * of messages refreshes it instead of stacking (NotificationsService).
+   */
+  private async notifySpaceMembers(
+    spaceId: string,
+    senderId: string,
+  ): Promise<void> {
+    try {
+      const members = await this.memberRepo.find({
+        where: { space_id: spaceId, is_active: true },
+      });
+      await this.notificationsService.notifyMany(
+        members.map((m) => m.user_id).filter((id) => id !== senderId),
+        {
+          actorUserId: senderId,
+          type: 'space_message',
+          entity: { type: 'space', id: spaceId },
+        },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `notification fan-out failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   private async getActiveSpaceOrThrow(spaceId: string): Promise<Space> {

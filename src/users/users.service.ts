@@ -68,10 +68,9 @@ export class UsersService {
   /**
    * Bloque 1, admin-only — deactivates the target account (reuses the existing
    * `is_active` flag; never a hard delete, same convention `SpacesService.remove`'s
-   * soft-delete already uses). Blocks future logins (see AuthService.login); an
-   * already-issued JWT for this user stays valid until it naturally expires — there is
-   * no per-request DB lookup of the caller in JwtAuthGuard to revoke it earlier than
-   * that (a deliberate, existing perf tradeoff, not something this feature changes).
+   * soft-delete already uses). Blocks future logins (see AuthService.login), and
+   * JwtAuthGuard rejects the user's already-issued JWTs within ~30 s (its cached
+   * per-user account check), which makes the app sign them out.
    */
   async banUser(targetUserId: string): Promise<{ message: string }> {
     const user = await this.userRepo.findOne({ where: { id: targetUserId } });
@@ -624,6 +623,9 @@ export class UsersService {
       .createQueryBuilder('cu')
       .leftJoinAndSelect('cu.challenge', 'challenge')
       .where('cu.user_id = :userId', { userId })
+      // B4: a challenge its creator deleted no longer lists (the membership
+      // row itself is preserved as history).
+      .andWhere('challenge.is_active = true')
       .orderBy('cu.joined_at', 'DESC')
       .getMany();
 

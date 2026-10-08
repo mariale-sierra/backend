@@ -1,5 +1,6 @@
 import {
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -170,5 +171,25 @@ export class WorkoutPostsController {
       challengeId,
       user.sub,
     );
+  }
+
+  @Delete(':id')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID UUID del post' })
+  @ApiOperation({
+    summary: 'Eliminar un post propio',
+    description:
+      'Soft delete (is_active = false) de un post del usuario autenticado. Conserva comentarios, reacciones y el workout log asociado; el post deja de aparecer en feed, perfil, galería y mosaico.',
+  })
+  @ApiResponse({ status: 200, description: 'Post eliminado' })
+  @ApiResponse({ status: 400, description: 'ID inválido' })
+  @ApiResponse({ status: 401, description: 'No autorizado' })
+  @ApiResponse({ status: 403, description: 'El post no te pertenece' })
+  @ApiResponse({ status: 404, description: 'Post no encontrado' })
+  remove(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.workoutPostsService.remove(id, user.sub);
   }
 }

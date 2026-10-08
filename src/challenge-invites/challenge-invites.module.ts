@@ -7,6 +7,7 @@ import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
 import { User } from '../users/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { AuthModule } from '../auth/auth.module';
       User,
     ]),
     AuthModule,
+    NotificationsModule,
   ],
   controllers: [ChallengeInvitesController],
   providers: [ChallengeInvitesService],
