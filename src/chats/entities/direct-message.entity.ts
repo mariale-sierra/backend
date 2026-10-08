@@ -14,7 +14,7 @@ import { User } from '../../users/entities/user.entity';
  * 2026-09-01-01-add-direct-messages-read-status.sql on top of the
  * pre-existing init-schema table — a message is unread while it's NULL.
  *
- * Shared content (Sprint 10, B5): a message may carry ONE optional
+ * Shared content (Sprint 9, B5): a message may carry ONE optional
  * reference next to its text — `workout_post_id` (pre-existing init-schema
  * column) or `challenge_id` (2026-10-07-01-add-direct-messages-challenge-id.sql).
  * Both are ON DELETE SET NULL, so the message survives its content.

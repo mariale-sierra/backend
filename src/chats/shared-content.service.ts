@@ -28,7 +28,7 @@ interface ChallengePreviewRow {
 }
 
 /**
- * Resolves the content shared inside direct messages (Sprint 10, B5) — kept
+ * Resolves the content shared inside direct messages (Sprint 9, B5) — kept
  * out of ChatsService so the conversation logic there doesn't grow SQL for
  * two other modules' tables. Every lookup is batched per page of messages.
  *

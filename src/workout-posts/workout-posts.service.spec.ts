@@ -800,6 +800,72 @@ describe('WorkoutPostsService', () => {
   // GET /workout-posts/user/:userId
   // ---------------------------------------------------------------------
   describe('getUserPosts', () => {
+    it('returns each post with what a feed card needs: author, challenge, reactions, comments, hashtags (B5)', async () => {
+      userRepo.findOne.mockResolvedValue({
+        id: OTHER_USER_ID,
+        is_active: true,
+      });
+      postRepo.manager.query
+        .mockResolvedValueOnce([
+          photoRow({
+            id: 'p-1',
+            user_id: OTHER_USER_ID,
+            user_avatar_url: 'https://example.com/me.jpg',
+            challenge_name: 'Reto de Agosto',
+          }),
+        ])
+        .mockResolvedValue([]);
+      reactionsService.getCountsForPosts.mockResolvedValue(
+        new Map([['p-1', 4]]),
+      );
+      reactionsService.getReactedPostIds.mockResolvedValue(new Set(['p-1']));
+      reactionsService.getRecentReactorsForPosts.mockResolvedValue(
+        new Map([
+          [
+            'p-1',
+            [
+              {
+                id: 'u-9',
+                username: 'bob',
+                displayName: null,
+                profileImageUrl: null,
+              },
+            ],
+          ],
+        ]),
+      );
+      commentsService.getCountsForPosts.mockResolvedValue(
+        new Map([['p-1', 2]]),
+      );
+      hashtagsService.getTagsForPosts.mockResolvedValue(
+        new Map([['p-1', ['legday']]]),
+      );
+
+      const { photos } = await service.getUserPosts(OTHER_USER_ID, VIEWER_ID, {
+        limit: 20,
+      });
+
+      expect(photos[0]).toEqual(
+        expect.objectContaining({
+          id: 'p-1',
+          userId: OTHER_USER_ID,
+          userAvatarUrl: 'https://example.com/me.jpg',
+          challengeName: 'Reto de Agosto',
+          postedAt: '2026-08-16T10:00:00.000Z',
+          likesCount: 4,
+          likedByMe: true,
+          commentsCount: 2,
+          hashtags: ['legday'],
+        }),
+      );
+      expect(photos[0].recentReactors).toHaveLength(1);
+      // Per viewer: the reacted/recent-reactor lookups get the VIEWER's id.
+      expect(reactionsService.getReactedPostIds).toHaveBeenCalledWith(
+        ['p-1'],
+        VIEWER_ID,
+      );
+    });
+
     it('should throw NotFoundException when the target user does not exist or is inactive', async () => {
       userRepo.findOne.mockResolvedValue(null);
 

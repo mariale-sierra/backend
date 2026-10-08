@@ -120,7 +120,7 @@ export class WorkoutPostReactionsService {
   }
 
   /**
-   * "Who reacted" (Sprint 10, B5): the reaction redesign shows people, not a
+   * "Who reacted" (Sprint 9, B5): the reaction redesign shows people, not a
    * number, so this lists them newest first. Same visibility gate as every
    * other reaction endpoint. Accounts that were deactivated drop out of the
    * list. Keyset-paginated on (created_at, user_id) like the Feed.

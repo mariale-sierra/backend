@@ -6,7 +6,7 @@ import {
 } from 'typeorm';
 
 /**
- * Maps to havit.hashtags (2026-10-07-02-create-hashtags.sql, Sprint 10 B5):
+ * Maps to havit.hashtags (2026-10-07-02-create-hashtags.sql, Sprint 9 B5):
  * one row per distinct tag, stored lowercase and without the leading '#'.
  * Rows are only written by HashtagsService.syncPostHashtags.
  */

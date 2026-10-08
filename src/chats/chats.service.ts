@@ -26,7 +26,7 @@ import {
   MAX_MESSAGES_LIMIT,
 } from './dto/messages-query.dto';
 
-/** What a message carries besides its text (Sprint 10, B5) — at most one. */
+/** What a message carries besides its text (Sprint 9, B5) — at most one. */
 export interface SharedContentInput {
   workoutPostId?: string;
   challengeId?: string;

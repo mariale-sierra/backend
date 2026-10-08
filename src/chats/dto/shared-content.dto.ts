@@ -2,7 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { ConversationParticipantDto } from './conversation-participant.dto';
 
 /**
- * Preview of a workout post shared inside a message (Sprint 10, B5), resolved
+ * Preview of a workout post shared inside a message (Sprint 9, B5), resolved
  * per VIEWER: `available` is false when the post was deleted/hidden or the
  * viewer can't see it (private post, followers-only post of someone they
  * don't follow, private challenge) — then every other field is null and the
@@ -29,7 +29,7 @@ export class SharedPostPreviewDto {
 }
 
 /**
- * Preview of a challenge shared inside a message (Sprint 10, B5). Challenge
+ * Preview of a challenge shared inside a message (Sprint 9, B5). Challenge
  * detail is readable by any authenticated user (ChallengesService.findOne),
  * so `available` is only false once its owner deleted it.
  */

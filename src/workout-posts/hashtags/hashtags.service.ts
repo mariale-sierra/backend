@@ -4,7 +4,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { extractHashtags } from './hashtag.util';
 
 /**
- * #hashtags on workout posts (Sprint 10, B5). Tags live in their own tables
+ * #hashtags on workout posts (Sprint 9, B5). Tags live in their own tables
  * (havit.hashtags + havit.workout_post_hashtags) rather than a text column on
  * workout_posts, so a later "posts with #tag" search/grouping is an indexed
  * join — this sprint only stores and returns them.

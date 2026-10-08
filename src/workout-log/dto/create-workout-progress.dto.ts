@@ -8,7 +8,7 @@ import {
   MaxLength,
 } from 'class-validator';
 
-/** Same cap as the app's caption field (Sprint 10, B5 — captions now carry
+/** Same cap as the app's caption field (Sprint 9, B5 — captions now carry
  * #hashtags, so the app finally has a caption input). */
 const MAX_CAPTION_LENGTH = 500;
 

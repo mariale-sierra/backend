@@ -27,6 +27,23 @@ export interface ChallengePhoto {
   visibility: 'public' | 'private';
   metrics: Array<{ label: string; value: string }>;
   description: string;
+  // Sprint 9, B5 — enough to show a profile/gallery photo as a full feed post
+  // (react, comment, share) instead of a read-only photo. Same batched
+  // lookups as the Feed (one query each per page).
+  userId: string;
+  userAvatarUrl: string | null;
+  challengeName: string | null;
+  postedAt: string;
+  likesCount: number;
+  likedByMe: boolean;
+  commentsCount: number;
+  recentReactors: Array<{
+    id: string;
+    username: string;
+    displayName: string | null;
+    profileImageUrl: string | null;
+  }>;
+  hashtags: string[];
 }
 
 /** Wire contract GET /feed must return exactly (frontend/types/feed.ts
@@ -51,7 +68,7 @@ export interface FeedPostContract {
   /** Comment count — see WorkoutPostCommentsService (Bloque 3). */
   comments_count?: number;
   /** Up to 3 people who reacted (followed users first, never the viewer) —
-   * the reaction redesign (Sprint 10, B5) shows who, not how many. */
+   * the reaction redesign (Sprint 9, B5) shows who, not how many. */
   recent_reactors?: Array<{
     id: string;
     username: string;
@@ -60,10 +77,16 @@ export interface FeedPostContract {
   }>;
   /** Hashtags parsed from the caption, lowercase, without '#' (B5). */
   hashtags?: string[];
+  /** What was logged with the photo (exercise + value) — same rows as a
+   * profile photo's `metrics` (B5: shown collapsed on the card). */
+  metrics?: Array<{ label: string; value: string }>;
 }
 
 interface PhotoRow {
   id: number | string;
+  user_id: string;
+  user_avatar_url: string | null;
+  challenge_name: string | null;
   image_url: string | null;
   caption: string | null;
   visibility: string;
@@ -77,6 +100,7 @@ interface PhotoRow {
 
 interface FeedRow {
   id: number | string;
+  workout_log_id: number | string;
   user_id: string;
   image_url: string | null;
   caption: string | null;
@@ -575,7 +599,8 @@ export class WorkoutPostsService {
     const visibilityFilter = this.postVisibilityFilter(viewerParamIndex);
 
     const rows: PhotoRow[] = await this.repo.manager.query(
-      `SELECT p.id, p.image_url, p.caption, p.visibility, p.created_at,
+      `SELECT p.id, p.user_id, p.image_url, p.caption, p.visibility, p.created_at,
+              up.profile_image_url AS user_avatar_url, c.name AS challenge_name,
               ${supportsModeration ? 'p.moderation_status' : 'NULL AS moderation_status'},
               wl.challenge_id, p.workout_log_id,
               COALESCE(up.display_name, u.username) AS user_name,
@@ -592,7 +617,7 @@ export class WorkoutPostsService {
       params,
     );
 
-    return this.mapRowsToChallengePhotos(rows, timezone);
+    return this.mapRowsToChallengePhotos(rows, timezone, viewerId);
   }
 
   /** Shared row -> ChallengePhoto enrichment (metrics batch + day calc) used
@@ -601,26 +626,52 @@ export class WorkoutPostsService {
   private async mapRowsToChallengePhotos(
     rows: PhotoRow[],
     timezone: string,
+    viewerId: string,
   ): Promise<ChallengePhoto[]> {
     if (rows.length === 0) return [];
 
-    const metricsByLog = await this.metricsByWorkoutLog(
-      rows.map((r) => r.workout_log_id),
-    );
+    const postIds = rows.map((r) => String(r.id));
+    const [
+      metricsByLog,
+      likesCountByPost,
+      commentsCountByPost,
+      reactedPostIds,
+      recentReactorsByPost,
+      hashtagsByPost,
+    ] = await Promise.all([
+      this.metricsByWorkoutLog(rows.map((r) => r.workout_log_id)),
+      this.reactionsService.getCountsForPosts(postIds),
+      this.commentsService.getCountsForPosts(postIds),
+      this.reactionsService.getReactedPostIds(postIds, viewerId),
+      this.reactionsService.getRecentReactorsForPosts(postIds, viewerId),
+      this.hashtagsService.getTagsForPosts(postIds),
+    ]);
 
-    return rows.map((r) => ({
-      id: String(r.id),
-      challengeId: r.challenge_id,
-      userName: r.user_name,
-      imageUrl: r.image_url,
-      day: this.dayFromJoinedAt(r.joined_at, r.created_at, timezone),
-      // Post visibility is 'private' | 'followers' | 'public'; the gallery
-      // model only distinguishes 'private' | 'public' (followers-visible
-      // reads as public here, same as an actual public post).
-      visibility: r.visibility === 'private' ? 'private' : 'public',
-      metrics: metricsByLog.get(String(r.workout_log_id)) ?? [],
-      description: r.caption ?? '',
-    }));
+    return rows.map((r) => {
+      const id = String(r.id);
+      return {
+        id,
+        challengeId: r.challenge_id,
+        userName: r.user_name,
+        imageUrl: r.image_url,
+        day: this.dayFromJoinedAt(r.joined_at, r.created_at, timezone),
+        // Post visibility is 'private' | 'followers' | 'public'; the gallery
+        // model only distinguishes 'private' | 'public' (followers-visible
+        // reads as public here, same as an actual public post).
+        visibility: r.visibility === 'private' ? 'private' : 'public',
+        metrics: metricsByLog.get(String(r.workout_log_id)) ?? [],
+        description: r.caption ?? '',
+        userId: r.user_id,
+        userAvatarUrl: r.user_avatar_url ?? null,
+        challengeName: r.challenge_name ?? null,
+        postedAt: new Date(r.created_at).toISOString(),
+        likesCount: likesCountByPost.get(id) ?? 0,
+        likedByMe: reactedPostIds.has(id),
+        commentsCount: commentsCountByPost.get(id) ?? 0,
+        recentReactors: recentReactorsByPost.get(id) ?? [],
+        hashtags: hashtagsByPost.get(id) ?? [],
+      };
+    });
   }
 
   /**
@@ -691,7 +742,8 @@ export class WorkoutPostsService {
     const limitParamIndex = params.length;
 
     const rows: PhotoRow[] = await this.repo.manager.query(
-      `SELECT p.id, p.image_url, p.caption, p.visibility, p.created_at,
+      `SELECT p.id, p.user_id, p.image_url, p.caption, p.visibility, p.created_at,
+              up.profile_image_url AS user_avatar_url, c.name AS challenge_name,
               ${supportsModeration ? 'p.moderation_status' : 'NULL AS moderation_status'},
               wl.challenge_id, p.workout_log_id,
               COALESCE(up.display_name, u.username) AS user_name,
@@ -712,7 +764,11 @@ export class WorkoutPostsService {
     const hasNextPage = rows.length > options.limit;
     const pageRows = hasNextPage ? rows.slice(0, options.limit) : rows;
 
-    const photos = await this.mapRowsToChallengePhotos(pageRows, timezone);
+    const photos = await this.mapRowsToChallengePhotos(
+      pageRows,
+      timezone,
+      viewerId,
+    );
 
     const last = pageRows[pageRows.length - 1];
     const nextCursor =
@@ -895,6 +951,9 @@ export class WorkoutPostsService {
       ),
       this.hashtagsService.getTagsForPosts(postIds),
     ]);
+    const metricsByLog = await this.metricsByWorkoutLog(
+      pageRows.map((r) => r.workout_log_id),
+    );
 
     const posts: FeedPostContract[] = pageRows.map((r) => {
       const id = String(r.id);
@@ -926,6 +985,7 @@ export class WorkoutPostsService {
           avatar_url: r.profileImageUrl,
         })),
         hashtags: hashtagsByPost.get(id) ?? [],
+        metrics: metricsByLog.get(String(r.workout_log_id)) ?? [],
       };
     });
 
