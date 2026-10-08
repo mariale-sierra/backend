@@ -359,6 +359,15 @@ describe('WorkoutPostsService', () => {
       expect(sql).toContain("c.visibility != 'private'");
     });
 
+    it('should exclude posts whose challenge was deleted by its creator (B4 soft delete)', async () => {
+      postRepo.manager.query.mockResolvedValue([]);
+
+      await service.getFeed({ limit: 20, viewerId: VIEWER_ID });
+
+      const [sql] = postRepo.manager.query.mock.calls[0] as [string];
+      expect(sql).toContain('c.is_active = true');
+    });
+
     it('should never populate activity_type (no unambiguous source exists)', async () => {
       postRepo.manager.query.mockResolvedValue([feedRow()]);
 

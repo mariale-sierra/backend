@@ -778,6 +778,11 @@ export class WorkoutPostsService {
    * never surface as public content, and Feed has no per-viewer context in
    * which to make a membership exception).
    *
+   * A post whose challenge its creator deleted (B4 soft delete,
+   * `challenges.is_active = false`) never appears either — every other read
+   * treats a deleted challenge as nonexistent, and the feed card links to
+   * the post's challenge (B5), which would otherwise open a 404.
+   *
    * The JOIN to `challenges` is intentionally an INNER JOIN, so a post whose
    * workout_log has no challenge_id would silently be excluded here. That's
    * safe today only because every current post-creation path requires a
@@ -842,6 +847,7 @@ export class WorkoutPostsService {
          AND p.is_hidden = false
          AND p.is_active = true
          AND c.visibility != 'private'
+         AND c.is_active = true
          ${cursorFilter}
        ORDER BY p.created_at DESC, p.id DESC
        LIMIT $${limitParamIndex}`,
