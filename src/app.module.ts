@@ -99,8 +99,15 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
       synchronize: false,
       // Azure Postgres requires TLS (default). A local Postgres container does
       // not speak SSL, so set DB_SSL=false to disable it for local dev only.
+      // Behind PgBouncer (DB_POOL_HOST set) the app talks to the pooler over
+      // the private Docker network and the pooler has no client-side TLS
+      // ("The server does not support SSL connections" otherwise — found
+      // when first enabling it on the VM). The pooler -> Azure hop stays
+      // TLS (SERVER_TLS_SSLMODE=require in raiz/docker-compose.yml). Set
+      // DB_POOL_SSL=true only if the pooler is given client certificates.
       ssl:
-        process.env.DB_SSL === 'false'
+        process.env.DB_SSL === 'false' ||
+        (process.env.DB_POOL_HOST && process.env.DB_POOL_SSL !== 'true')
           ? false
           : {
               // Cert verification stays off by default (matches current
