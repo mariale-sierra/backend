@@ -93,3 +93,41 @@ instance:
    are a conservative starting point for a single-instance deployment —
    **revisit once step 1 is done**, especially before running more than one
    `backend` instance behind a load balancer.
+
+## Rollout on the VM (2026-10-11) — two real problems and their fixes
+
+Enabling `DB_POOL_HOST=pgbouncer` / `DB_POOL_PORT=6432` in
+`/home/azureuser/raiz/.env` against the real Azure Postgres failed twice
+before working; neither problem showed up in the local validation run.
+
+1. **`The server does not support SSL connections`** (backend -> pooler).
+   `app.module.ts` always asked `pg` for TLS, but PgBouncer has no
+   client-side TLS on the private Docker network. Fix (backend
+   `7d506a2`): when `DB_POOL_HOST` is set, TLS is off for the app -> pooler
+   hop only (override with `DB_POOL_SSL=true`); the pooler -> Azure hop stays
+   TLS via `SERVER_TLS_SSLMODE=require`. Do NOT use `DB_SSL=false` for this:
+   it also reaches `database/scripts/migrate.js`, which connects straight to
+   Azure and needs TLS.
+2. **`cannot do SCRAM authentication: wrong password type`** (pooler ->
+   Azure). Azure authenticates with SCRAM-SHA-256, but the
+   `edoburu/pgbouncer` entrypoint defaults to `AUTH_TYPE=md5` and writes only
+   an MD5 hash into `userlist.txt`, which cannot answer a SCRAM challenge.
+   Fix (raiz `cfc1646`): `AUTH_TYPE: scram-sha-256`, which makes the
+   entrypoint keep the plain password in `userlist.txt` (inside the pooler
+   container only; same exposure as `DATABASE_URL`). The local run missed
+   this because the local Postgres used a different auth method.
+
+Checked after the fix: `GET /` and `GET /exercises/count` answer 200 through
+the pool; PgBouncer logs `new connection to server ... SSL established:
+TLSv1.3`; 30 concurrent requests left Azure with 3 idle server connections.
+Note `/exercises/count` is Redis-cached, so this shows the path works, not
+the multiplexing ratio under real load.
+
+Rollback: restore the `.env` without the two `DB_POOL_*` lines and run
+`docker-compose down && docker-compose up -d` (the VM has docker-compose v1;
+`down` + `up`, never an in-place recreate). The two lines are NOT in git —
+if the server is rebuilt they must be added again.
+
+Azure `max_connections` is 50 (about 35 usable) and was left unchanged;
+revisit the `DEFAULT_POOL_SIZE` sizing formula above only with 2+ backend
+instances.
