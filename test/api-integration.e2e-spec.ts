@@ -276,4 +276,58 @@ describeDb('API integration & regression (real Postgres)', () => {
         .expect(400);
     });
   });
+
+  // R4 — GET /challenges/:id devolvía los ejercicios de cada día del ciclo
+  // sin ORDER BY routine_exercises.order_index, en un orden arbitrario
+  // distinto al de la rutina (p. ej. [10, 9, 11] para una rutina [9, 11, 10]).
+  describe('R4 regresión: el detalle del reto respeta el orden de la rutina', () => {
+    it('cycle_days[].exercises sale ordenado por order_index y es determinístico', async () => {
+      const user = await registerAndLogin();
+      const challengeId = await createChallenge(user.userId);
+      const [{ id: routineId }] = await ds.query(
+        `INSERT INTO havit.routines (created_by_user_id, name)
+         VALUES ($1, 'r4 routine') RETURNING id`,
+        [user.userId],
+      );
+      // Insertados en un orden distinto a order_index, cada uno con sets.
+      const rows: Array<[number, number]> = [
+        [10, 3],
+        [9, 1],
+        [12, 4],
+        [11, 2],
+      ];
+      for (const [exerciseId, orderIndex] of rows) {
+        const [{ id: reId }] = await ds.query(
+          `INSERT INTO havit.routine_exercises (routine_id, exercise_id, order_index)
+           VALUES ($1, $2, $3) RETURNING id`,
+          [routineId, exerciseId, orderIndex],
+        );
+        for (const setNumber of [2, 1]) {
+          await ds.query(
+            `INSERT INTO havit.routine_exercise_sets (routine_exercise_id, set_number)
+             VALUES ($1, $2)`,
+            [reId, setNumber],
+          );
+        }
+      }
+      await ds.query(
+        `INSERT INTO havit.challenge_cycle_days (challenge_id, day_in_cycle, routine_id, day_type)
+         VALUES ($1, 1, $2, 'workout')`,
+        [challengeId, routineId],
+      );
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const res = await http().get(`/challenges/${challengeId}`).expect(200);
+        const [day] = res.body.cycle_days;
+        expect(
+          day.exercises.map((e: { exercise_id: number }) => e.exercise_id),
+        ).toEqual([9, 11, 10, 12]);
+        for (const exercise of day.exercises) {
+          expect(
+            exercise.sets.map((s: { set_number: number }) => s.set_number),
+          ).toEqual([1, 2]);
+        }
+      }
+    });
+  });
 });

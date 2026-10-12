@@ -638,6 +638,9 @@ export class ChallengesService {
       .leftJoinAndSelect('targets.metricType', 'targetMetricType')
       .where('cycleDay.challenge_id = :challengeId', { challengeId })
       .orderBy('cycleDay.day_in_cycle', 'ASC')
+      // Without this the exercises came back in arbitrary join order, not
+      // the routine's own order (getTodayRoutine already sorts the same way).
+      .addOrderBy('routineExercise.order_index', 'ASC')
       .addOrderBy('sets.set_number', 'ASC')
       .getMany();
 
