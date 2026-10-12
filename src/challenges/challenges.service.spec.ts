@@ -1210,6 +1210,43 @@ describe('ChallengesService', () => {
       ).rejects.toThrow(ForbiddenException);
       expect(dataSource.transaction).not.toHaveBeenCalled();
     });
+
+    // B8: approving joins the requester, and no one can join a closed challenge.
+    it('should refuse to approve a request while the challenge is closed', async () => {
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        status: 'closed',
+      });
+
+      await expect(
+        service.respondToChallengeJoinRequest(
+          OWNER_ID,
+          CHALLENGE_ID,
+          'request-1',
+          true,
+        ),
+      ).rejects.toThrow('This challenge is closed');
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('should still let the owner reject a request while the challenge is closed', async () => {
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        status: 'closed',
+      });
+      const { userMapRepo } = mockTransaction({
+        request: { ...PENDING_REQUEST },
+      });
+
+      await service.respondToChallengeJoinRequest(
+        OWNER_ID,
+        CHALLENGE_ID,
+        'request-1',
+        false,
+      );
+
+      expect(userMapRepo.save).not.toHaveBeenCalled();
+    });
   });
 
   describe('removeChallengeParticipant', () => {

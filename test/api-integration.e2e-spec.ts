@@ -604,5 +604,63 @@ describeDb('API integration & regression (real Postgres)', () => {
         .send({ challengeId, isRestDay: true })
         .expect(409);
     });
+
+    // "Nadie podrá unirse una vez cerrado" — aprobar una solicitud es unir a
+    // alguien, así que el dueño no puede hacerlo con el reto cerrado; sí
+    // puede rechazarla. Al reactivar, la misma solicitud se aprueba.
+    it('un reto cerrado no admite aprobar solicitudes de ingreso, solo rechazarlas', async () => {
+      const owner = await signUp();
+      const first = await signUp();
+      const second = await signUp();
+      const admin = await signUp();
+      await makeAdmin(admin.userId);
+      const ownerAuth = { Authorization: `Bearer ${owner.token}` };
+      const adminAuth = { Authorization: `Bearer ${admin.token}` };
+      const challengeId = randomUUID();
+      await ds.query(
+        `INSERT INTO havit.challenges (id, name, visibility, created_by_user_id, duration_days, status)
+         VALUES ($1, 'it private', 'private', $2, 30, 'open')`,
+        [challengeId, owner.userId],
+      );
+      for (const user of [first, second]) {
+        await http()
+          .post(`/challenges/${challengeId}/join`)
+          .set({ Authorization: `Bearer ${user.token}` })
+          .expect(201);
+      }
+      const pending = await http()
+        .get(`/challenges/${challengeId}/join-requests`)
+        .set(ownerAuth)
+        .expect(200);
+      const requestOf = (userId: string) =>
+        pending.body.find((r: { user: { id: string } }) => r.user.id === userId)
+          .id as string;
+      const respond = (userId: string, action: 'approve' | 'reject') =>
+        http()
+          .post(
+            `/challenges/${challengeId}/join-requests/${requestOf(userId)}/${action}`,
+          )
+          .set(ownerAuth);
+      const members = () =>
+        ds.query(
+          `SELECT user_id FROM havit.challenge_user_map WHERE challenge_id = $1`,
+          [challengeId],
+        );
+
+      await http()
+        .patch(`/challenges/${challengeId}/close`)
+        .set(adminAuth)
+        .expect(200);
+      await respond(first.userId, 'approve').expect(400);
+      expect(await members()).toEqual([]);
+      await respond(second.userId, 'reject').expect(201);
+
+      await http()
+        .patch(`/challenges/${challengeId}/reopen`)
+        .set(adminAuth)
+        .expect(200);
+      await respond(first.userId, 'approve').expect(201);
+      expect(await members()).toEqual([{ user_id: first.userId }]);
+    });
   });
 });

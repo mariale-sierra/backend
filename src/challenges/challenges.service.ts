@@ -1071,6 +1071,11 @@ export class ChallengesService {
       userId,
       'Only the owner can respond to join requests',
     );
+    // Approving adds a member, and no one can join a closed challenge (same
+    // rule joinChallenge enforces). Rejecting stays allowed.
+    if (approve && challenge.status === 'closed') {
+      throw new BadRequestException('This challenge is closed');
+    }
 
     let requesterId: string | undefined;
     const response = await this.dataSource.transaction(async (manager) => {
