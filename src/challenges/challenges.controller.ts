@@ -374,6 +374,23 @@ export class ChallengesController {
     return this.challengesService.closeChallenge(id);
   }
 
+  @Patch(':id/reopen')
+  @UseGuards(AdminGuard)
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiOperation({
+    summary: 'Reactivar desafío cerrado (admin)',
+    description:
+      'Inverso de cerrar: vuelve a aceptar ingresos y progreso nuevo. No toca participantes, solicitudes, rutinas, historial ni fechas. Solo administradores.',
+  })
+  @ApiOkResponse({ description: 'Desafío reactivado' })
+  @ApiResponse({ status: 400, description: 'El desafío no está cerrado' })
+  @ApiForbiddenResponse({ description: 'Solo administradores' })
+  @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
+  reopenChallenge(@Param('id', ParseUUIDPipe) id: string) {
+    return this.challengesService.reopenChallenge(id);
+  }
+
   @Public()
   @Get(':id/author')
   @ApiParam({ name: 'id', description: 'ID del desafío' })

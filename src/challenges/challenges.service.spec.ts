@@ -439,6 +439,7 @@ describe('ChallengesService', () => {
           ),
       ],
       ['closeChallenge', () => service.closeChallenge(CHALLENGE_ID)],
+      ['reopenChallenge', () => service.reopenChallenge(CHALLENGE_ID)],
       [
         'updateCycleDay',
         () =>
@@ -1324,6 +1325,43 @@ describe('ChallengesService', () => {
       challengeRepo.findOne.mockResolvedValue(null);
 
       await expect(service.closeChallenge(CHALLENGE_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('reopenChallenge', () => {
+    it('should reopen a closed challenge, changing nothing but its status', async () => {
+      const challenge = { ...baseChallenge(), status: 'closed' };
+      challengeRepo.findOne.mockResolvedValue(challenge);
+      challengeRepo.save.mockImplementation((c: object) => Promise.resolve(c));
+
+      const result = await service.reopenChallenge(CHALLENGE_ID);
+
+      expect(challengeRepo.save).toHaveBeenCalledWith({
+        ...baseChallenge(),
+        status: 'open',
+      });
+      expect(challengeUserMapRepo.save).not.toHaveBeenCalled();
+      expect(result.message).toBe('Challenge reopened successfully');
+    });
+
+    it('should reject reopening a challenge that is not closed', async () => {
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        status: 'open',
+      });
+
+      await expect(service.reopenChallenge(CHALLENGE_ID)).rejects.toThrow(
+        'Challenge is not closed',
+      );
+      expect(challengeRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should throw NotFoundException when the challenge does not exist', async () => {
+      challengeRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.reopenChallenge(CHALLENGE_ID)).rejects.toThrow(
         NotFoundException,
       );
     });

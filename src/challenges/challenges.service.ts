@@ -1215,6 +1215,29 @@ export class ChallengesService {
   }
 
   /**
+   * Admin-only (AdminGuard at the controller, like closeChallenge): the exact
+   * inverse of closing. Closing only ever flips `status` — it never touches
+   * memberships, join requests, cycle days, routines, workout logs or any
+   * date — so reopening only flips it back: joining and logging progress are
+   * accepted again and everything recorded before and during the close is
+   * kept as it was.
+   */
+  async reopenChallenge(challengeId: string): Promise<{ message: string }> {
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId, is_active: true },
+    });
+    if (!challenge) throw new NotFoundException('Challenge not found');
+    if (challenge.status !== 'closed') {
+      throw new BadRequestException('Challenge is not closed');
+    }
+
+    challenge.status = 'open';
+    await this.challengeRepo.save(challenge);
+    await this.cache.bumpVersion(CACHE_NAMESPACE);
+    return { message: 'Challenge reopened successfully' };
+  }
+
+  /**
    * Fire-and-forget: everyone still in the challenge plus its creator. No
    * actor — it's an admin action, and which admin did it isn't shown.
    */

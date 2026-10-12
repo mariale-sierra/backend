@@ -506,4 +506,103 @@ describeDb('API integration & regression (real Postgres)', () => {
       ]);
     });
   });
+
+  // R6 — B8: cerrar y reactivar son acciones de administrador de la
+  // plataforma (AdminGuard), no del dueño del reto. Reactivar es el inverso
+  // exacto de cerrar: solo cambia status y no toca membresías ni historial.
+  describe('R6 regresión: cerrar y reactivar un reto (solo admin)', () => {
+    const makeAdmin = (userId: string) =>
+      ds.query(`UPDATE havit.users SET is_admin = true WHERE id = $1`, [
+        userId,
+      ]);
+
+    it('cada rol recibe la respuesta esperada al reactivar', async () => {
+      const owner = await signUp();
+      const participant = await signUp();
+      const admin = await signUp();
+      await makeAdmin(admin.userId);
+      const as = (u: { token: string }) => ({
+        Authorization: `Bearer ${u.token}`,
+      });
+      const challengeId = await createChallenge(owner.userId, 'closed');
+      const reopen = () => http().patch(`/challenges/${challengeId}/reopen`);
+
+      await reopen().expect(401);
+      await reopen().set(as(participant)).expect(403);
+      await reopen().set(as(owner)).expect(403);
+      await http()
+        .patch(`/challenges/${randomUUID()}/reopen`)
+        .set(as(admin))
+        .expect(404);
+      await reopen().set(as(admin)).expect(200);
+      await reopen().set(as(admin)).expect(400);
+
+      // Un dueño que además es admin actúa como admin.
+      await makeAdmin(owner.userId);
+      await http()
+        .patch(`/challenges/${challengeId}/close`)
+        .set(as(owner))
+        .expect(200);
+      await reopen().set(as(owner)).expect(200);
+    });
+
+    it('reactivar conserva miembros e historial y vuelve a aceptar ingresos y progreso', async () => {
+      const owner = await signUp();
+      const member = await signUp();
+      const newcomer = await signUp();
+      const admin = await signUp();
+      await makeAdmin(admin.userId);
+      const challengeId = await createChallenge(owner.userId);
+      const memberAuth = { Authorization: `Bearer ${member.token}` };
+      const newcomerAuth = { Authorization: `Bearer ${newcomer.token}` };
+      const adminAuth = { Authorization: `Bearer ${admin.token}` };
+
+      await http()
+        .post(`/challenges/${challengeId}/join`)
+        .set(memberAuth)
+        .expect(201);
+      await http()
+        .post('/workout-logs/progress')
+        .set(memberAuth)
+        .send({ challengeId, isRestDay: true })
+        .expect(201);
+      const snapshot = () =>
+        ds.query(
+          `SELECT
+             (SELECT json_agg(json_build_object('u', user_id, 's', status, 'j', joined_at) ORDER BY user_id)
+                FROM havit.challenge_user_map WHERE challenge_id = $1) AS members,
+             (SELECT json_agg(id ORDER BY id)
+                FROM havit.workout_logs WHERE challenge_id = $1) AS logs`,
+          [challengeId],
+        );
+      const before = await snapshot();
+
+      await http()
+        .patch(`/challenges/${challengeId}/close`)
+        .set(adminAuth)
+        .expect(200);
+      await http()
+        .post(`/challenges/${challengeId}/join`)
+        .set(newcomerAuth)
+        .expect(400);
+      await http()
+        .patch(`/challenges/${challengeId}/reopen`)
+        .set(adminAuth)
+        .expect(200);
+
+      expect(await snapshot()).toEqual(before);
+      const detail = await http().get(`/challenges/${challengeId}`).expect(200);
+      expect(detail.body.status).toBe('open');
+      await http()
+        .post(`/challenges/${challengeId}/join`)
+        .set(newcomerAuth)
+        .expect(201);
+      // B5 intacto: el progreso de hoy ya existe, así que sigue siendo 409.
+      await http()
+        .post('/workout-logs/progress')
+        .set(memberAuth)
+        .send({ challengeId, isRestDay: true })
+        .expect(409);
+    });
+  });
 });
