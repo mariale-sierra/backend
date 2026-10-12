@@ -54,6 +54,29 @@ describeDb('API integration & regression (real Postgres)', () => {
     return { email, password, token, userId: id as string };
   };
 
+  // Igual que registerAndLogin pero sin pasar por POST /auth/login, que tiene
+  // su propio límite (10/min) que la suite completa superaría: el registro ya
+  // devuelve el token.
+  const signUp = async () => {
+    const tag = randomUUID().slice(0, 8);
+    const email = `it_${tag}@example.com`;
+    const res = await http()
+      .post('/auth/register')
+      .send({
+        email,
+        password: 'password123',
+        username: `it_${tag}`,
+        acceptTerms: true,
+        confirmAge16: true,
+      })
+      .expect(200);
+    const [{ id }] = await ds.query(
+      `SELECT id FROM havit.users WHERE email = $1`,
+      [email],
+    );
+    return { token: res.body.accessToken as string, userId: id as string };
+  };
+
   const createChallenge = async (ownerId: string, status = 'open') => {
     const id = randomUUID();
     await ds.query(
@@ -282,7 +305,7 @@ describeDb('API integration & regression (real Postgres)', () => {
   // distinto al de la rutina (p. ej. [10, 9, 11] para una rutina [9, 11, 10]).
   describe('R4 regresión: el detalle del reto respeta el orden de la rutina', () => {
     it('cycle_days[].exercises sale ordenado por order_index y es determinístico', async () => {
-      const user = await registerAndLogin();
+      const user = await signUp();
       const challengeId = await createChallenge(user.userId);
       const [{ id: routineId }] = await ds.query(
         `INSERT INTO havit.routines (created_by_user_id, name)
@@ -328,6 +351,159 @@ describeDb('API integration & regression (real Postgres)', () => {
           ).toEqual([1, 2]);
         }
       }
+    });
+  });
+
+  // R5 — Quien abandonaba un reto (status 'left') recibía para siempre
+  // "Already joined this challenge": la fila se conserva como historial y la
+  // PK (challenge_id, user_id) impide otra. El reingreso reactiva esa fila.
+  describe('R5 regresión: volver a unirse tras abandonar', () => {
+    const membership = (challengeId: string, userId: string) =>
+      ds.query(
+        `SELECT status FROM havit.challenge_user_map
+         WHERE challenge_id = $1 AND user_id = $2`,
+        [challengeId, userId],
+      );
+
+    it('join, join duplicado, leave y rejoin dejan una sola membresía activa', async () => {
+      const owner = await signUp();
+      const user = await signUp();
+      const auth = { Authorization: `Bearer ${user.token}` };
+      const challengeId = await createChallenge(owner.userId);
+
+      await http()
+        .post(`/challenges/${challengeId}/join`)
+        .set(auth)
+        .expect(201);
+      await http()
+        .post(`/challenges/${challengeId}/join`)
+        .set(auth)
+        .expect(400);
+      await http()
+        .patch(`/challenges/${challengeId}/leave`)
+        .set(auth)
+        .expect(200);
+      expect(await membership(challengeId, user.userId)).toEqual([
+        { status: 'left' },
+      ]);
+
+      const rejoin = await http()
+        .post(`/challenges/${challengeId}/join`)
+        .set(auth)
+        .expect(201);
+      expect(rejoin.body.status).toBe('joined');
+      expect(await membership(challengeId, user.userId)).toEqual([
+        { status: 'active' },
+      ]);
+      await http()
+        .post(`/challenges/${challengeId}/join`)
+        .set(auth)
+        .expect(400);
+    });
+
+    it('un reto cerrado no admite el reingreso', async () => {
+      const owner = await signUp();
+      const user = await signUp();
+      const auth = { Authorization: `Bearer ${user.token}` };
+      const challengeId = await createChallenge(owner.userId);
+
+      await http()
+        .post(`/challenges/${challengeId}/join`)
+        .set(auth)
+        .expect(201);
+      await http()
+        .patch(`/challenges/${challengeId}/leave`)
+        .set(auth)
+        .expect(200);
+      await ds.query(
+        `UPDATE havit.challenges SET status = 'closed' WHERE id = $1`,
+        [challengeId],
+      );
+
+      await http()
+        .post(`/challenges/${challengeId}/join`)
+        .set(auth)
+        .expect(400);
+      expect(await membership(challengeId, user.userId)).toEqual([
+        { status: 'left' },
+      ]);
+    });
+
+    it('en un reto privado el reingreso vuelve a pasar por solicitud y aprobación', async () => {
+      const owner = await signUp();
+      const user = await signUp();
+      const auth = { Authorization: `Bearer ${user.token}` };
+      const ownerAuth = { Authorization: `Bearer ${owner.token}` };
+      const challengeId = randomUUID();
+      await ds.query(
+        `INSERT INTO havit.challenges (id, name, visibility, created_by_user_id, duration_days, status)
+         VALUES ($1, 'it private', 'private', $2, 30, 'open')`,
+        [challengeId, owner.userId],
+      );
+      const approveOnly = async () => {
+        const pending = await http()
+          .get(`/challenges/${challengeId}/join-requests`)
+          .set(ownerAuth)
+          .expect(200);
+        expect(pending.body).toHaveLength(1);
+        await http()
+          .post(
+            `/challenges/${challengeId}/join-requests/${pending.body[0].id}/approve`,
+          )
+          .set(ownerAuth)
+          .expect(201);
+      };
+
+      const first = await http()
+        .post(`/challenges/${challengeId}/join`)
+        .set(auth)
+        .expect(201);
+      expect(first.body.status).toBe('requested');
+      await approveOnly();
+      await http()
+        .patch(`/challenges/${challengeId}/leave`)
+        .set(auth)
+        .expect(200);
+
+      const again = await http()
+        .post(`/challenges/${challengeId}/join`)
+        .set(auth)
+        .expect(201);
+      expect(again.body.status).toBe('requested');
+      expect(await membership(challengeId, user.userId)).toEqual([
+        { status: 'left' },
+      ]);
+
+      await approveOnly();
+      expect(await membership(challengeId, user.userId)).toEqual([
+        { status: 'active' },
+      ]);
+    });
+
+    it('un usuario baneado no puede volver a unirse', async () => {
+      const owner = await signUp();
+      const user = await signUp();
+      const auth = { Authorization: `Bearer ${user.token}` };
+      const challengeId = await createChallenge(owner.userId);
+      // Membresía abandonada sembrada por SQL: el JwtAuthGuard reutiliza
+      // durante 30 s (SESSION_CHECK_TTL_MS) un "cuenta usable" ya visto, así
+      // que el baneo se prueba sin peticiones autenticadas previas.
+      await ds.query(
+        `INSERT INTO havit.challenge_user_map (challenge_id, user_id, role, status)
+         VALUES ($1, $2, 'participant', 'left')`,
+        [challengeId, user.userId],
+      );
+      await ds.query(`UPDATE havit.users SET is_active = false WHERE id = $1`, [
+        user.userId,
+      ]);
+
+      await http()
+        .post(`/challenges/${challengeId}/join`)
+        .set(auth)
+        .expect(401);
+      expect(await membership(challengeId, user.userId)).toEqual([
+        { status: 'left' },
+      ]);
     });
   });
 });

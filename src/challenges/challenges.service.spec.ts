@@ -600,6 +600,75 @@ describe('ChallengesService', () => {
       ).rejects.toThrow('Already joined this challenge');
     });
 
+    // Regression: a user who left used to get "Already joined" forever, since
+    // the left row (primary key challenge_id + user_id) is kept as history.
+    it('should reactivate the same row when a user who left joins again', async () => {
+      const leftRow = {
+        user_id: OTHER_USER_ID,
+        challenge_id: CHALLENGE_ID,
+        role: 'participant',
+        status: 'left',
+        joined_at: new Date('2026-09-01T00:00:00Z'),
+      };
+      userRepo.findOne.mockResolvedValue({ id: OTHER_USER_ID });
+      challengeRepo.findOne.mockResolvedValue(baseChallenge());
+      challengeUserMapRepo.findOne.mockResolvedValue(leftRow);
+      challengeUserMapRepo.save.mockImplementation((m: object) =>
+        Promise.resolve(m),
+      );
+
+      const result = await service.joinChallenge(OTHER_USER_ID, CHALLENGE_ID);
+
+      expect(result.status).toBe('joined');
+      expect(challengeUserMapRepo.create).not.toHaveBeenCalled();
+      expect(challengeUserMapRepo.save).toHaveBeenCalledTimes(1);
+      expect(challengeUserMapRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user_id: OTHER_USER_ID,
+          challenge_id: CHALLENGE_ID,
+          role: 'participant',
+          status: 'active',
+          joined_at: new Date('2026-09-01T00:00:00Z'),
+        }),
+      );
+    });
+
+    it.each(['active', 'completed'])(
+      'should still reject joining with a %s membership',
+      async (status) => {
+        userRepo.findOne.mockResolvedValue({ id: OTHER_USER_ID });
+        challengeRepo.findOne.mockResolvedValue(baseChallenge());
+        challengeUserMapRepo.findOne.mockResolvedValue({
+          user_id: OTHER_USER_ID,
+          challenge_id: CHALLENGE_ID,
+          status,
+        });
+
+        await expect(
+          service.joinChallenge(OTHER_USER_ID, CHALLENGE_ID),
+        ).rejects.toThrow('Already joined this challenge');
+        expect(challengeUserMapRepo.save).not.toHaveBeenCalled();
+      },
+    );
+
+    it('should not let a user who left a closed challenge back in', async () => {
+      userRepo.findOne.mockResolvedValue({ id: OTHER_USER_ID });
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        status: 'closed',
+      });
+      challengeUserMapRepo.findOne.mockResolvedValue({
+        user_id: OTHER_USER_ID,
+        challenge_id: CHALLENGE_ID,
+        status: 'left',
+      });
+
+      await expect(
+        service.joinChallenge(OTHER_USER_ID, CHALLENGE_ID),
+      ).rejects.toThrow('This challenge is closed');
+      expect(challengeUserMapRepo.save).not.toHaveBeenCalled();
+    });
+
     it('should throw NotFoundException when the challenge does not exist', async () => {
       userRepo.findOne.mockResolvedValue({ id: OTHER_USER_ID });
       challengeRepo.findOne.mockResolvedValue(null);
@@ -651,6 +720,31 @@ describe('ChallengesService', () => {
             status: 'pending',
           }),
         );
+        expect(challengeUserMapRepo.save).not.toHaveBeenCalled();
+      });
+
+      it('should make a user who left a private challenge request again, never rejoin directly', async () => {
+        userRepo.findOne.mockResolvedValue({ id: OTHER_USER_ID });
+        challengeRepo.findOne.mockResolvedValue({
+          ...baseChallenge(),
+          visibility: 'private',
+        });
+        challengeUserMapRepo.findOne.mockResolvedValue({
+          user_id: OTHER_USER_ID,
+          challenge_id: CHALLENGE_ID,
+          status: 'left',
+        });
+        challengeJoinRequestRepo.findOne.mockResolvedValue(null);
+        challengeJoinRequestRepo.create.mockImplementation((data: object) => ({
+          ...data,
+        }));
+        challengeJoinRequestRepo.save.mockImplementation((r: object) =>
+          Promise.resolve({ id: 'request-2', ...r }),
+        );
+
+        const result = await service.joinChallenge(OTHER_USER_ID, CHALLENGE_ID);
+
+        expect(result.status).toBe('requested');
         expect(challengeUserMapRepo.save).not.toHaveBeenCalled();
       });
 

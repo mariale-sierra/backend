@@ -946,10 +946,13 @@ export class ChallengesService {
       throw new BadRequestException('This challenge is closed');
     }
 
+    // A voluntary leave ('left', only ever written by leaveChallenge) is the
+    // one past membership that may come back in. Removal deletes the row and
+    // a ban is rejected at the JWT guard, so neither reaches this branch.
     const alreadyJoined = await this.challengeUserMapRepo.findOne({
       where: { user_id: userId, challenge_id: challengeId },
     });
-    if (alreadyJoined)
+    if (alreadyJoined && alreadyJoined.status !== 'left')
       throw new BadRequestException('Already joined this challenge');
 
     if (challenge.visibility === 'private') {
@@ -997,12 +1000,17 @@ export class ChallengesService {
       }
     }
 
-    const join = this.challengeUserMapRepo.create({
-      user_id: userId,
-      challenge_id: challengeId,
-      role: 'participant',
-      status: 'active',
-    });
+    // (challenge_id, user_id) is the primary key: a rejoin reactivates the
+    // same row, exactly like approving a join request does for an existing
+    // one (respondToChallengeJoinRequest), instead of inserting a duplicate.
+    const join = alreadyJoined
+      ? Object.assign(alreadyJoined, { status: 'active' as const })
+      : this.challengeUserMapRepo.create({
+          user_id: userId,
+          challenge_id: challengeId,
+          role: 'participant',
+          status: 'active',
+        });
 
     await this.challengeUserMapRepo.save(join);
     await this.cache.bumpVersion(CACHE_NAMESPACE);
