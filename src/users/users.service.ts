@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, ILike, In, IsNull, Not, Repository } from 'typeorm';
+import { BannedUserResponseDto } from './dto/banned-user-response.dto';
 import { User } from './entities/user.entity';
 import { UserProfile } from './entities/user-profile.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
@@ -94,6 +95,32 @@ export class UsersService {
     user.is_active = true;
     await this.userRepo.save(user);
     return { message: 'User unbanned successfully' };
+  }
+
+  /**
+   * Accounts an admin banned and can unban (B8): is_active = false is only
+   * ever written by banUser or by account deletion, and a deleted account
+   * also has deleted_at set — so this is exactly the banned ones. Without it
+   * a banned user was unreachable from the app (their public profile 404s).
+   */
+  async listBannedUsers(): Promise<BannedUserResponseDto[]> {
+    const users = await this.userRepo.find({
+      where: { is_active: false, deleted_at: IsNull() },
+      select: ['id', 'username'],
+      order: { username: 'ASC' },
+    });
+    if (users.length === 0) return [];
+
+    const profiles = await this.profileRepo.find({
+      where: { user_id: In(users.map((u) => u.id)) },
+    });
+    const profileByUser = new Map(profiles.map((p) => [p.user_id, p]));
+    return users.map((u) => ({
+      id: u.id,
+      username: u.username,
+      display_name: profileByUser.get(u.id)?.display_name ?? null,
+      profile_image_url: profileByUser.get(u.id)?.profile_image_url ?? null,
+    }));
   }
 
   async findByEmail(email: string) {

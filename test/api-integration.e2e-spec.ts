@@ -862,11 +862,23 @@ describeDb('API integration & regression (real Postgres)', () => {
         .patch(`/users/${target.userId}/unban`)
         .set({ Authorization: `Bearer ${regular.token}` })
         .expect(403);
+      const banned = async () =>
+        (
+          (await http().get('/users/banned').set(adminAuth).expect(200))
+            .body as Array<{ id: string }>
+        ).map((u) => u.id);
+      await http()
+        .get('/users/banned')
+        .set({ Authorization: `Bearer ${regular.token}` })
+        .expect(403);
+      expect(await banned()).toContain(target.userId);
+
       await http()
         .patch(`/users/${target.userId}/unban`)
         .set(adminAuth)
         .expect(200);
       await http().get('/auth/me').set(targetAuth).expect(200);
+      expect(await banned()).not.toContain(target.userId);
     });
 
     it('una cuenta eliminada no se puede desbanear ni banear', async () => {
@@ -894,6 +906,10 @@ describeDb('API integration & regression (real Postgres)', () => {
         [deleted.userId],
       );
       expect(is_active).toBe(false);
+      const list = await http().get('/users/banned').set(adminAuth).expect(200);
+      expect(list.body.map((u: { id: string }) => u.id)).not.toContain(
+        deleted.userId,
+      );
     });
   });
 });

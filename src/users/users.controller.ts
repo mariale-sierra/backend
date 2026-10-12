@@ -27,6 +27,7 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { UserResponseDto } from './dto/user-response.dto';
+import { BannedUserResponseDto } from './dto/banned-user-response.dto';
 import {
   UpdateUserProfileDto,
   UpdateProfilePhotoDto,
@@ -224,6 +225,20 @@ export class UsersController {
   @ApiOkResponse({ description: 'Estado actual' })
   getAccountDeletionStatus(@CurrentUser() user: AuthenticatedUser) {
     return this.accountDeletionService.getStatus(user.sub);
+  }
+
+  @Get('banned')
+  @UseGuards(AdminGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Usuarios baneados (admin)',
+    description:
+      'Cuentas desactivadas por un administrador (no incluye cuentas eliminadas), para poder revertir el baneo desde la app. Solo administradores.',
+  })
+  @ApiOkResponse({ type: BannedUserResponseDto, isArray: true })
+  @ApiForbiddenResponse({ description: 'Solo administradores' })
+  listBannedUsers(): Promise<BannedUserResponseDto[]> {
+    return this.usersService.listBannedUsers();
   }
 
   @Patch(':id/ban')
