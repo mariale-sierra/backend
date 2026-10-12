@@ -319,6 +319,28 @@ export class ChallengesController {
     return this.challengesService.getChallengeJoinRequests(user.sub, id);
   }
 
+  @Get(':id/join-requests/mine')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiOperation({
+    summary: 'Mi solicitud de ingreso pendiente',
+    description:
+      'Si el usuario autenticado tiene una solicitud pendiente para este desafío. Solo informa la propia, nunca las de otros usuarios.',
+  })
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+      properties: { hasPendingRequest: { type: 'boolean' } },
+    },
+  })
+  @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
+  getMyJoinRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<{ hasPendingRequest: boolean }> {
+    return this.challengesService.getMyJoinRequestStatus(user.sub, id);
+  }
+
   @Post(':id/join-requests/:requestId/approve')
   @ApiBearerAuth()
   @ApiParam({ name: 'id', description: 'ID del desafío' })

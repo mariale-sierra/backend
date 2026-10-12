@@ -1017,6 +1017,39 @@ describe('ChallengesService', () => {
     });
   });
 
+  describe('getMyJoinRequestStatus', () => {
+    it.each([
+      [1, true],
+      [0, false],
+    ])(
+      'with %s pending request(s) of the caller reports %s',
+      async (count, expected) => {
+        challengeRepo.findOne.mockResolvedValue(baseChallenge());
+        challengeJoinRequestRepo.count.mockResolvedValue(count);
+
+        await expect(
+          service.getMyJoinRequestStatus(OTHER_USER_ID, CHALLENGE_ID),
+        ).resolves.toEqual({ hasPendingRequest: expected });
+        // Only ever the caller's own request, and only a pending one.
+        expect(challengeJoinRequestRepo.count).toHaveBeenCalledWith({
+          where: {
+            challenge_id: CHALLENGE_ID,
+            user_id: OTHER_USER_ID,
+            status: 'pending',
+          },
+        });
+      },
+    );
+
+    it('should throw NotFoundException for a missing or deleted challenge', async () => {
+      challengeRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.getMyJoinRequestStatus(OTHER_USER_ID, CHALLENGE_ID),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
   describe('respondToChallengeJoinRequest', () => {
     const PENDING_REQUEST = {
       id: 'request-1',

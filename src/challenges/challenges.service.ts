@@ -1052,6 +1052,27 @@ export class ChallengesService {
   }
 
   /**
+   * The caller's own pending request for a challenge — never anyone else's —
+   * so the challenge screen can show "request sent" again after being
+   * reopened instead of offering Join (which answers 409). Same flag
+   * SpacesService exposes for spaces (hasPendingRequest).
+   */
+  async getMyJoinRequestStatus(
+    userId: string,
+    challengeId: string,
+  ): Promise<{ hasPendingRequest: boolean }> {
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId, is_active: true },
+    });
+    if (!challenge) throw new NotFoundException('Challenge not found');
+
+    const pending = await this.challengeJoinRequestRepo.count({
+      where: { challenge_id: challengeId, user_id: userId, status: 'pending' },
+    });
+    return { hasPendingRequest: pending > 0 };
+  }
+
+  /**
    * Approve/reject a pending join request. Runs in a transaction with a row lock on the
    * request, same shape as `SpacesService.respondToJoinRequest`, to avoid
    * double-processing under concurrent approve/reject calls.

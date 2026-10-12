@@ -663,4 +663,59 @@ describeDb('API integration & regression (real Postgres)', () => {
       expect(await members()).toEqual([{ user_id: first.userId }]);
     });
   });
+
+  // R8 — INC-02: al volver a abrir un reto privado, la app ofrecía Join a
+  // quien ya tenía una solicitud pendiente (y el backend respondía 409).
+  describe('R8 regresión: mi solicitud de ingreso pendiente', () => {
+    it('cada usuario ve solo el estado de la suya, y deja de estar pendiente al responderse', async () => {
+      const owner = await signUp();
+      const requester = await signUp();
+      const other = await signUp();
+      const ownerAuth = { Authorization: `Bearer ${owner.token}` };
+      const challengeId = randomUUID();
+      await ds.query(
+        `INSERT INTO havit.challenges (id, name, visibility, created_by_user_id, duration_days, status)
+         VALUES ($1, 'it private', 'private', $2, 30, 'open')`,
+        [challengeId, owner.userId],
+      );
+      const mine = (u?: { token: string }) => {
+        const req = http().get(`/challenges/${challengeId}/join-requests/mine`);
+        return u ? req.set({ Authorization: `Bearer ${u.token}` }) : req;
+      };
+
+      await mine().expect(401);
+      expect((await mine(requester).expect(200)).body).toEqual({
+        hasPendingRequest: false,
+      });
+      await http()
+        .post(`/challenges/${challengeId}/join`)
+        .set({ Authorization: `Bearer ${requester.token}` })
+        .expect(201);
+
+      expect((await mine(requester).expect(200)).body).toEqual({
+        hasPendingRequest: true,
+      });
+      expect((await mine(other).expect(200)).body).toEqual({
+        hasPendingRequest: false,
+      });
+      await http()
+        .get(`/challenges/${randomUUID()}/join-requests/mine`)
+        .set({ Authorization: `Bearer ${requester.token}` })
+        .expect(404);
+
+      const [pending] = (
+        await http()
+          .get(`/challenges/${challengeId}/join-requests`)
+          .set(ownerAuth)
+          .expect(200)
+      ).body;
+      await http()
+        .post(`/challenges/${challengeId}/join-requests/${pending.id}/reject`)
+        .set(ownerAuth)
+        .expect(201);
+      expect((await mine(requester).expect(200)).body).toEqual({
+        hasPendingRequest: false,
+      });
+    });
+  });
 });
