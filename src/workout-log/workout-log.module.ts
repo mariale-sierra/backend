@@ -10,6 +10,7 @@ import { WorkoutLogExerciseSetTarget } from './entities/workout-log-exercise-set
 import { RoutineExercise } from '../routine/entities/routine-exercise.entity';
 import { Exercise } from '../exercises/entities/exercise.entity';
 import { WorkoutLogExerciseMetric } from '../metrics/entities/workout-log-exercise-metric.entity';
+import { ExercisesModule } from '../exercises/exercises.module';
 import { AuthModule } from '../auth/auth.module';
 import { WorkoutPost } from 'src/workout-posts/entities/workout-post.entity';
 import { WorkoutPostsModule } from '../workout-posts/workout-posts.module';
@@ -33,6 +34,7 @@ import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.enti
       ChallengeUserMap,
     ]),
     AuthModule,
+    ExercisesModule,
     WorkoutPostsModule,
     OpenAiModule,
   ],

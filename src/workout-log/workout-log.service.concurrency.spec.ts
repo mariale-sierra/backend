@@ -9,6 +9,7 @@ import { WorkoutLogExercise } from './entities/workout-log-exercise.entity';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
+import { ExerciseSubstitutionService } from '../exercises/exercise-substitution.service';
 import { RedisCacheService } from '../cache/redis-cache.service';
 
 /**
@@ -285,6 +286,13 @@ describe('WorkoutLogService — B5 concurrency', () => {
         {
           provide: getRepositoryToken(ChallengeUserMap),
           useValue: challengeUserMapRepo,
+        },
+        {
+          provide: ExerciseSubstitutionService,
+          useValue: {
+            getLocationByCode: jest.fn(),
+            resolveSubstitutions: jest.fn().mockResolvedValue(new Map()),
+          },
         },
         {
           provide: RedisCacheService,

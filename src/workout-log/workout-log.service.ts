@@ -21,6 +21,9 @@ import {
   getLocalCalendarDate,
   getLocalDayBoundsUtc,
 } from '../common/timezone.util';
+import { ExerciseSubstitutionService } from '../exercises/exercise-substitution.service';
+import { filterTargetsForSubstitute } from '../exercises/lib/exercise-substitution';
+import { Exercise } from '../exercises/entities/exercise.entity';
 import { getCycleDayInfo } from '../common/cycle-day.util';
 import { RedisCacheService } from '../cache/redis-cache.service';
 import {
@@ -70,6 +73,8 @@ export class WorkoutLogService {
     private challengeUserMapRepo: Repository<ChallengeUserMap>,
 
     private readonly cache: RedisCacheService,
+
+    private readonly substitutionService: ExerciseSubstitutionService,
   ) {}
 
   async createWorkout(dto: {
@@ -86,6 +91,12 @@ export class WorkoutLogService {
      * create() path never reaches the day-check block below, so it's fine
      * to omit there. */
     timezone?: string;
+    /** B7: location trained at + the user's own exercise substitutions. */
+    locationCode?: string;
+    substitutions?: Array<{
+      originalExerciseId: number;
+      substituteExerciseId: number;
+    }>;
   }) {
     if (!dto.isRestDay && !dto.imageUrl) {
       throw new BadRequestException(
@@ -162,8 +173,12 @@ export class WorkoutLogService {
     let savedWorkout: WorkoutLog;
     try {
       savedWorkout = await this.dataSource.transaction(async (manager) => {
+        const location = dto.locationCode
+          ? await this.substitutionService.getLocationByCode(dto.locationCode)
+          : null;
         const workout = manager.create(WorkoutLog, {
           routineId: dto.routineId,
+          locationId: location?.id,
           userId: dto.userId,
           challengeId: dto.challengeId,
           localDay,
@@ -188,11 +203,30 @@ export class WorkoutLogService {
               order: { order_index: 'ASC' },
             });
 
+          // B7: validated server-side (location, active, metric compatibility,
+          // no duplicates) -- an invalid pair throws 400 and rolls back the whole
+          // submission, so incompatible data is never persisted. Only THIS
+          // user's workout_log_exercises row changes; routine_exercises (shared
+          // with every participant) is read, never written.
+          const substitutes =
+            await this.substitutionService.resolveSubstitutions(
+              routineExercises.map((re) => re.exercise_id),
+              dto.substitutions ?? [],
+              dto.locationCode,
+            );
+
           const workoutExercises = await manager.save(
             routineExercises.map((routineExercise) =>
               manager.create(WorkoutLogExercise, {
                 workout: createdWorkout,
-                exercise: routineExercise.exercise,
+                exercise: substitutes.has(routineExercise.exercise_id)
+                  ? ({
+                      id: substitutes.get(routineExercise.exercise_id)!.id,
+                    } as Exercise)
+                  : routineExercise.exercise,
+                originalExercise: substitutes.has(routineExercise.exercise_id)
+                  ? routineExercise.exercise
+                  : null,
                 orderIndex: routineExercise.order_index,
                 notes: routineExercise.notes,
               }),
@@ -202,10 +236,21 @@ export class WorkoutLogService {
           for (let index = 0; index < routineExercises.length; index += 1) {
             const routineExercise = routineExercises[index];
             const workoutExercise = workoutExercises[index];
+            const substitute = substitutes.get(routineExercise.exercise_id);
+            // A substitute only keeps targets for metrics it actually tracks.
+            const keepTargets = <T extends { metric_type_id: number }>(
+              targets: T[],
+            ): T[] =>
+              substitute
+                ? filterTargetsForSubstitute(
+                    targets.map((t) => ({ t, metricTypeId: t.metric_type_id })),
+                    substitute.metrics,
+                  ).map(({ t }) => t)
+                : targets;
 
             if (routineExercise.targets?.length) {
               await manager.save(
-                routineExercise.targets.map((target) =>
+                keepTargets(routineExercise.targets).map((target) =>
                   manager.create(WorkoutLogExerciseTarget, {
                     workoutLogExercise: workoutExercise,
                     metricTypeId: target.metric_type_id,
@@ -242,7 +287,7 @@ export class WorkoutLogService {
 
                 if (routineSet.targets?.length) {
                   await manager.save(
-                    routineSet.targets.map((target) =>
+                    keepTargets(routineSet.targets).map((target) =>
                       manager.create(WorkoutLogExerciseSetTarget, {
                         workoutLogExerciseSet: workoutSet,
                         metricTypeId: target.metric_type_id,
@@ -427,6 +472,7 @@ export class WorkoutLogService {
       relations: [
         'exercises',
         'exercises.exercise',
+        'exercises.originalExercise',
         'exercises.metrics',
         'exercises.targets',
         'exercises.sets',
@@ -515,6 +561,7 @@ export class WorkoutLogService {
       relations: [
         'exercises',
         'exercises.exercise',
+        'exercises.originalExercise',
         'exercises.metrics',
         'exercises.targets',
         'exercises.sets',

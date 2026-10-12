@@ -25,6 +25,12 @@ export class WorkoutLogExercise {
   @JoinColumn({ name: 'exercise_id' })
   exercise!: Exercise;
 
+  /** B7: the routine's prescribed exercise when `exercise` is the user's
+   * location-driven substitute; null when not substituted. */
+  @ManyToOne(() => Exercise, { nullable: true })
+  @JoinColumn({ name: 'original_exercise_id' })
+  originalExercise?: Exercise | null;
+
   @OneToMany(
     () => WorkoutLogExerciseMetric,
     (metric) => metric.workoutLogExercise,

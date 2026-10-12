@@ -9,6 +9,7 @@ import { RoutineService } from './routine.service';
 import { RoutineController } from './routine.controller';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengesModule } from '../challenges/challenges.module';
+import { ExercisesModule } from '../exercises/exercises.module';
 import { AuthModule } from '../auth/auth.module';
 import { RoutineExerciseSet } from './entities/routine-exercise-set.entity';
 import { RoutineExerciseTarget } from './entities/routine-exercise-target.entity';
@@ -28,6 +29,7 @@ import { MetricType } from '../metrics/entities/metric-type.entity';
       MetricType,
     ]),
     ChallengesModule,
+    ExercisesModule,
     AuthModule,
   ],
   controllers: [RoutineController],

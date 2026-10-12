@@ -1,3 +1,4 @@
+import { ExerciseSubstitutionService } from '../exercises/exercise-substitution.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
@@ -69,6 +70,14 @@ describe('WorkoutLogService', () => {
       providers: [
         WorkoutLogService,
         { provide: RedisCacheService, useValue: cache },
+        {
+          provide: ExerciseSubstitutionService,
+          useValue: {
+            getLocationByCode: jest.fn(),
+            resolveSubstitutions: jest.fn().mockResolvedValue(new Map()),
+            getLocationAvailability: jest.fn().mockResolvedValue([]),
+          },
+        },
         {
           provide: getRepositoryToken(RoutineExercise),
           useValue: createMockRepo(),

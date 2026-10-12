@@ -6,6 +6,7 @@ import {
   Body,
   Param,
   Req,
+  Query,
   ParseIntPipe,
 } from '@nestjs/common';
 import { RoutineService } from './routine.service';
@@ -14,12 +15,14 @@ import {
   ApiOperation,
   ApiResponse,
   ApiParam,
+  ApiQuery,
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { CreateRoutineDto } from './dto/create-routine.dto';
 import { AddRoutineExerciseDto } from './dto/add-routine-exercise.dto';
+import { parseSubstitutionsParam } from '../exercises/exercise-substitution.service';
 import { resolveRequestTimezone } from '../common/timezone.util';
 
 @ApiTags('Routine')
@@ -96,15 +99,28 @@ export class RoutineController {
 
   @Get('today/:challengeId')
   @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Rutina de hoy de un challenge',
+    description:
+      'Incluye `locations` (en cuáles se puede hacer; requiresSubstitution marca las que exigen cambiar ejercicios). Con ?location=<code>&substitutions=<origId>:<subId>,... devuelve la vista efectiva del usuario (ejercicios sustituidos, solo en memoria; la rutina compartida no se modifica). Sustituciones inválidas responden 400.',
+  })
+  @ApiQuery({ name: 'location', required: false })
+  @ApiQuery({ name: 'substitutions', required: false })
   getTodayRoutine(
     @Param('challengeId') challengeId: string,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req,
+    @Query('location') location?: string,
+    @Query('substitutions') substitutions?: string,
   ) {
     return this.routineService.getTodayRoutine(
       challengeId,
       user.sub,
       resolveRequestTimezone(req),
+      {
+        locationCode: location,
+        substitutions: parseSubstitutionsParam(substitutions),
+      },
     );
   }
 
