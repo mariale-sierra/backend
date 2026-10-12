@@ -718,4 +718,104 @@ describeDb('API integration & regression (real Postgres)', () => {
       });
     });
   });
+
+  // R9 — BUG-03: la app enviaba taggedUserIds en el post conjunto del dueño y
+  // la API rechazaba todo el progreso con 400 (el campo no existía).
+  describe('R9 regresión: etiquetar participantes en un post conjunto', () => {
+    it('solo el dueño etiqueta participantes activos; los inválidos no escriben nada', async () => {
+      const owner = await signUp();
+      const [first, second, outsider] = [
+        await signUp(),
+        await signUp(),
+        await signUp(),
+      ];
+      const ownerAuth = { Authorization: `Bearer ${owner.token}` };
+      const challengeId = await createChallenge(owner.userId);
+      for (const user of [first, second]) {
+        await http()
+          .post(`/challenges/${challengeId}/join`)
+          .set({ Authorization: `Bearer ${user.token}` })
+          .expect(201);
+      }
+      // B7 en el mismo envío: rutina con Kettlebell Swing (9, solo gym) y
+      // su sustituto en casa Bodyweight Circuit (23).
+      const [{ id: routineId }] = await ds.query(
+        `INSERT INTO havit.routines (created_by_user_id, name)
+         VALUES ($1, 'r9 routine') RETURNING id`,
+        [owner.userId],
+      );
+      await ds.query(
+        `INSERT INTO havit.routine_exercises (routine_id, exercise_id, order_index)
+         VALUES ($1, 9, 1)`,
+        [routineId],
+      );
+      const post = (
+        userAuth: { Authorization: string },
+        taggedUserIds: unknown,
+      ) =>
+        http()
+          .post('/workout-logs/progress')
+          .set(userAuth)
+          .send({
+            challengeId,
+            routineId: Number(routineId),
+            imageUrl: 'https://example.com/r9.jpg',
+            locationCode: 'home',
+            substitutions: [
+              { originalExerciseId: 9, substituteExerciseId: 23 },
+            ],
+            taggedUserIds,
+          });
+      const logsOf = async (userId: string) =>
+        (
+          await ds.query(
+            `SELECT count(*)::int AS n FROM havit.workout_logs
+             WHERE user_id = $1 AND challenge_id = $2`,
+            [userId, challengeId],
+          )
+        )[0].n as number;
+
+      await post(ownerAuth, [first.userId, outsider.userId]).expect(400);
+      await post(ownerAuth, [randomUUID()]).expect(400);
+      await post(ownerAuth, ['no-es-un-uuid']).expect(400);
+      await post(ownerAuth, [owner.userId]).expect(400);
+      await post({ Authorization: `Bearer ${first.token}` }, [
+        second.userId,
+      ]).expect(403);
+      expect(await logsOf(owner.userId)).toBe(0);
+      expect(await logsOf(first.userId)).toBe(0);
+
+      await post(ownerAuth, [first.userId, second.userId]).expect(201);
+
+      const tags = await ds.query(
+        `SELECT t.user_id, t.tagged_by_user_id
+         FROM havit.workout_post_tagged_users t
+         JOIN havit.workout_posts p ON p.id = t.workout_post_id
+         JOIN havit.workout_logs l ON l.id = p.workout_log_id
+         WHERE l.user_id = $1 AND l.challenge_id = $2
+         ORDER BY t.user_id`,
+        [owner.userId, challengeId],
+      );
+      expect(tags).toEqual(
+        [first.userId, second.userId].sort().map((id) => ({
+          user_id: id,
+          tagged_by_user_id: owner.userId,
+        })),
+      );
+      const [exercise] = await ds.query(
+        `SELECT wle.exercise_id, wle.original_exercise_id
+         FROM havit.workout_log_exercises wle
+         JOIN havit.workout_logs l ON l.id = wle.workout_log_id
+         WHERE l.user_id = $1 AND l.challenge_id = $2`,
+        [owner.userId, challengeId],
+      );
+      expect(exercise).toEqual({
+        exercise_id: '23',
+        original_exercise_id: '9',
+      });
+      // B5 intacto: un solo progreso por día, con o sin etiquetas.
+      await post(ownerAuth, []).expect(409);
+      expect(await logsOf(owner.userId)).toBe(1);
+    });
+  });
 });

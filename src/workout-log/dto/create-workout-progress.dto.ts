@@ -102,4 +102,15 @@ export class CreateWorkoutProgressDto {
   @ValidateNested({ each: true })
   @Type(() => WorkoutSubstitutionDto)
   substitutions?: WorkoutSubstitutionDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'Post conjunto (B8): IDs de participantes activos del challenge que su dueño etiqueta en el post. Solo el dueño puede etiquetar; omitido o vacío = post normal.',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsUUID('all', { each: true })
+  taggedUserIds?: string[];
 }

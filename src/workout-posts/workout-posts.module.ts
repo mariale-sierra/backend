@@ -17,6 +17,7 @@ import { WorkoutPostReportsService } from './workout-post-reports.service';
 import { ContentReport } from './entities/content-report.entity';
 import { Hashtag } from './entities/hashtag.entity';
 import { WorkoutPostHashtag } from './entities/workout-post-hashtag.entity';
+import { WorkoutPostTaggedUser } from './entities/workout-post-tagged-user.entity';
 import { HashtagsService } from './hashtags/hashtags.service';
 import { UserPenalty } from './entities/user-penalty.entity';
 import { OpenAiModule } from '../openai/openai.module';
@@ -33,6 +34,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
       UserPenalty,
       Hashtag,
       WorkoutPostHashtag,
+      WorkoutPostTaggedUser,
       WorkoutLog,
       User,
     ]),

@@ -143,6 +143,7 @@ export class WorkoutLogController {
       timezone: resolveRequestTimezone(req),
       locationCode: body.locationCode,
       substitutions: body.substitutions,
+      taggedUserIds: body.taggedUserIds,
     });
   }
 

@@ -24,6 +24,7 @@ const createMockRepo = () => ({
   save: jest.fn(),
   create: jest.fn((v) => v),
   createQueryBuilder: jest.fn(),
+  count: jest.fn(),
 });
 
 // Same pass-through mock as exercises.service.spec.ts — real code path by
@@ -45,7 +46,7 @@ describe('WorkoutLogService', () => {
   let service: WorkoutLogService;
   let workoutRepo: ReturnType<typeof createMockRepo>;
   let dataSource: { transaction: jest.Mock };
-  let workoutPostsService: { create: jest.Mock };
+  let workoutPostsService: { create: jest.Mock; tagUsers: jest.Mock };
   let challengeRepo: ReturnType<typeof createMockRepo>;
   let challengeUserMapRepo: ReturnType<typeof createMockRepo>;
   let cache: ReturnType<typeof createMockCache>;
@@ -61,7 +62,7 @@ describe('WorkoutLogService', () => {
   beforeEach(async () => {
     workoutRepo = createMockRepo();
     dataSource = { transaction: jest.fn() };
-    workoutPostsService = { create: jest.fn() };
+    workoutPostsService = { create: jest.fn(), tagUsers: jest.fn() };
     challengeRepo = createMockRepo();
     challengeUserMapRepo = createMockRepo();
     cache = createMockCache();
@@ -453,6 +454,118 @@ describe('WorkoutLogService', () => {
         });
 
         expect(workoutPostsService.create).not.toHaveBeenCalled();
+      });
+    });
+
+    // B8 (BUG-03): the app sent taggedUserIds for joint posts and the API
+    // rejected the whole progress with 400 — the field didn't exist.
+    describe('tagging participants in a joint post (B8)', () => {
+      const OWNED_CHALLENGE = {
+        ...OPEN_CHALLENGE,
+        created_by_user_id: OWNER_ID,
+      };
+      const TAGGED = ['tagged-a', 'tagged-b'];
+      let manager: Record<string, jest.Mock>;
+      const submit = (overrides: Record<string, unknown> = {}) =>
+        service.createWorkout({
+          userId: OWNER_ID,
+          challengeId: 'challenge-1',
+          imageUrl: 'https://example.com/joint.jpg',
+          taggedUserIds: TAGGED,
+          ...overrides,
+        });
+
+      beforeEach(() => {
+        challengeRepo.findOne.mockResolvedValue(OWNED_CHALLENGE);
+        challengeUserMapRepo.count.mockResolvedValue(TAGGED.length);
+        workoutRepo.findOne
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({ id: 99, userId: OWNER_ID });
+        const createdWorkout = { id: 99, userId: OWNER_ID };
+        manager = {
+          create: jest.fn().mockReturnValue(createdWorkout),
+          save: jest.fn().mockResolvedValue(createdWorkout),
+          getRepository: jest.fn(),
+        };
+        dataSource.transaction.mockImplementation(
+          (cb: (m: unknown) => unknown) => cb(manager),
+        );
+        workoutPostsService.create.mockResolvedValue({ id: 'post-1' });
+      });
+
+      it('saves the tags with the post, in the same transaction', async () => {
+        await submit();
+
+        expect(challengeUserMapRepo.count).toHaveBeenCalledWith({
+          where: {
+            challenge_id: 'challenge-1',
+            user_id: expect.anything(),
+            status: 'active',
+          },
+        });
+        expect(workoutPostsService.tagUsers).toHaveBeenCalledWith(
+          'post-1',
+          TAGGED,
+          OWNER_ID,
+          manager,
+        );
+      });
+
+      it('a post without tags is unchanged: no tag check, no tag rows', async () => {
+        await submit({ taggedUserIds: undefined });
+
+        expect(challengeUserMapRepo.count).not.toHaveBeenCalled();
+        expect(workoutPostsService.tagUsers).not.toHaveBeenCalled();
+        expect(workoutPostsService.create).toHaveBeenCalled();
+      });
+
+      it('repeated ids are tagged once', async () => {
+        challengeUserMapRepo.count.mockResolvedValue(1);
+
+        await submit({ taggedUserIds: ['tagged-a', 'tagged-a'] });
+
+        expect(workoutPostsService.tagUsers).toHaveBeenCalledWith(
+          'post-1',
+          ['tagged-a'],
+          OWNER_ID,
+          manager,
+        );
+      });
+
+      it('only the challenge owner can tag', async () => {
+        challengeRepo.findOne.mockResolvedValue({
+          ...OPEN_CHALLENGE,
+          created_by_user_id: OTHER_USER_ID,
+        });
+
+        await expect(submit()).rejects.toThrow(ForbiddenException);
+        expect(dataSource.transaction).not.toHaveBeenCalled();
+      });
+
+      it('only active participants of this challenge can be tagged', async () => {
+        challengeUserMapRepo.count.mockResolvedValue(1);
+
+        await expect(submit()).rejects.toThrow(
+          'Tagged users must be active participants of this challenge',
+        );
+        expect(dataSource.transaction).not.toHaveBeenCalled();
+      });
+
+      it('the owner cannot tag themselves', async () => {
+        await expect(
+          submit({ taggedUserIds: [OWNER_ID, 'tagged-a'] }),
+        ).rejects.toThrow('You cannot tag yourself');
+        expect(dataSource.transaction).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        ['a rest day (no post)', { isRestDay: true, imageUrl: undefined }],
+        ['progress outside a challenge', { challengeId: undefined }],
+      ])('cannot tag on %s', async (_case, overrides) => {
+        await expect(submit(overrides)).rejects.toThrow(
+          'Tagging participants needs a challenge progress post with a photo',
+        );
+        expect(dataSource.transaction).not.toHaveBeenCalled();
       });
     });
 

@@ -15,6 +15,7 @@ import { WorkoutLogExerciseSet } from './entities/workout-log-exercise-set.entit
 import { WorkoutLogExerciseSetTarget } from './entities/workout-log-exercise-set-target.entity';
 import { Between, In } from 'typeorm';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
+import { assertOwnership } from '../auth/utils/assert-ownership';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
 import {
@@ -97,6 +98,8 @@ export class WorkoutLogService {
       originalExerciseId: number;
       substituteExerciseId: number;
     }>;
+    /** B8: joint post — participants the challenge owner tags in it. */
+    taggedUserIds?: string[];
   }) {
     if (!dto.isRestDay && !dto.imageUrl) {
       throw new BadRequestException(
@@ -161,6 +164,13 @@ export class WorkoutLogService {
       if (existing) {
         throw new ConflictException('You already logged progress today');
       }
+    }
+
+    // B8 (BUG-03): validated before anything is written, so a bad tag never
+    // leaves a half-saved progress behind.
+    const taggedUserIds = [...new Set(dto.taggedUserIds ?? [])];
+    if (taggedUserIds.length > 0) {
+      await this.assertCanTag(dto, challenge, taggedUserIds);
     }
 
     // Resolved before the transaction starts — a plain read, independent of
@@ -311,7 +321,7 @@ export class WorkoutLogService {
         // operation, so a failure here rolls back the workout log too instead
         // of leaving an orphaned "progress recorded" row with no post.
         if (!dto.isRestDay) {
-          await this.workoutPostsService.create(
+          const post = await this.workoutPostsService.create(
             {
               workout_log_id: createdWorkout.id,
               user_id: dto.userId,
@@ -321,6 +331,14 @@ export class WorkoutLogService {
             },
             manager,
           );
+          if (taggedUserIds.length > 0) {
+            await this.workoutPostsService.tagUsers(
+              post.id,
+              taggedUserIds,
+              dto.userId,
+              manager,
+            );
+          }
         }
 
         return createdWorkout;
@@ -414,6 +432,44 @@ export class WorkoutLogService {
 
     relation.status = 'completed';
     await this.challengeUserMapRepo.save(relation);
+  }
+
+  /**
+   * Joint posts (B8): only the challenge's owner tags, only on a challenge
+   * progress post with a photo, and only active participants of that same
+   * challenge other than themselves — the TagParticipantsSheet already offers
+   * exactly those, this enforces it server-side.
+   */
+  private async assertCanTag(
+    dto: { userId: string; challengeId?: string; isRestDay?: boolean },
+    challenge: Challenge | null,
+    taggedUserIds: string[],
+  ): Promise<void> {
+    if (!dto.challengeId || !challenge || dto.isRestDay) {
+      throw new BadRequestException(
+        'Tagging participants needs a challenge progress post with a photo',
+      );
+    }
+    assertOwnership(
+      challenge.created_by_user_id,
+      dto.userId,
+      'Only the challenge owner can tag participants',
+    );
+    if (taggedUserIds.includes(dto.userId)) {
+      throw new BadRequestException('You cannot tag yourself');
+    }
+    const activeParticipants = await this.challengeUserMapRepo.count({
+      where: {
+        challenge_id: dto.challengeId,
+        user_id: In(taggedUserIds),
+        status: 'active',
+      },
+    });
+    if (activeParticipants !== taggedUserIds.length) {
+      throw new BadRequestException(
+        'Tagged users must be active participants of this challenge',
+      );
+    }
   }
 
   /**

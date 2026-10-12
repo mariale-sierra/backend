@@ -8,6 +8,7 @@ import {
 } from './entities/workout-post.entity';
 import { ModerationService } from '../openai/moderation.service';
 import { User } from '../users/entities/user.entity';
+import { WorkoutPostTaggedUser } from './entities/workout-post-tagged-user.entity';
 import { DecodedCursor, encodeCursor } from '../common/pagination.util';
 import { formatPrimaryMetric, MetricValueRow } from './metric-display.util';
 import { FollowsService } from '../follows/follows.service';
@@ -213,6 +214,31 @@ export class WorkoutPostsService {
       manager ?? this.repo.manager,
     );
     return saved;
+  }
+
+  /**
+   * Joint posts (B8): records the participants the challenge owner tagged.
+   * Callers validate who may tag whom (WorkoutLogService.createWorkout); this
+   * only persists, through the caller's manager so it commits or rolls back
+   * together with the post, like syncPostHashtags.
+   */
+  async tagUsers(
+    postId: string,
+    taggedUserIds: string[],
+    taggedByUserId: string,
+    manager: EntityManager,
+  ): Promise<void> {
+    if (taggedUserIds.length === 0) return;
+    const repo = manager.getRepository(WorkoutPostTaggedUser);
+    await repo.save(
+      [...new Set(taggedUserIds)].map((userId) =>
+        repo.create({
+          workout_post_id: postId,
+          user_id: userId,
+          tagged_by_user_id: taggedByUserId,
+        }),
+      ),
+    );
   }
 
   /**
