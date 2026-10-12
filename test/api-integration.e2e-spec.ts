@@ -912,4 +912,101 @@ describeDb('API integration & regression (real Postgres)', () => {
       );
     });
   });
+
+  // R11 — B8: matriz de autorización de las acciones del dueño del reto. Ser
+  // admin de la plataforma no da permisos de dueño: cada acción se prueba
+  // contra el endpoint, no contra un botón oculto.
+  describe('R11 regresión: acciones del dueño (owner) por rol', () => {
+    it('solo el dueño gestiona su reto; el admin que no es dueño recibe 403', async () => {
+      const owner = await signUp();
+      const participant = await signUp();
+      const requester = await signUp();
+      const admin = await signUp();
+      await ds.query(`UPDATE havit.users SET is_admin = true WHERE id = $1`, [
+        admin.userId,
+      ]);
+      const as = (u: { token: string }) => ({
+        Authorization: `Bearer ${u.token}`,
+      });
+      const publicId = await createChallenge(owner.userId);
+      await ds.query(
+        `UPDATE havit.challenges SET cycle_length_days = 1 WHERE id = $1`,
+        [publicId],
+      );
+      await ds.query(
+        `INSERT INTO havit.challenge_cycle_days (challenge_id, day_in_cycle, day_type)
+         VALUES ($1, 1, 'workout')`,
+        [publicId],
+      );
+      const privateId = randomUUID();
+      await ds.query(
+        `INSERT INTO havit.challenges (id, name, visibility, created_by_user_id, duration_days, status)
+         VALUES ($1, 'it private', 'private', $2, 30, 'open')`,
+        [privateId, owner.userId],
+      );
+      await http()
+        .post(`/challenges/${publicId}/join`)
+        .set(as(participant))
+        .expect(201);
+      await http()
+        .post(`/challenges/${privateId}/join`)
+        .set(as(requester))
+        .expect(201);
+
+      // Todos menos el dueño: sin token 401; participante y admin 403.
+      const denied = async (
+        call: () => request.Test,
+        withAuth: (u: { token: string }) => request.Test,
+      ) => {
+        await call().expect(401);
+        await withAuth(participant).expect(403);
+        await withAuth(admin).expect(403);
+      };
+      const edit = () => http().patch(`/challenges/${publicId}`);
+      await denied(edit, (u) => edit().set(as(u)).send({ name: 'x' }));
+      const cycleDay = () =>
+        http().patch(`/challenges/${publicId}/cycle-days/1`);
+      await denied(cycleDay, (u) =>
+        cycleDay().set(as(u)).send({ day_type: 'rest' }),
+      );
+      const remove = () =>
+        http().patch(
+          `/challenges/${publicId}/users/${participant.userId}/remove`,
+        );
+      await denied(remove, (u) => remove().set(as(u)));
+      const requests = () =>
+        http().get(`/challenges/${privateId}/join-requests`);
+      await denied(requests, (u) => requests().set(as(u)));
+      const [pending] = (await requests().set(as(owner)).expect(200))
+        .body as Array<{ id: string }>;
+      for (const action of ['approve', 'reject']) {
+        const respond = () =>
+          http().post(
+            `/challenges/${privateId}/join-requests/${pending.id}/${action}`,
+          );
+        await denied(respond, (u) => respond().set(as(u)));
+      }
+      const del = () => http().delete(`/challenges/${publicId}`);
+      await denied(del, (u) => del().set(as(u)));
+
+      // El dueño sí puede (editar el nombre pasa por la moderación de OpenAI,
+      // que necesita credenciales: se prueba con un cambio de día del ciclo).
+      await cycleDay().set(as(owner)).send({ day_type: 'rest' }).expect(200);
+      await http()
+        .post(`/challenges/${privateId}/join-requests/${pending.id}/approve`)
+        .set(as(owner))
+        .expect(201);
+      await remove().set(as(owner)).expect(200);
+      await del().set(as(owner)).expect(200);
+
+      // Dueño que además es admin: sigue pudiendo todo lo de dueño.
+      await ds.query(`UPDATE havit.users SET is_admin = true WHERE id = $1`, [
+        owner.userId,
+      ]);
+      await http()
+        .delete(`/challenges/${privateId}`)
+        .set(as(owner))
+        .expect(200);
+    });
+  });
 });
