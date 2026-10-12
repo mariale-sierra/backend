@@ -105,7 +105,7 @@ export class CreateWorkoutProgressDto {
 
   @ApiPropertyOptional({
     description:
-      'Post conjunto (B8): IDs de participantes activos del challenge que su dueño etiqueta en el post. Solo el dueño puede etiquetar; omitido o vacío = post normal.',
+      'Post conjunto (B8): IDs de participantes del challenge (activos o que lo completaron; no quienes lo abandonaron) que su dueño etiqueta en el post. Solo el dueño puede etiquetar; omitido o vacío = post normal.',
     type: [String],
   })
   @IsOptional()

@@ -775,7 +775,21 @@ describeDb('API integration & regression (real Postgres)', () => {
           )
         )[0].n as number;
 
+      // Quien abandonó ya no es participante; quien completó el reto sí.
+      const leaver = await signUp();
+      await ds.query(
+        `INSERT INTO havit.challenge_user_map (challenge_id, user_id, role, status)
+         VALUES ($1, $2, 'participant', 'left')`,
+        [challengeId, leaver.userId],
+      );
+      await ds.query(
+        `UPDATE havit.challenge_user_map SET status = 'completed'
+         WHERE challenge_id = $1 AND user_id = $2`,
+        [challengeId, second.userId],
+      );
+
       await post(ownerAuth, [first.userId, outsider.userId]).expect(400);
+      await post(ownerAuth, [leaver.userId]).expect(400);
       await post(ownerAuth, [randomUUID()]).expect(400);
       await post(ownerAuth, ['no-es-un-uuid']).expect(400);
       await post(ownerAuth, [owner.userId]).expect(400);

@@ -500,7 +500,7 @@ describe('WorkoutLogService', () => {
           where: {
             challenge_id: 'challenge-1',
             user_id: expect.anything(),
-            status: 'active',
+            status: expect.anything(),
           },
         });
         expect(workoutPostsService.tagUsers).toHaveBeenCalledWith(
@@ -542,11 +542,11 @@ describe('WorkoutLogService', () => {
         expect(dataSource.transaction).not.toHaveBeenCalled();
       });
 
-      it('only active participants of this challenge can be tagged', async () => {
+      it('only participants of this challenge can be tagged', async () => {
         challengeUserMapRepo.count.mockResolvedValue(1);
 
         await expect(submit()).rejects.toThrow(
-          'Tagged users must be active participants of this challenge',
+          'Tagged users must be participants of this challenge',
         );
         expect(dataSource.transaction).not.toHaveBeenCalled();
       });

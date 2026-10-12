@@ -436,9 +436,10 @@ export class WorkoutLogService {
 
   /**
    * Joint posts (B8): only the challenge's owner tags, only on a challenge
-   * progress post with a photo, and only active participants of that same
-   * challenge other than themselves — the TagParticipantsSheet already offers
-   * exactly those, this enforces it server-side.
+   * progress post with a photo, and only participants of that same challenge
+   * (active or completed — everyone but those who left, the membership rule
+   * the app uses everywhere, including the TagParticipantsSheet's list) other
+   * than themselves.
    */
   private async assertCanTag(
     dto: { userId: string; challengeId?: string; isRestDay?: boolean },
@@ -458,16 +459,16 @@ export class WorkoutLogService {
     if (taggedUserIds.includes(dto.userId)) {
       throw new BadRequestException('You cannot tag yourself');
     }
-    const activeParticipants = await this.challengeUserMapRepo.count({
+    const participants = await this.challengeUserMapRepo.count({
       where: {
         challenge_id: dto.challengeId,
         user_id: In(taggedUserIds),
-        status: 'active',
+        status: In(['active', 'completed']),
       },
     });
-    if (activeParticipants !== taggedUserIds.length) {
+    if (participants !== taggedUserIds.length) {
       throw new BadRequestException(
-        'Tagged users must be active participants of this challenge',
+        'Tagged users must be participants of this challenge',
       );
     }
   }
