@@ -644,6 +644,7 @@ export class ChallengesService {
     return cycleDays.map((cycleDay) => ({
       day_number: cycleDay.day_in_cycle,
       is_rest_day: cycleDay.day_type === 'rest',
+      routine_id: cycleDay.routine_id ?? null,
       routine_name: cycleDay.routine?.name,
       routine_description: cycleDay.routine?.description,
       exercises: (cycleDay.routine?.routine_exercises ?? []).map(
@@ -653,6 +654,8 @@ export class ChallengesService {
             re.exercise?.category_maps?.[0]?.category;
 
           return {
+            // B7: lets the app ask for location alternatives for this exercise.
+            exercise_id: re.exercise_id,
             name: re.exercise?.name,
             description: re.exercise?.description ?? null,
             activity_type: primaryCategory

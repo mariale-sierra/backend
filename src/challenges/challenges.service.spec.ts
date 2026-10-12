@@ -1871,6 +1871,7 @@ describe('ChallengesService', () => {
         {
           day_number: 1,
           is_rest_day: true,
+          routine_id: null,
           routine_name: undefined,
           routine_description: undefined,
           exercises: [],
