@@ -1,3 +1,4 @@
+import { IsNull } from 'typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
@@ -281,6 +282,23 @@ describe('UsersService', () => {
       );
       expect(userRepo.save).not.toHaveBeenCalled();
     });
+
+    // B8: unbanning a deleted (anonymized) account flipped it back to active.
+    it.each([
+      ['banUser', () => service.banUser('user-1')],
+      ['unbanUser', () => service.unbanUser('user-1')],
+    ])(
+      '%s only ever looks up accounts that were not deleted',
+      async (_n, run) => {
+        userRepo.findOne.mockResolvedValue(null);
+
+        await expect(run()).rejects.toThrow(NotFoundException);
+        expect(userRepo.findOne).toHaveBeenCalledWith({
+          where: { id: 'user-1', deleted_at: IsNull() },
+        });
+        expect(userRepo.save).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('getMyProfile', () => {

@@ -832,4 +832,68 @@ describeDb('API integration & regression (real Postgres)', () => {
       expect(await logsOf(owner.userId)).toBe(1);
     });
   });
+
+  // R10 — B8: banear/desbanear son acciones de admin (AdminGuard). Una cuenta
+  // eliminada (anonimizada, deleted_at) no existe para el resto del sistema:
+  // desbanearla la reactivaba (is_active = true).
+  describe('R10 regresión: banear y desbanear (solo admin)', () => {
+    it('cada rol recibe la respuesta esperada, y el baneo corta y devuelve el acceso', async () => {
+      const admin = await signUp();
+      const regular = await signUp();
+      const target = await signUp();
+      await ds.query(`UPDATE havit.users SET is_admin = true WHERE id = $1`, [
+        admin.userId,
+      ]);
+      const adminAuth = { Authorization: `Bearer ${admin.token}` };
+      const targetAuth = { Authorization: `Bearer ${target.token}` };
+
+      await http().patch(`/users/${target.userId}/ban`).expect(401);
+      await http()
+        .patch(`/users/${target.userId}/ban`)
+        .set({ Authorization: `Bearer ${regular.token}` })
+        .expect(403);
+      await http()
+        .patch(`/users/${target.userId}/ban`)
+        .set(adminAuth)
+        .expect(200);
+      await http().get('/auth/me').set(targetAuth).expect(401);
+
+      await http()
+        .patch(`/users/${target.userId}/unban`)
+        .set({ Authorization: `Bearer ${regular.token}` })
+        .expect(403);
+      await http()
+        .patch(`/users/${target.userId}/unban`)
+        .set(adminAuth)
+        .expect(200);
+      await http().get('/auth/me').set(targetAuth).expect(200);
+    });
+
+    it('una cuenta eliminada no se puede desbanear ni banear', async () => {
+      const admin = await signUp();
+      const deleted = await signUp();
+      await ds.query(`UPDATE havit.users SET is_admin = true WHERE id = $1`, [
+        admin.userId,
+      ]);
+      await ds.query(
+        `UPDATE havit.users SET is_active = false, deleted_at = now() WHERE id = $1`,
+        [deleted.userId],
+      );
+      const adminAuth = { Authorization: `Bearer ${admin.token}` };
+
+      await http()
+        .patch(`/users/${deleted.userId}/unban`)
+        .set(adminAuth)
+        .expect(404);
+      await http()
+        .patch(`/users/${deleted.userId}/ban`)
+        .set(adminAuth)
+        .expect(404);
+      const [{ is_active }] = await ds.query(
+        `SELECT is_active FROM havit.users WHERE id = $1`,
+        [deleted.userId],
+      );
+      expect(is_active).toBe(false);
+    });
+  });
 });

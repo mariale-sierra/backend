@@ -72,8 +72,12 @@ export class UsersService {
    * JwtAuthGuard rejects the user's already-issued JWTs within ~30 s (its cached
    * per-user account check), which makes the app sign them out.
    */
+  // A deleted account (anonymized, deleted_at set) doesn't exist for ban or
+  // unban either — unbanning one used to flip it back to is_active = true.
   async banUser(targetUserId: string): Promise<{ message: string }> {
-    const user = await this.userRepo.findOne({ where: { id: targetUserId } });
+    const user = await this.userRepo.findOne({
+      where: { id: targetUserId, deleted_at: IsNull() },
+    });
     if (!user) throw new NotFoundException('User not found');
 
     user.is_active = false;
@@ -82,7 +86,9 @@ export class UsersService {
   }
 
   async unbanUser(targetUserId: string): Promise<{ message: string }> {
-    const user = await this.userRepo.findOne({ where: { id: targetUserId } });
+    const user = await this.userRepo.findOne({
+      where: { id: targetUserId, deleted_at: IsNull() },
+    });
     if (!user) throw new NotFoundException('User not found');
 
     user.is_active = true;
