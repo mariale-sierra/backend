@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ExercisesService } from './exercises.service';
+import { ExerciseSubstitutionService } from './exercise-substitution.service';
 import { ExercisesController } from './exercises.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Exercise } from './entities/exercise.entity';
@@ -41,6 +42,7 @@ import { DatasetImport } from './entities/dataset-import.entity';
     ]),
   ],
   controllers: [ExercisesController],
-  providers: [ExercisesService],
+  providers: [ExercisesService, ExerciseSubstitutionService],
+  exports: [ExerciseSubstitutionService],
 })
 export class ExercisesModule {}

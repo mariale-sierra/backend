@@ -1,0 +1,618 @@
+[
+  {
+    "id": "A01-00",
+    "owasp": "A01",
+    "title": "Swagger JSON publicly readable (API map)",
+    "verdict": "FINDING",
+    "evidence": "GET /api-docs-json -> 200, 105 paths"
+  },
+  {
+    "id": "A01-01",
+    "owasp": "A01",
+    "title": "GET endpoints reachable WITHOUT a token",
+    "verdict": "INFO",
+    "evidence": "/:200 /challenges:200 /exercises:200 /exercises/muscle-regions:200 /exercises/body-parts:200 /exercises/count:200 /exercises/categories:200 /metrics:200"
+  },
+  {
+    "id": "A01-02",
+    "owasp": "A01",
+    "title": "Private challenge detail without token",
+    "verdict": "FINDING",
+    "evidence": "GET /challenges/:privateId (no auth) -> 200 name=secret club"
+  },
+  {
+    "id": "A01-03",
+    "owasp": "A01",
+    "title": "Private challenge member list for a non-member",
+    "verdict": "PASS",
+    "evidence": "GET /challenges/:id/members as stranger -> 404"
+  },
+  {
+    "id": "A01-04",
+    "owasp": "A01",
+    "title": "Private challenge author endpoint without token",
+    "verdict": "FINDING",
+    "evidence": "GET /challenges/:id/author -> 200"
+  },
+  {
+    "id": "A01-05",
+    "owasp": "A01",
+    "title": "Challenge list without token leaks private ones?",
+    "verdict": "FINDING",
+    "evidence": "GET /challenges (no auth) -> 200, contains private name: true"
+  },
+  {
+    "id": "A01-IDOR",
+    "owasp": "A01",
+    "title": "IDOR: read another user workout log",
+    "verdict": "PASS",
+    "evidence": "GET /workout-logs/23 -> 403"
+  },
+  {
+    "id": "A01-IDOR",
+    "owasp": "A01",
+    "title": "IDOR: finish another user workout log",
+    "verdict": "PASS",
+    "evidence": "PATCH /workout-logs/23/finish -> 403"
+  },
+  {
+    "id": "A01-IDOR",
+    "owasp": "A01",
+    "title": "IDOR: delete another user post",
+    "verdict": "PASS",
+    "evidence": "DELETE /workout-posts/e2344e33-f599-4a0e-a7a6-93994601b336 -> 403"
+  },
+  {
+    "id": "A01-IDOR",
+    "owasp": "A01",
+    "title": "IDOR: list posts of a private profile",
+    "verdict": "PASS",
+    "evidence": "GET /workout-posts/user/539dd5f0-6735-4c7e-8eab-06628bd2322d -> 200 body=[]"
+  },
+  {
+    "id": "A01-IDOR",
+    "owasp": "A01",
+    "title": "IDOR: profile of private user (stranger)",
+    "verdict": "FINDING",
+    "evidence": "GET /users/539dd5f0-6735-4c7e-8eab-06628bd2322d/profile -> 200 body={\"id\":\"539dd5f0-6735-4c7e-8eab-06628bd2322d\",\"username\":\"sec_b_3521e6\",\"display_name\":\"sec_b_3521e6\",\"bio\":null,\"profile"
+  },
+  {
+    "id": "A01-IDOR",
+    "owasp": "A01",
+    "title": "IDOR: badges of private user",
+    "verdict": "PASS",
+    "evidence": "GET /badges/user/539dd5f0-6735-4c7e-8eab-06628bd2322d -> 200 body=[]"
+  },
+  {
+    "id": "A01-IDOR",
+    "owasp": "A01",
+    "title": "IDOR: comments of a private post",
+    "verdict": "PASS",
+    "evidence": "GET /workout-posts/e2344e33-f599-4a0e-a7a6-93994601b336/comments -> 403"
+  },
+  {
+    "id": "A01-IDOR",
+    "owasp": "A01",
+    "title": "IDOR: reactions of a private post",
+    "verdict": "PASS",
+    "evidence": "GET /workout-posts/e2344e33-f599-4a0e-a7a6-93994601b336/reactions -> 403"
+  },
+  {
+    "id": "A01-IDOR",
+    "owasp": "A01",
+    "title": "IDOR: who reacted to a private post",
+    "verdict": "PASS",
+    "evidence": "GET /workout-posts/e2344e33-f599-4a0e-a7a6-93994601b336/reactions/users -> 403"
+  },
+  {
+    "id": "A01-06",
+    "owasp": "A01",
+    "title": "IDOR: read messages of a conversation you are not in",
+    "verdict": "PASS",
+    "evidence": "-> 404"
+  },
+  {
+    "id": "A01-07",
+    "owasp": "A01",
+    "title": "IDOR: send into a conversation you are not in",
+    "verdict": "PASS",
+    "evidence": "-> 404"
+  },
+  {
+    "id": "A01-08",
+    "owasp": "A01",
+    "title": "IDOR: read another user's routine by id",
+    "verdict": "INFO",
+    "evidence": "GET /routine/:id as other user -> 200 (routines are shareable via challenges; confirm intent)"
+  },
+  {
+    "id": "A01-09",
+    "owasp": "A01",
+    "title": "IDOR: delete another user's routine",
+    "verdict": "PASS",
+    "evidence": "DELETE -> 403"
+  },
+  {
+    "id": "A01-10",
+    "owasp": "A01",
+    "title": "IDOR: add exercise to another user's routine",
+    "verdict": "PASS",
+    "evidence": "POST -> 403"
+  },
+  {
+    "id": "A01-11",
+    "owasp": "A01",
+    "title": "Join a PRIVATE challenge directly (must go through request)",
+    "verdict": "PASS",
+    "evidence": "POST /join -> 201 {\"status\":\"requested\",\"message\":\"Join request sent\",\"data\":{\"id\":\"1\",\"challenge_id\":\"87064675-baf5-4"
+  },
+  {
+    "id": "A01-12",
+    "owasp": "A01",
+    "title": "Log progress in a challenge you are not in (BUG-04 fix)",
+    "verdict": "PASS",
+    "evidence": "-> 403"
+  },
+  {
+    "id": "A01-ADM",
+    "owasp": "A01",
+    "title": "Admin route as normal user: GET /users/banned",
+    "verdict": "PASS",
+    "evidence": "-> 403"
+  },
+  {
+    "id": "A01-ADM",
+    "owasp": "A01",
+    "title": "Admin route as normal user: PATCH /users/539dd5f0-6735-4c7e-8eab-06628bd2322d/ban",
+    "verdict": "PASS",
+    "evidence": "-> 403"
+  },
+  {
+    "id": "A01-ADM",
+    "owasp": "A01",
+    "title": "Admin route as normal user: PATCH /users/539dd5f0-6735-4c7e-8eab-06628bd2322d/unban",
+    "verdict": "PASS",
+    "evidence": "-> 403"
+  },
+  {
+    "id": "A01-ADM",
+    "owasp": "A01",
+    "title": "Admin route as normal user: GET /reports/pending",
+    "verdict": "PASS",
+    "evidence": "-> 403"
+  },
+  {
+    "id": "A01-ADM",
+    "owasp": "A01",
+    "title": "Admin route as normal user: PATCH /reports/1/resolve",
+    "verdict": "PASS",
+    "evidence": "-> 403"
+  },
+  {
+    "id": "A01-ADM",
+    "owasp": "A01",
+    "title": "Admin route as normal user: PATCH /challenges/f691a9cc-e4d3-4f8f-8b71-b8bc17d8e571/close",
+    "verdict": "PASS",
+    "evidence": "-> 403"
+  },
+  {
+    "id": "A01-ADM",
+    "owasp": "A01",
+    "title": "Admin route as normal user: PATCH /challenges/f691a9cc-e4d3-4f8f-8b71-b8bc17d8e571/reopen",
+    "verdict": "PASS",
+    "evidence": "-> 403"
+  },
+  {
+    "id": "A01-13",
+    "owasp": "A01",
+    "title": "Mass assignment: register with is_admin:true",
+    "verdict": "PASS",
+    "evidence": "-> 400"
+  },
+  {
+    "id": "A01-14",
+    "owasp": "A01",
+    "title": "Mass assignment: PATCH profile with is_admin",
+    "verdict": "PASS",
+    "evidence": "-> 400"
+  },
+  {
+    "id": "A01-15",
+    "owasp": "A01",
+    "title": "is_admin actually unchanged",
+    "verdict": "PASS",
+    "evidence": "db check"
+  },
+  {
+    "id": "A02-01",
+    "owasp": "A02",
+    "title": "JWT algorithm / lifetime",
+    "verdict": "INFO",
+    "evidence": "alg=HS256, lifetime=168h, claims=sub,email,username,iat,exp"
+  },
+  {
+    "id": "A02-02",
+    "owasp": "A02",
+    "title": "JWT alg=none forgery",
+    "verdict": "PASS",
+    "evidence": "-> 401"
+  },
+  {
+    "id": "A02-03",
+    "owasp": "A02",
+    "title": "JWT signed with common weak secrets",
+    "verdict": "PASS",
+    "evidence": "none of 10 common secrets accepted (a short guessable production secret would still be a risk; length unknown)"
+  },
+  {
+    "id": "A02-04",
+    "owasp": "A02",
+    "title": "Password hash exposed in /users/me or profile",
+    "verdict": "PASS",
+    "evidence": "no password/hash fields"
+  },
+  {
+    "id": "A02-05",
+    "owasp": "A02",
+    "title": "Other-user profile leaks email?",
+    "verdict": "PASS",
+    "evidence": "{\"id\":\"91c508af-9a19-4b70-b68a-007b5c970957\",\"username\":\"sec_c_da35c9\",\"display_name\":\"sec_c_da35c9\",\"bio\":null,\"profile_image_url\":null,\"is_private\":false,\"fol"
+  },
+  {
+    "id": "A02-06",
+    "owasp": "A02",
+    "title": "User search leaks email",
+    "verdict": "PASS",
+    "evidence": "[{\"id\":\"9f19eb35-4d61-40b7-bb8a-cdd179c6a09a\",\"username\":\"sec_adm_1b49fa\",\"display_name\":\"sec_adm_1b49fa\",\"bio\":null,\"profile_image_url\":null,\"is_private\":false"
+  },
+  {
+    "id": "A02-07",
+    "owasp": "A02",
+    "title": "bcrypt cost factor",
+    "verdict": "INFO",
+    "evidence": "$2b$10$ (cost 10 - OWASP minimum recommended is 10-12)"
+  },
+  {
+    "id": "A02-08",
+    "owasp": "A02",
+    "title": "Transport",
+    "verdict": "INFO",
+    "evidence": "API listens on plain HTTP in this run; production URL is http://20.63.84.1:3000 (see docs). HSTS header is sent but ignored over HTTP."
+  },
+  {
+    "id": "A07-01",
+    "owasp": "A07",
+    "title": "Login user enumeration (message)",
+    "verdict": "PASS",
+    "evidence": "wrong pass: 401 \"Invalid email or password\" | no user: 401 \"Invalid email or password\""
+  },
+  {
+    "id": "A07-02",
+    "owasp": "A07",
+    "title": "Login timing side channel (existing vs unknown email)",
+    "verdict": "FINDING",
+    "evidence": "avg existing=66ms unknown=5ms (bcrypt only runs for existing accounts)"
+  },
+  {
+    "id": "A07-03",
+    "owasp": "A07",
+    "title": "Register enumerates existing emails",
+    "verdict": "FINDING",
+    "evidence": "duplicate email -> 409 \"Email already in use\""
+  },
+  {
+    "id": "A07-04",
+    "owasp": "A07",
+    "title": "Weak password accepted: \"1\"",
+    "verdict": "PASS",
+    "evidence": "-> 400 password must be longer than or equal to 8 characters"
+  },
+  {
+    "id": "A07-04",
+    "owasp": "A07",
+    "title": "Weak password accepted: \"abc\"",
+    "verdict": "PASS",
+    "evidence": "-> 400 password must be longer than or equal to 8 characters"
+  },
+  {
+    "id": "A07-04",
+    "owasp": "A07",
+    "title": "Weak password accepted: \"password\"",
+    "verdict": "FINDING",
+    "evidence": "-> 200 User registered successfully"
+  },
+  {
+    "id": "A07-04",
+    "owasp": "A07",
+    "title": "Weak password accepted: \"12345678\"",
+    "verdict": "FINDING",
+    "evidence": "-> 200 User registered successfully"
+  },
+  {
+    "id": "A07-05",
+    "owasp": "A07",
+    "title": "Brute force limiter on /auth/login (10/min/IP)",
+    "verdict": "PASS",
+    "evidence": "statuses: 401,401,401,401,401,401,401,401,401,401,429,429,429,429"
+  },
+  {
+    "id": "A07-06",
+    "owasp": "A07",
+    "title": "Rate-limit bypass via spoofed X-Forwarded-For",
+    "verdict": "PASS",
+    "evidence": "statuses: 401,401,401,401,401,401,401,401,401,401,429,429,429,429 (429 present = header not trusted)"
+  },
+  {
+    "id": "A07-07",
+    "owasp": "A07",
+    "title": "No account lockout after failed attempts (limiter is per IP only)",
+    "verdict": "INFO",
+    "evidence": "valid login after 28 bad attempts from same IP -> 429 (429 means IP window; no per-account lockout/alerts)"
+  },
+  {
+    "id": "A07-08",
+    "owasp": "A07",
+    "title": "Token still valid after logout (stateless JWT, no revocation)",
+    "verdict": "FINDING",
+    "evidence": "logout -> 404; /users/me after logout -> 200"
+  },
+  {
+    "id": "A03-01",
+    "owasp": "A03",
+    "title": "SQLi probe on /users/search q=' OR '1'='1",
+    "verdict": "PASS",
+    "evidence": "-> 200 in 4ms, rows=0"
+  },
+  {
+    "id": "A03-01",
+    "owasp": "A03",
+    "title": "SQLi probe on /users/search q='; SELECT pg_sleep(4);--",
+    "verdict": "PASS",
+    "evidence": "-> 200 in 3ms, rows=0"
+  },
+  {
+    "id": "A03-01",
+    "owasp": "A03",
+    "title": "SQLi probe on /users/search q=1; DROP TABLE havit.users;--",
+    "verdict": "PASS",
+    "evidence": "-> 200 in 2ms, rows=0"
+  },
+  {
+    "id": "A03-01",
+    "owasp": "A03",
+    "title": "SQLi probe on /users/search q=%",
+    "verdict": "PASS",
+    "evidence": "-> 200 in 147ms, rows=11"
+  },
+  {
+    "id": "A03-01",
+    "owasp": "A03",
+    "title": "SQLi probe on /users/search q=_",
+    "verdict": "PASS",
+    "evidence": "-> 200 in 8ms, rows=11"
+  },
+  {
+    "id": "A03-01",
+    "owasp": "A03",
+    "title": "SQLi probe on /users/search q=\\",
+    "verdict": "PASS",
+    "evidence": "-> 200 in 4ms, rows=0"
+  },
+  {
+    "id": "A03-01",
+    "owasp": "A03",
+    "title": "SQLi probe on /users/search q=\" OR 1=1 --",
+    "verdict": "PASS",
+    "evidence": "-> 200 in 2ms, rows=0"
+  },
+  {
+    "id": "A03-01",
+    "owasp": "A03",
+    "title": "SQLi probe on /users/search q=${7*7}",
+    "verdict": "PASS",
+    "evidence": "-> 200 in 4ms, rows=0"
+  },
+  {
+    "id": "A03-01",
+    "owasp": "A03",
+    "title": "SQLi probe on /users/search q={{7*7}}",
+    "verdict": "PASS",
+    "evidence": "-> 200 in 2ms, rows=0"
+  },
+  {
+    "id": "A03-02",
+    "owasp": "A03",
+    "title": "LIKE wildcard not escaped in user search (\"%\" lists everyone)",
+    "verdict": "FINDING",
+    "evidence": "q=% -> 200, 11 users returned"
+  },
+  {
+    "id": "A03-03",
+    "owasp": "A03",
+    "title": "Malformed id \"1 OR 1=1\" in path",
+    "verdict": "PASS",
+    "evidence": "exercises/:id -> 400, posts/user/:id -> 400"
+  },
+  {
+    "id": "A03-03",
+    "owasp": "A03",
+    "title": "Malformed id \"1;select pg_sleep(4)\" in path",
+    "verdict": "PASS",
+    "evidence": "exercises/:id -> 400, posts/user/:id -> 400"
+  },
+  {
+    "id": "A03-03",
+    "owasp": "A03",
+    "title": "Malformed id \"' or ''='\" in path",
+    "verdict": "PASS",
+    "evidence": "exercises/:id -> 400, posts/user/:id -> 400"
+  },
+  {
+    "id": "A03-03",
+    "owasp": "A03",
+    "title": "Malformed id \"../../etc/passwd\" in path",
+    "verdict": "PASS",
+    "evidence": "exercises/:id -> 400, posts/user/:id -> 400"
+  },
+  {
+    "id": "A03-03",
+    "owasp": "A03",
+    "title": "Malformed id \"%00\" in path",
+    "verdict": "PASS",
+    "evidence": "exercises/:id -> 400, posts/user/:id -> 400"
+  },
+  {
+    "id": "A03-04",
+    "owasp": "A03",
+    "title": "SQLi probe on cursor param",
+    "verdict": "PASS",
+    "evidence": "-> 400"
+  },
+  {
+    "id": "A03-05",
+    "owasp": "A03",
+    "title": "Pagination limit cap",
+    "verdict": "PASS",
+    "evidence": "limit=999999999 -> 400"
+  },
+  {
+    "id": "A03-06",
+    "owasp": "A03",
+    "title": "Stored XSS payload returned verbatim (JSON API; escaping is the client job)",
+    "verdict": "INFO",
+    "evidence": "caption \"<script>\" stored/returned raw; RN renders as text (no HTML), a future web client must escape"
+  },
+  {
+    "id": "A03-07",
+    "owasp": "A03",
+    "title": "Operator injection in login body",
+    "verdict": "FINDING",
+    "evidence": "-> 429"
+  },
+  {
+    "id": "A04-01",
+    "owasp": "A04",
+    "title": "Oversized JSON body (2 MB) rejected",
+    "verdict": "INFO",
+    "evidence": "-> 500"
+  },
+  {
+    "id": "A04-02",
+    "owasp": "A04",
+    "title": "Very long comment (100k chars)",
+    "verdict": "PASS",
+    "evidence": "-> 400"
+  },
+  {
+    "id": "A04-03",
+    "owasp": "A04",
+    "title": "Negative routineId handled",
+    "verdict": "PASS",
+    "evidence": "-> 400"
+  },
+  {
+    "id": "A10-01",
+    "owasp": "A10",
+    "title": "Progress imageUrl accepts arbitrary scheme/host: http://169.254.169.254/latest/meta-data/",
+    "verdict": "FINDING",
+    "evidence": "-> 201"
+  },
+  {
+    "id": "A10-01",
+    "owasp": "A10",
+    "title": "Progress imageUrl accepts arbitrary scheme/host: file:///etc/passwd",
+    "verdict": "FINDING",
+    "evidence": "-> 201"
+  },
+  {
+    "id": "A10-01",
+    "owasp": "A10",
+    "title": "Progress imageUrl accepts arbitrary scheme/host: javascript:alert(1)",
+    "verdict": "FINDING",
+    "evidence": "-> 201"
+  },
+  {
+    "id": "A10-01",
+    "owasp": "A10",
+    "title": "Progress imageUrl accepts arbitrary scheme/host: ftp://evil.example/x",
+    "verdict": "FINDING",
+    "evidence": "-> 201"
+  },
+  {
+    "id": "A10-01",
+    "owasp": "A10",
+    "title": "Progress imageUrl accepts arbitrary scheme/host: http://localhost:5432/",
+    "verdict": "FINDING",
+    "evidence": "-> 201"
+  },
+  {
+    "id": "A10-02",
+    "owasp": "A10",
+    "title": "Profile photo URL accepts arbitrary scheme",
+    "verdict": "PASS",
+    "evidence": "-> 400"
+  },
+  {
+    "id": "A08-01",
+    "owasp": "A08",
+    "title": "Upload sign only allows image mime types",
+    "verdict": "PASS",
+    "evidence": "text/html -> 400 {\"statusCode\":400,\"error\":\"Bad Request\",\"message\":[\"fileType must be one of the "
+  },
+  {
+    "id": "A05-01",
+    "owasp": "A05",
+    "title": "CORS reflects any origin",
+    "verdict": "FINDING",
+    "evidence": "ACAO=https://evil.example creds=null (CORS_ORIGINS not set => reflect all; tokens are Bearer so impact is low, but open)"
+  },
+  {
+    "id": "A05-02",
+    "owasp": "A05",
+    "title": "Swagger UI exposed (no auth, no env gate)",
+    "verdict": "FINDING",
+    "evidence": "/api-docs -> 200"
+  },
+  {
+    "id": "A05-03",
+    "owasp": "A05",
+    "title": "Malformed JSON error does not leak stack",
+    "verdict": "PASS",
+    "evidence": "{\"statusCode\":400,\"error\":\"Bad Request\",\"message\":\"Unexpected end of JSON input\",\"code\":\"VALIDATION_ERROR\",\"timestamp\":\"2026-10-13T07:58:41."
+  },
+  {
+    "id": "A05-04",
+    "owasp": "A05",
+    "title": "Invalid id error shape",
+    "verdict": "PASS",
+    "evidence": "400 {\"statusCode\":400,\"error\":\"Bad Request\",\"message\":\"Validation failed (uuid is expected)\",\"code\":\"VALIDATION_ERROR\",\"time"
+  },
+  {
+    "id": "A05-05",
+    "owasp": "A05",
+    "title": "X-Powered-By / Server banner",
+    "verdict": "PASS",
+    "evidence": "x-powered-by=null"
+  },
+  {
+    "id": "A05-06",
+    "owasp": "A05",
+    "title": "TRACE method",
+    "verdict": "PASS",
+    "evidence": "-> 0"
+  },
+  {
+    "id": "A05-07",
+    "owasp": "A05",
+    "title": "Seeded default account 'testuser' (password in repo) created by db:migrate on every environment",
+    "verdict": "FINDING",
+    "evidence": "testuser rows: 1; password TestHavit123! is in database/seeds/2026-07-21-01-test-user.sql"
+  },
+  {
+    "id": "A07-09",
+    "owasp": "A07",
+    "title": "Login with the seeded default credentials",
+    "verdict": "PASS",
+    "evidence": "-> 429"
+  }
+]

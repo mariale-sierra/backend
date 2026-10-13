@@ -103,6 +103,38 @@ describe('HttpExceptionFilter', () => {
     expect(JSON.stringify(body)).not.toContain('some internal database error');
   });
 
+  // body-parser throws http-errors (not Nest exceptions): an oversized body is the caller's
+  // fault (413), and must not be logged as an ERROR with a stack.
+  it('keeps the 4xx of an Express middleware error (payload too large) and logs a warning, not an error', () => {
+    const error = Object.assign(new Error('request entity too large'), {
+      status: 413,
+      statusCode: 413,
+      type: 'entity.too.large',
+    });
+    const errorLog = jest
+      .spyOn(filter['logger'], 'error')
+      .mockImplementation(() => undefined);
+    const warnLog = jest
+      .spyOn(filter['logger'], 'warn')
+      .mockImplementation(() => undefined);
+    const host = buildHost({ method: 'POST', originalUrl: '/auth/login' });
+
+    filter.catch(error, host);
+
+    expect(statusMock).toHaveBeenCalledWith(413);
+    expect(jsonMock).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 413, error: 'Payload Too Large' }),
+    );
+    expect(errorLog).not.toHaveBeenCalled();
+    expect(warnLog).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not trust a 5xx status on a plain error: it stays a generic 500', () => {
+    const host = buildHost();
+    filter.catch(Object.assign(new Error('boom'), { status: 502 }), host);
+    expect(statusMock).toHaveBeenCalledWith(500);
+  });
+
   it('should use request.url as a fallback when originalUrl is not present', () => {
     const host = buildHost({ originalUrl: undefined, url: '/fallback-path' });
     filter.catch(new NotFoundException('x'), host);

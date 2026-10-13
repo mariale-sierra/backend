@@ -59,7 +59,55 @@ export class AuthService {
 
     const password_hash = await bcrypt.hash(password, 10);
 
-    const user = await this.dataSource.transaction(async (manager) => {
+    const user = await this.createUserTransaction(
+      email,
+      username,
+      password_hash,
+    );
+
+    return {
+      message: 'User registered successfully',
+      accessToken: await this.signToken(user),
+      user: { id: user.id, email: user.email, username: user.username },
+    };
+  }
+
+  /**
+   * Creates the account and its profile. Two sign-ups racing for the same email or username
+   * both pass the pre-check and the loser hits the unique index: that is a 409, not a 500.
+   */
+  private async createUserTransaction(
+    email: string,
+    username: string,
+    password_hash: string,
+  ): Promise<User> {
+    try {
+      return await this.runCreateUser(email, username, password_hash);
+    } catch (err) {
+      const driver = err as {
+        driverError?: { code?: string; detail?: string };
+        code?: string;
+        detail?: string;
+      };
+      const code = driver.driverError?.code ?? driver.code;
+      const detail = driver.driverError?.detail ?? driver.detail ?? '';
+      if (code === '23505') {
+        throw new ConflictException(
+          /username/i.test(detail)
+            ? 'Username already in use'
+            : 'Email already in use',
+        );
+      }
+      throw err;
+    }
+  }
+
+  private async runCreateUser(
+    email: string,
+    username: string,
+    password_hash: string,
+  ): Promise<User> {
+    return this.dataSource.transaction(async (manager) => {
       // DTO validation already guarantees both flags are true; the timestamp
       // is what actually gets recorded as the consent trail.
       const acceptedAt = new Date();
@@ -82,12 +130,6 @@ export class AuthService {
 
       return savedUser;
     });
-
-    return {
-      message: 'User registered successfully',
-      accessToken: await this.signToken(user),
-      user: { id: user.id, email: user.email, username: user.username },
-    };
   }
 
   /**

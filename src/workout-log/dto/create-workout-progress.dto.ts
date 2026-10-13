@@ -1,9 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
+  IsInt,
+  Min,
+  ValidateNested,
   IsBoolean,
   IsIn,
   IsOptional,
   IsString,
+  IsUrl,
   IsUUID,
   MaxLength,
 } from 'class-validator';
@@ -11,6 +18,18 @@ import {
 /** Same cap as the app's caption field (Sprint 9, B5 — captions now carry
  * #hashtags, so the app finally has a caption input). */
 const MAX_CAPTION_LENGTH = 500;
+
+export class WorkoutSubstitutionDto {
+  @ApiProperty({ description: 'Ejercicio original de la rutina', example: 10 })
+  @IsInt()
+  @Min(1)
+  originalExerciseId!: number;
+
+  @ApiProperty({ description: 'Ejercicio sustituto elegido', example: 25 })
+  @IsInt()
+  @Min(1)
+  substituteExerciseId!: number;
+}
 
 export class CreateWorkoutProgressDto {
   @ApiProperty({
@@ -33,6 +52,11 @@ export class CreateWorkoutProgressDto {
   })
   @IsOptional()
   @IsString()
+  @IsUrl(
+    { protocols: ['https'], require_protocol: true },
+    { message: 'imageUrl must be a valid https URL' },
+  )
+  @MaxLength(500, { message: 'imageUrl must be at most 500 characters' })
   imageUrl?: string;
 
   @ApiPropertyOptional({
@@ -62,4 +86,37 @@ export class CreateWorkoutProgressDto {
   @IsOptional()
   @IsBoolean()
   isRestDay?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Código de la location donde se entrenó (home, gym, outdoor...). Requerido si hay substitutions.',
+    example: 'home',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  locationCode?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Sustituciones del usuario para este workout. Se validan contra la location y las métricas; solo afectan a este workout, nunca a la rutina compartida.',
+    type: [WorkoutSubstitutionDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => WorkoutSubstitutionDto)
+  substitutions?: WorkoutSubstitutionDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'Post conjunto (B8): IDs de participantes del challenge (activos o que lo completaron; no quienes lo abandonaron) que su dueño etiqueta en el post. Solo el dueño puede etiquetar; omitido o vacío = post normal.',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsUUID('all', { each: true })
+  taggedUserIds?: string[];
 }

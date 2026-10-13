@@ -9,6 +9,8 @@ import { WorkoutLogExercise } from './entities/workout-log-exercise.entity';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
+import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
+import { ExerciseSubstitutionService } from '../exercises/exercise-substitution.service';
 import { RedisCacheService } from '../cache/redis-cache.service';
 
 /**
@@ -168,6 +170,7 @@ const createMockRepo = () => ({
   findOneBy: jest.fn(),
   save: jest.fn(),
   create: jest.fn((v: unknown) => v),
+  exists: jest.fn().mockResolvedValue(true),
 });
 
 /** Never rejects/throws — a real caller error would be a test bug, not a signal. */
@@ -283,8 +286,19 @@ describe('WorkoutLogService — B5 concurrency', () => {
         },
         { provide: getRepositoryToken(Challenge), useValue: challengeRepo },
         {
+          provide: getRepositoryToken(ChallengeCycleDay),
+          useValue: createMockRepo(),
+        },
+        {
           provide: getRepositoryToken(ChallengeUserMap),
           useValue: challengeUserMapRepo,
+        },
+        {
+          provide: ExerciseSubstitutionService,
+          useValue: {
+            getLocationByCode: jest.fn(),
+            resolveSubstitutions: jest.fn().mockResolvedValue(new Map()),
+          },
         },
         {
           provide: RedisCacheService,

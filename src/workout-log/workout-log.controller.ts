@@ -141,6 +141,9 @@ export class WorkoutLogController {
       visibility: body.visibility,
       isRestDay: body.isRestDay,
       timezone: resolveRequestTimezone(req),
+      locationCode: body.locationCode,
+      substitutions: body.substitutions,
+      taggedUserIds: body.taggedUserIds,
     });
   }
 

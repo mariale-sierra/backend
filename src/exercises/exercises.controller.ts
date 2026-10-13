@@ -9,10 +9,12 @@ import {
   Query,
 } from '@nestjs/common';
 import { ExercisesService } from './exercises.service';
+import { ExerciseSubstitutionService } from './exercise-substitution.service';
 import {
   ApiBearerAuth,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -22,10 +24,27 @@ import { CountExercisesQueryDto } from './dto/count-exercises-query.dto';
 import { QueryExercisesDto } from './dto/query-exercises.dto';
 import { Public } from '../auth/decorators/public.decorator';
 
+function parseIdList(raw: string | undefined, name: string, optional = false) {
+  if (!raw?.trim()) {
+    if (optional) return [];
+    throw new BadRequestException(`${name} is required`);
+  }
+  const ids = raw.split(',').map((v) => Number(v.trim()));
+  if (ids.some((n) => !Number.isInteger(n) || n < 1) || ids.length > 100) {
+    throw new BadRequestException(
+      `${name} must be up to 100 positive integers`,
+    );
+  }
+  return ids;
+}
+
 @ApiTags('Exercises')
 @Controller('exercises')
 export class ExercisesController {
-  constructor(private readonly exercisesService: ExercisesService) {}
+  constructor(
+    private readonly exercisesService: ExercisesService,
+    private readonly substitutionService: ExerciseSubstitutionService,
+  ) {}
 
   @Post()
   @ApiBearerAuth()
@@ -50,6 +69,50 @@ export class ExercisesController {
   @ApiResponse({ status: 200, description: 'Página de ejercicios' })
   findAll(@Query() query: QueryExercisesDto) {
     return this.exercisesService.findAll(query);
+  }
+
+  @Get('location-availability')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Locations donde se puede hacer una lista de ejercicios',
+    description:
+      'Para cada location (excepto "anywhere") indica qué ejercicios de ?exerciseIds=1,2,3 no se pueden hacer ahí (requiresSubstitution). Un ejercicio etiquetado "anywhere" sirve en cualquier location.',
+  })
+  @ApiQuery({ name: 'exerciseIds', description: 'IDs separados por coma' })
+  @ApiResponse({ status: 200, description: 'Disponibilidad por location' })
+  locationAvailability(@Query('exerciseIds') exerciseIds?: string) {
+    return this.substitutionService.getLocationAvailability(
+      parseIdList(exerciseIds, 'exerciseIds'),
+    );
+  }
+
+  @Get(':id/alternatives')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Buscar ejercicios sustitutos para otra location',
+    description:
+      'Ejercicios activos disponibles en ?location= (o "anywhere") que conservan las métricas del original: tienen todas sus métricas required/primary, no exigen métricas required nuevas y no cambian la unidad por defecto de las métricas compartidas. Criterio completo en src/exercises/lib/exercise-substitution.ts.',
+  })
+  @ApiParam({ name: 'id', description: 'ID del ejercicio original' })
+  @ApiQuery({ name: 'location', description: 'Código de la nueva location' })
+  @ApiQuery({
+    name: 'exclude',
+    required: false,
+    description: 'IDs a excluir (ej. los demás ejercicios de la rutina)',
+  })
+  @ApiResponse({ status: 200, description: 'Alternativas compatibles' })
+  @ApiResponse({ status: 404, description: 'Ejercicio o location inexistente' })
+  findAlternatives(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('location') location?: string,
+    @Query('exclude') exclude?: string,
+  ) {
+    if (!location) throw new BadRequestException('location is required');
+    return this.substitutionService.findAlternatives(
+      id,
+      location,
+      parseIdList(exclude, 'exclude', true),
+    );
   }
 
   @Public()

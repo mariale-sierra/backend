@@ -1,3 +1,4 @@
+import { ExerciseSubstitutionService } from '../exercises/exercise-substitution.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
@@ -115,6 +116,14 @@ describe('RoutineService.addExerciseToRoutine', () => {
       providers: [
         RoutineService,
         { provide: ChallengesService, useValue: {} },
+        {
+          provide: ExerciseSubstitutionService,
+          useValue: {
+            getLocationByCode: jest.fn(),
+            resolveSubstitutions: jest.fn().mockResolvedValue(new Map()),
+            getLocationAvailability: jest.fn().mockResolvedValue([]),
+          },
+        },
         { provide: DataSource, useValue: dataSource },
         { provide: getRepositoryToken(Routine), useValue: routineRepo },
         {
@@ -393,6 +402,14 @@ describe('RoutineService.getTodayRoutine', () => {
       providers: [
         RoutineService,
         { provide: ChallengesService, useValue: challengeService },
+        {
+          provide: ExerciseSubstitutionService,
+          useValue: {
+            getLocationByCode: jest.fn(),
+            resolveSubstitutions: jest.fn().mockResolvedValue(new Map()),
+            getLocationAvailability: jest.fn().mockResolvedValue([]),
+          },
+        },
         { provide: DataSource, useValue: { transaction: jest.fn() } },
         { provide: getRepositoryToken(Routine), useValue: createMockRepo() },
         {
@@ -487,6 +504,14 @@ describe('RoutineService.deactivateRoutine', () => {
       providers: [
         RoutineService,
         { provide: ChallengesService, useValue: {} },
+        {
+          provide: ExerciseSubstitutionService,
+          useValue: {
+            getLocationByCode: jest.fn(),
+            resolveSubstitutions: jest.fn().mockResolvedValue(new Map()),
+            getLocationAvailability: jest.fn().mockResolvedValue([]),
+          },
+        },
         { provide: DataSource, useValue: { transaction: jest.fn() } },
         { provide: getRepositoryToken(Routine), useValue: routineRepo },
         {

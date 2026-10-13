@@ -24,6 +24,11 @@ export class User {
   @Column({ default: false })
   is_admin!: boolean;
 
+  // Moderation: activity (writes) is blocked until this moment. NULL = not suspended.
+  // 2026-10-13-01 migration; set by WorkoutPostReportsService.resolve on a strike.
+  @Column({ type: 'timestamptz', nullable: true })
+  suspended_until!: Date | null;
+
   // B2 — consent trail (2026-10-02-03 migration). NULL for accounts created
   // before T&C acceptance existed.
   @Column({ type: 'timestamptz', nullable: true })

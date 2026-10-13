@@ -638,12 +638,16 @@ export class ChallengesService {
       .leftJoinAndSelect('targets.metricType', 'targetMetricType')
       .where('cycleDay.challenge_id = :challengeId', { challengeId })
       .orderBy('cycleDay.day_in_cycle', 'ASC')
+      // Without this the exercises came back in arbitrary join order, not
+      // the routine's own order (getTodayRoutine already sorts the same way).
+      .addOrderBy('routineExercise.order_index', 'ASC')
       .addOrderBy('sets.set_number', 'ASC')
       .getMany();
 
     return cycleDays.map((cycleDay) => ({
       day_number: cycleDay.day_in_cycle,
       is_rest_day: cycleDay.day_type === 'rest',
+      routine_id: cycleDay.routine_id ?? null,
       routine_name: cycleDay.routine?.name,
       routine_description: cycleDay.routine?.description,
       exercises: (cycleDay.routine?.routine_exercises ?? []).map(
@@ -653,6 +657,8 @@ export class ChallengesService {
             re.exercise?.category_maps?.[0]?.category;
 
           return {
+            // B7: lets the app ask for location alternatives for this exercise.
+            exercise_id: re.exercise_id,
             name: re.exercise?.name,
             description: re.exercise?.description ?? null,
             activity_type: primaryCategory
@@ -940,10 +946,13 @@ export class ChallengesService {
       throw new BadRequestException('This challenge is closed');
     }
 
+    // A voluntary leave ('left', only ever written by leaveChallenge) is the
+    // one past membership that may come back in. Removal deletes the row and
+    // a ban is rejected at the JWT guard, so neither reaches this branch.
     const alreadyJoined = await this.challengeUserMapRepo.findOne({
       where: { user_id: userId, challenge_id: challengeId },
     });
-    if (alreadyJoined)
+    if (alreadyJoined && alreadyJoined.status !== 'left')
       throw new BadRequestException('Already joined this challenge');
 
     if (challenge.visibility === 'private') {
@@ -991,12 +1000,17 @@ export class ChallengesService {
       }
     }
 
-    const join = this.challengeUserMapRepo.create({
-      user_id: userId,
-      challenge_id: challengeId,
-      role: 'participant',
-      status: 'active',
-    });
+    // (challenge_id, user_id) is the primary key: a rejoin reactivates the
+    // same row, exactly like approving a join request does for an existing
+    // one (respondToChallengeJoinRequest), instead of inserting a duplicate.
+    const join = alreadyJoined
+      ? Object.assign(alreadyJoined, { status: 'active' as const })
+      : this.challengeUserMapRepo.create({
+          user_id: userId,
+          challenge_id: challengeId,
+          role: 'participant',
+          status: 'active',
+        });
 
     await this.challengeUserMapRepo.save(join);
     await this.cache.bumpVersion(CACHE_NAMESPACE);
@@ -1038,6 +1052,27 @@ export class ChallengesService {
   }
 
   /**
+   * The caller's own pending request for a challenge — never anyone else's —
+   * so the challenge screen can show "request sent" again after being
+   * reopened instead of offering Join (which answers 409). Same flag
+   * SpacesService exposes for spaces (hasPendingRequest).
+   */
+  async getMyJoinRequestStatus(
+    userId: string,
+    challengeId: string,
+  ): Promise<{ hasPendingRequest: boolean }> {
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId, is_active: true },
+    });
+    if (!challenge) throw new NotFoundException('Challenge not found');
+
+    const pending = await this.challengeJoinRequestRepo.count({
+      where: { challenge_id: challengeId, user_id: userId, status: 'pending' },
+    });
+    return { hasPendingRequest: pending > 0 };
+  }
+
+  /**
    * Approve/reject a pending join request. Runs in a transaction with a row lock on the
    * request, same shape as `SpacesService.respondToJoinRequest`, to avoid
    * double-processing under concurrent approve/reject calls.
@@ -1057,6 +1092,11 @@ export class ChallengesService {
       userId,
       'Only the owner can respond to join requests',
     );
+    // Approving adds a member, and no one can join a closed challenge (same
+    // rule joinChallenge enforces). Rejecting stays allowed.
+    if (approve && challenge.status === 'closed') {
+      throw new BadRequestException('This challenge is closed');
+    }
 
     let requesterId: string | undefined;
     const response = await this.dataSource.transaction(async (manager) => {
@@ -1198,6 +1238,29 @@ export class ChallengesService {
     await this.cache.bumpVersion(CACHE_NAMESPACE);
     void this.notifyChallengeClosed(challenge);
     return { message: 'Challenge closed successfully' };
+  }
+
+  /**
+   * Admin-only (AdminGuard at the controller, like closeChallenge): the exact
+   * inverse of closing. Closing only ever flips `status` — it never touches
+   * memberships, join requests, cycle days, routines, workout logs or any
+   * date — so reopening only flips it back: joining and logging progress are
+   * accepted again and everything recorded before and during the close is
+   * kept as it was.
+   */
+  async reopenChallenge(challengeId: string): Promise<{ message: string }> {
+    const challenge = await this.challengeRepo.findOne({
+      where: { id: challengeId, is_active: true },
+    });
+    if (!challenge) throw new NotFoundException('Challenge not found');
+    if (challenge.status !== 'closed') {
+      throw new BadRequestException('Challenge is not closed');
+    }
+
+    challenge.status = 'open';
+    await this.challengeRepo.save(challenge);
+    await this.cache.bumpVersion(CACHE_NAMESPACE);
+    return { message: 'Challenge reopened successfully' };
   }
 
   /**

@@ -37,7 +37,6 @@ import { CreateWorkoutProgressDto } from '../workout-log/dto/create-workout-prog
 import { UseGuards } from '@nestjs/common';
 import { ChallengeProgressSummaryDto } from './dto/challenge-progress-summary.dto';
 import { UpdateChallengeCycleDayDto } from './dto/update-challenge-cycle-day.dto';
-import { Public } from '../auth/decorators/public.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { resolveRequestTimezone } from '../common/timezone.util';
@@ -173,7 +172,6 @@ export class ChallengesController {
     );
   }
 
-  @Public()
   @Get()
   @ApiOperation({
     summary: 'Obtener todos los desafíos',
@@ -202,7 +200,9 @@ export class ChallengesController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
-    const cursor = query.cursor ? decodeCursor(query.cursor, 'uuid') : undefined;
+    const cursor = query.cursor
+      ? decodeCursor(query.cursor, 'uuid')
+      : undefined;
 
     const { nextCursor, ...body } = await this.challengesService.findAll(
       cursor,
@@ -319,6 +319,28 @@ export class ChallengesController {
     return this.challengesService.getChallengeJoinRequests(user.sub, id);
   }
 
+  @Get(':id/join-requests/mine')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiOperation({
+    summary: 'Mi solicitud de ingreso pendiente',
+    description:
+      'Si el usuario autenticado tiene una solicitud pendiente para este desafío. Solo informa la propia, nunca las de otros usuarios.',
+  })
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+      properties: { hasPendingRequest: { type: 'boolean' } },
+    },
+  })
+  @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
+  getMyJoinRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<{ hasPendingRequest: boolean }> {
+    return this.challengesService.getMyJoinRequestStatus(user.sub, id);
+  }
+
   @Post(':id/join-requests/:requestId/approve')
   @ApiBearerAuth()
   @ApiParam({ name: 'id', description: 'ID del desafío' })
@@ -374,7 +396,23 @@ export class ChallengesController {
     return this.challengesService.closeChallenge(id);
   }
 
-  @Public()
+  @Patch(':id/reopen')
+  @UseGuards(AdminGuard)
+  @ApiBearerAuth()
+  @ApiParam({ name: 'id', description: 'ID del desafío' })
+  @ApiOperation({
+    summary: 'Reactivar desafío cerrado (admin)',
+    description:
+      'Inverso de cerrar: vuelve a aceptar ingresos y progreso nuevo. No toca participantes, solicitudes, rutinas, historial ni fechas. Solo administradores.',
+  })
+  @ApiOkResponse({ description: 'Desafío reactivado' })
+  @ApiResponse({ status: 400, description: 'El desafío no está cerrado' })
+  @ApiForbiddenResponse({ description: 'Solo administradores' })
+  @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
+  reopenChallenge(@Param('id', ParseUUIDPipe) id: string) {
+    return this.challengesService.reopenChallenge(id);
+  }
+
   @Get(':id/author')
   @ApiParam({ name: 'id', description: 'ID del desafío' })
   @ApiOperation({
@@ -388,7 +426,6 @@ export class ChallengesController {
     return this.challengesService.getChallengeAuthor(id);
   }
 
-  @Public()
   @Get(':id')
   @ApiParam({ name: 'id', description: 'ID del desafío' })
   @ApiOperation({

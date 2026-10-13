@@ -15,13 +15,19 @@ import { WorkoutLogExerciseSet } from './entities/workout-log-exercise-set.entit
 import { WorkoutLogExerciseSetTarget } from './entities/workout-log-exercise-set-target.entity';
 import { Between, In } from 'typeorm';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
+import { assertOwnership } from '../auth/utils/assert-ownership';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
+import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
 import {
   getLocalCalendarDate,
   getLocalDayBoundsUtc,
 } from '../common/timezone.util';
+import { ExerciseSubstitutionService } from '../exercises/exercise-substitution.service';
+import { filterTargetsForSubstitute } from '../exercises/lib/exercise-substitution';
+import { Exercise } from '../exercises/entities/exercise.entity';
 import { getCycleDayInfo } from '../common/cycle-day.util';
+import { assertOwnUploadUrl } from '../uploads/upload-url.util';
 import { RedisCacheService } from '../cache/redis-cache.service';
 import {
   DecodedCursor,
@@ -69,7 +75,12 @@ export class WorkoutLogService {
     @InjectRepository(ChallengeUserMap)
     private challengeUserMapRepo: Repository<ChallengeUserMap>,
 
+    @InjectRepository(ChallengeCycleDay)
+    private cycleDayRepo: Repository<ChallengeCycleDay>,
+
     private readonly cache: RedisCacheService,
+
+    private readonly substitutionService: ExerciseSubstitutionService,
   ) {}
 
   async createWorkout(dto: {
@@ -86,12 +97,22 @@ export class WorkoutLogService {
      * create() path never reaches the day-check block below, so it's fine
      * to omit there. */
     timezone?: string;
+    /** B7: location trained at + the user's own exercise substitutions. */
+    locationCode?: string;
+    substitutions?: Array<{
+      originalExerciseId: number;
+      substituteExerciseId: number;
+    }>;
+    /** B8: joint post — participants the challenge owner tags in it. */
+    taggedUserIds?: string[];
   }) {
     if (!dto.isRestDay && !dto.imageUrl) {
       throw new BadRequestException(
         'Se requiere una imagen para guardar este progreso.',
       );
     }
+    // Only the caller's own uploaded objects (https, under their R2 folder): never arbitrary URLs.
+    if (dto.imageUrl) assertOwnUploadUrl(dto.imageUrl, dto.userId);
 
     // Fetched once up front (when there's a challenge at all) and reused below for the
     // auto-complete check after the workout is saved — one query serves both, rather than
@@ -118,6 +139,8 @@ export class WorkoutLogService {
       if (challenge.status === 'closed') {
         throw new BadRequestException('This challenge is closed');
       }
+
+      await this.assertCanLogChallengeProgress(dto, challenge);
 
       // Bounded by the user's local calendar day, not the server's UTC
       // clock, so the one-log-per-day gate agrees with the "completed
@@ -152,6 +175,13 @@ export class WorkoutLogService {
       }
     }
 
+    // B8 (BUG-03): validated before anything is written, so a bad tag never
+    // leaves a half-saved progress behind.
+    const taggedUserIds = [...new Set(dto.taggedUserIds ?? [])];
+    if (taggedUserIds.length > 0) {
+      await this.assertCanTag(dto, challenge, taggedUserIds);
+    }
+
     // Resolved before the transaction starts — a plain read, independent of
     // the workout log row being created, so it doesn't need to run inside
     // the same transaction/connection.
@@ -162,8 +192,12 @@ export class WorkoutLogService {
     let savedWorkout: WorkoutLog;
     try {
       savedWorkout = await this.dataSource.transaction(async (manager) => {
+        const location = dto.locationCode
+          ? await this.substitutionService.getLocationByCode(dto.locationCode)
+          : null;
         const workout = manager.create(WorkoutLog, {
           routineId: dto.routineId,
+          locationId: location?.id,
           userId: dto.userId,
           challengeId: dto.challengeId,
           localDay,
@@ -188,11 +222,30 @@ export class WorkoutLogService {
               order: { order_index: 'ASC' },
             });
 
+          // B7: validated server-side (location, active, metric compatibility,
+          // no duplicates) -- an invalid pair throws 400 and rolls back the whole
+          // submission, so incompatible data is never persisted. Only THIS
+          // user's workout_log_exercises row changes; routine_exercises (shared
+          // with every participant) is read, never written.
+          const substitutes =
+            await this.substitutionService.resolveSubstitutions(
+              routineExercises.map((re) => re.exercise_id),
+              dto.substitutions ?? [],
+              dto.locationCode,
+            );
+
           const workoutExercises = await manager.save(
             routineExercises.map((routineExercise) =>
               manager.create(WorkoutLogExercise, {
                 workout: createdWorkout,
-                exercise: routineExercise.exercise,
+                exercise: substitutes.has(routineExercise.exercise_id)
+                  ? ({
+                      id: substitutes.get(routineExercise.exercise_id)!.id,
+                    } as Exercise)
+                  : routineExercise.exercise,
+                originalExercise: substitutes.has(routineExercise.exercise_id)
+                  ? routineExercise.exercise
+                  : null,
                 orderIndex: routineExercise.order_index,
                 notes: routineExercise.notes,
               }),
@@ -202,10 +255,21 @@ export class WorkoutLogService {
           for (let index = 0; index < routineExercises.length; index += 1) {
             const routineExercise = routineExercises[index];
             const workoutExercise = workoutExercises[index];
+            const substitute = substitutes.get(routineExercise.exercise_id);
+            // A substitute only keeps targets for metrics it actually tracks.
+            const keepTargets = <T extends { metric_type_id: number }>(
+              targets: T[],
+            ): T[] =>
+              substitute
+                ? filterTargetsForSubstitute(
+                    targets.map((t) => ({ t, metricTypeId: t.metric_type_id })),
+                    substitute.metrics,
+                  ).map(({ t }) => t)
+                : targets;
 
             if (routineExercise.targets?.length) {
               await manager.save(
-                routineExercise.targets.map((target) =>
+                keepTargets(routineExercise.targets).map((target) =>
                   manager.create(WorkoutLogExerciseTarget, {
                     workoutLogExercise: workoutExercise,
                     metricTypeId: target.metric_type_id,
@@ -242,7 +306,7 @@ export class WorkoutLogService {
 
                 if (routineSet.targets?.length) {
                   await manager.save(
-                    routineSet.targets.map((target) =>
+                    keepTargets(routineSet.targets).map((target) =>
                       manager.create(WorkoutLogExerciseSetTarget, {
                         workoutLogExerciseSet: workoutSet,
                         metricTypeId: target.metric_type_id,
@@ -266,7 +330,7 @@ export class WorkoutLogService {
         // operation, so a failure here rolls back the workout log too instead
         // of leaving an orphaned "progress recorded" row with no post.
         if (!dto.isRestDay) {
-          await this.workoutPostsService.create(
+          const post = await this.workoutPostsService.create(
             {
               workout_log_id: createdWorkout.id,
               user_id: dto.userId,
@@ -276,6 +340,14 @@ export class WorkoutLogService {
             },
             manager,
           );
+          if (taggedUserIds.length > 0) {
+            await this.workoutPostsService.tagUsers(
+              post.id,
+              taggedUserIds,
+              dto.userId,
+              manager,
+            );
+          }
         }
 
         return createdWorkout;
@@ -372,6 +444,81 @@ export class WorkoutLogService {
   }
 
   /**
+   * BUG-04: progress in a challenge needs an active membership in it, and a
+   * `routineId` the client sends must be one of that challenge's own cycle-day
+   * routines (the B7 substitutions are validated against that routine, so an
+   * arbitrary one would let a log borrow someone else's exercises). Both run
+   * before anything is written. A rest-day log has no routine to check.
+   */
+  private async assertCanLogChallengeProgress(
+    dto: { userId: string; challengeId?: string; routineId?: number },
+    challenge: Challenge,
+  ): Promise<void> {
+    const isMember = await this.challengeUserMapRepo.exists({
+      where: {
+        challenge_id: challenge.id,
+        user_id: dto.userId,
+        status: 'active',
+      },
+    });
+    if (!isMember) {
+      throw new ForbiddenException(
+        'You must be an active participant of this challenge to log progress',
+      );
+    }
+
+    if (dto.routineId) {
+      const belongs = await this.cycleDayRepo.exists({
+        where: { challenge_id: challenge.id, routine_id: dto.routineId },
+      });
+      if (!belongs) {
+        throw new BadRequestException(
+          'The routine does not belong to this challenge',
+        );
+      }
+    }
+  }
+
+  /**
+   * Joint posts (B8): only the challenge's owner tags, only on a challenge
+   * progress post with a photo, and only participants of that same challenge
+   * (active or completed — everyone but those who left, the membership rule
+   * the app uses everywhere, including the TagParticipantsSheet's list) other
+   * than themselves.
+   */
+  private async assertCanTag(
+    dto: { userId: string; challengeId?: string; isRestDay?: boolean },
+    challenge: Challenge | null,
+    taggedUserIds: string[],
+  ): Promise<void> {
+    if (!dto.challengeId || !challenge || dto.isRestDay) {
+      throw new BadRequestException(
+        'Tagging participants needs a challenge progress post with a photo',
+      );
+    }
+    assertOwnership(
+      challenge.created_by_user_id,
+      dto.userId,
+      'Only the challenge owner can tag participants',
+    );
+    if (taggedUserIds.includes(dto.userId)) {
+      throw new BadRequestException('You cannot tag yourself');
+    }
+    const participants = await this.challengeUserMapRepo.count({
+      where: {
+        challenge_id: dto.challengeId,
+        user_id: In(taggedUserIds),
+        status: In(['active', 'completed']),
+      },
+    });
+    if (participants !== taggedUserIds.length) {
+      throw new BadRequestException(
+        'Tagged users must be participants of this challenge',
+      );
+    }
+  }
+
+  /**
    * A post can never become globally public content from a private
    * challenge — challenges.visibility (who can access/join a challenge) and
    * workout_posts.visibility (who can see a post) are independent concepts,
@@ -427,6 +574,7 @@ export class WorkoutLogService {
       relations: [
         'exercises',
         'exercises.exercise',
+        'exercises.originalExercise',
         'exercises.metrics',
         'exercises.targets',
         'exercises.sets',
@@ -515,6 +663,7 @@ export class WorkoutLogService {
       relations: [
         'exercises',
         'exercises.exercise',
+        'exercises.originalExercise',
         'exercises.metrics',
         'exercises.targets',
         'exercises.sets',

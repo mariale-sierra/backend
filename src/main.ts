@@ -5,6 +5,7 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
+import { isSwaggerEnabled, resolveCorsOrigin } from './config/http-config';
 import {
   helmetOptions,
   securityHeadersMiddleware,
@@ -25,11 +26,9 @@ async function bootstrap() {
   // a future web client). CORS_ORIGINS is a comma-separated allow-list; with
   // nothing configured we reflect the request origin (permissive but
   // explicit) rather than disabling the check entirely.
-  const corsOrigins = process.env.CORS_ORIGINS?.split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+  // Allow-list only (see config/http-config.ts): with nothing configured CORS is off.
   app.enableCors({
-    origin: corsOrigins && corsOrigins.length > 0 ? corsOrigins : true,
+    origin: resolveCorsOrigin(process.env),
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'PUT', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Timezone'],
     // Without this, a browser-based caller (Swagger UI, a future web client)
@@ -39,31 +38,37 @@ async function bootstrap() {
     // subject to CORS).
     exposedHeaders: ['X-Next-Cursor'],
   });
-  const config = new DocumentBuilder()
-    .setTitle('Havit - Fitness API')
-    .setDescription(
-      'API completa para la aplicación de fitness Havit. Incluye endpoints para autenticación, usuarios, rutinas, ejercicios, desafíos y tracking de entrenamientos.',
-    )
-    .setVersion('1.0')
-    .addServer(publicApiUrl)
-    .addTag('Auth', 'Endpoints de autenticación y login')
-    .addTag('Users', 'Endpoints para gestionar usuarios y perfiles')
-    .addTag('Challenges', 'Endpoints para gestionar desafíos')
-    .addTag('Exercises', 'Endpoints para gestionar ejercicios')
-    .addTag('Routine', 'Endpoints para gestionar rutinas')
-    .addTag('Metrics', 'Endpoints para gestionar métricas')
-    .addTag('Workout Logs', 'Endpoints para registrar entrenamientos')
-    .addTag('Feed', 'Feed público de publicaciones')
-    .addTag('Follows', 'Endpoints para seguir/dejar de seguir usuarios')
-    .addTag('Workout Post Reactions', 'Reacciones (likes) sobre publicaciones')
-    .addTag('Workout Post Comments', 'Comentarios sobre publicaciones')
-    .addTag('Badges', 'Badges de actividad calculados al vuelo')
-    .addTag('Notifications', 'Bandeja, preferencias y tokens push (B3)')
-    .addBearerAuth()
-    .build();
+  // Swagger (UI + /api-docs-json) is a developer tool: only when ENABLE_SWAGGER=true.
+  if (isSwaggerEnabled(process.env)) {
+    const config = new DocumentBuilder()
+      .setTitle('Havit - Fitness API')
+      .setDescription(
+        'API completa para la aplicación de fitness Havit. Incluye endpoints para autenticación, usuarios, rutinas, ejercicios, desafíos y tracking de entrenamientos.',
+      )
+      .setVersion('1.0')
+      .addServer(publicApiUrl)
+      .addTag('Auth', 'Endpoints de autenticación y login')
+      .addTag('Users', 'Endpoints para gestionar usuarios y perfiles')
+      .addTag('Challenges', 'Endpoints para gestionar desafíos')
+      .addTag('Exercises', 'Endpoints para gestionar ejercicios')
+      .addTag('Routine', 'Endpoints para gestionar rutinas')
+      .addTag('Metrics', 'Endpoints para gestionar métricas')
+      .addTag('Workout Logs', 'Endpoints para registrar entrenamientos')
+      .addTag('Feed', 'Feed público de publicaciones')
+      .addTag('Follows', 'Endpoints para seguir/dejar de seguir usuarios')
+      .addTag(
+        'Workout Post Reactions',
+        'Reacciones (likes) sobre publicaciones',
+      )
+      .addTag('Workout Post Comments', 'Comentarios sobre publicaciones')
+      .addTag('Badges', 'Badges de actividad calculados al vuelo')
+      .addTag('Notifications', 'Bandeja, preferencias y tokens push (B3)')
+      .addBearerAuth()
+      .build();
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api-docs', app, document);
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api-docs', app, document);
+  }
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

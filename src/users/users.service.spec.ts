@@ -1,3 +1,4 @@
+import { IsNull } from 'typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
@@ -237,6 +238,46 @@ describe('UsersService', () => {
     });
   });
 
+  describe('listBannedUsers (admin-only, gated by AdminGuard at the controller)', () => {
+    it('lists banned accounts, never deleted ones, with public-profile fields only', async () => {
+      userRepo.find.mockResolvedValue([
+        { id: 'u-1', username: 'ana' },
+        { id: 'u-2', username: 'beto' },
+      ]);
+      profileRepo.find.mockResolvedValue([
+        { user_id: 'u-1', display_name: 'Ana', profile_image_url: 'a.png' },
+      ]);
+
+      await expect(service.listBannedUsers()).resolves.toEqual([
+        {
+          id: 'u-1',
+          username: 'ana',
+          display_name: 'Ana',
+          profile_image_url: 'a.png',
+        },
+        {
+          id: 'u-2',
+          username: 'beto',
+          display_name: null,
+          profile_image_url: null,
+        },
+      ]);
+      expect(userRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { is_active: false, deleted_at: IsNull() },
+          select: ['id', 'username'],
+        }),
+      );
+    });
+
+    it('returns an empty list without loading profiles when nobody is banned', async () => {
+      userRepo.find.mockResolvedValue([]);
+
+      await expect(service.listBannedUsers()).resolves.toEqual([]);
+      expect(profileRepo.find).not.toHaveBeenCalled();
+    });
+  });
+
   describe('banUser / unbanUser (admin-only, gated by AdminGuard at the controller)', () => {
     it('should deactivate the target account', async () => {
       const user = baseUser();
@@ -281,6 +322,23 @@ describe('UsersService', () => {
       );
       expect(userRepo.save).not.toHaveBeenCalled();
     });
+
+    // B8: unbanning a deleted (anonymized) account flipped it back to active.
+    it.each([
+      ['banUser', () => service.banUser('user-1')],
+      ['unbanUser', () => service.unbanUser('user-1')],
+    ])(
+      '%s only ever looks up accounts that were not deleted',
+      async (_n, run) => {
+        userRepo.findOne.mockResolvedValue(null);
+
+        await expect(run()).rejects.toThrow(NotFoundException);
+        expect(userRepo.findOne).toHaveBeenCalledWith({
+          where: { id: 'user-1', deleted_at: IsNull() },
+        });
+        expect(userRepo.save).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('getMyProfile', () => {

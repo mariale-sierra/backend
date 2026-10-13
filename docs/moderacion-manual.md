@@ -38,3 +38,21 @@ Todo en una sola transacción (`dataSource.transaction`): fila del reporte bloqu
 ## Pruebas
 
 `src/workout-posts/workout-post-reports.service.spec.ts` (store en memoria con las dos restricciones únicas y rollback de transacción): flujo completo, cascada, descarte, reintento, rollback, targets inválidos, DTOs y guards.
+
+## Ocultar al reportante y suspensión por falta (Sprint 9)
+
+**Lo que reporto desaparece para mí al instante.** `WorkoutPostsService` (perfil/galería, feed, mosaico) y `WorkoutPostCommentsService.list` excluyen el contenido que el espectador reportó mientras el reporte siga `pending` o `actioned`; si un admin lo descarta (`dismissed`) vuelve a verse. El resto de usuarios lo sigue viendo hasta que un revisor lo oculta (`is_hidden`). Índice parcial `idx_content_reports_reporter_target_active`.
+
+**Penalización fija por motivo** (`REPORT_REASON_SUSPENSION_HOURS`, `entities/content-report.entity.ts`). Al resolver con `action: 'hide'` y `penalize: true` se registra el strike (con `user_penalties.suspension_hours`) y se fija `users.suspended_until = GREATEST(actual, now() + horas)` en la misma transacción (una suspensión más larga nunca se acorta):
+
+| Motivo | Suspensión |
+|---|---|
+| `spam`, `other`, `self_harm` | 24 h |
+| `harassment`, `nudity` | 72 h |
+| `hate_speech`, `violence` | 168 h (7 días) |
+
+**Qué bloquea.** `SuspensionGuard` (global, tras `JwtAuthGuard`): mientras `suspended_until` esté en el futuro, toda escritura (POST/PUT/PATCH/DELETE: publicar, comentar, mensajes, unirse, reportar…) responde `403 { code: 'ACCOUNT_SUSPENDED', suspendedUntil }`. Leer, `/auth/*` y `/notifications/*` siguen funcionando. Se levanta solo al pasar la fecha (sin job).
+
+**Aviso al autor.** La notificación `content_hidden` ya existente lleva ahora `data.suspendedHours` y `data.suspendedUntil` cuando hubo suspensión.
+
+Migración: `2026-10-13-01-user-suspension.sql` (`users.suspended_until`, `user_penalties.suspension_hours`, índice). Pruebas: unit (`suspension.guard.spec.ts`, `workout-post-reports.service.spec.ts`) y e2e R13.

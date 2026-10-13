@@ -1,7 +1,8 @@
 -- 2026-07-21-01-test-user.sql
--- Local/dev test account for manual QA against the mobile app.
--- Credentials: username "testuser" / password "TestHavit123!"
--- password_hash below is bcrypt(10) of that password.
+-- Cuenta de QA manual SOLO para desarrollo: se carga con `npm run db:demo`, nunca desde seeds/
+-- (los seeds corren en cada arranque, también en producción).
+-- Credenciales: username "testuser" / password "TestHavit123!"
+-- password_hash es bcrypt(10) de esa contraseña.
 
 INSERT INTO havit.users (username, email, password_hash, is_active)
 VALUES (

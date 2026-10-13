@@ -135,6 +135,51 @@ describe('AuthService', () => {
       ).rejects.toThrow(ConflictException);
       expect(dataSource.transaction).not.toHaveBeenCalled();
     });
+
+    // Two sign-ups racing for the same address both pass the pre-check; the loser hits the
+    // unique index and used to surface as a 500.
+    it.each([
+      ['email', 'Key (email)=(a@b.co) already exists.', 'Email already in use'],
+      [
+        'username',
+        'Key (username)=(ana) already exists.',
+        'Username already in use',
+      ],
+    ])(
+      'answers 409 when the %s unique index loses a race',
+      async (_field, detail, message) => {
+        userRepo.findOne.mockResolvedValue(null);
+        (bcrypt.hash as jest.Mock).mockResolvedValue('h');
+        dataSource.transaction.mockRejectedValue({
+          driverError: { code: '23505', detail },
+        });
+
+        await expect(
+          service.register({
+            email: 'a@b.co',
+            username: 'ana',
+            password: 'whatever12',
+            acceptTerms: true,
+            confirmAge16: true,
+          }),
+        ).rejects.toMatchObject({ message, status: 409 });
+      },
+    );
+
+    it('still lets unrelated database errors through as 500s', async () => {
+      userRepo.findOne.mockResolvedValue(null);
+      (bcrypt.hash as jest.Mock).mockResolvedValue('h');
+      dataSource.transaction.mockRejectedValue(new Error('connection lost'));
+      await expect(
+        service.register({
+          email: 'a@b.co',
+          username: 'ana',
+          password: 'whatever12',
+          acceptTerms: true,
+          confirmAge16: true,
+        }),
+      ).rejects.toThrow('connection lost');
+    });
   });
 
   describe('acceptTerms', () => {

@@ -41,6 +41,10 @@ export class WorkoutLog {
   @Column({ name: 'local_day', type: 'date', nullable: true })
   localDay?: string;
 
+  /** B7: exercise_locations.id the user trained at (null = routine as written). */
+  @Column({ name: 'location_id', type: 'int', nullable: true })
+  locationId?: number | null;
+
   @Column({ name: 'started_at', type: 'timestamp' })
   started_at!: Date;
 

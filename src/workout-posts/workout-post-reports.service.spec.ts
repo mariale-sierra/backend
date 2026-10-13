@@ -37,6 +37,7 @@ interface Store {
   comments: Row[];
   reports: Row[];
   penalties: Row[];
+  suspensions: Row[];
 }
 
 const POST_ID = '11111111-1111-4111-8111-111111111111';
@@ -95,6 +96,7 @@ function seed(): Store {
     ],
     reports: [],
     penalties: [],
+    suspensions: [],
   };
 }
 
@@ -242,12 +244,24 @@ function buildHarness() {
       return Promise.resolve({ affected: rows.length });
     }),
     query: jest.fn((sql: string, params: unknown[]) => {
+      if (sql.includes('UPDATE havit.users')) {
+        // Suspension: GREATEST(existing, now + hours); never shortens a longer one.
+        const [userId, hours] = params as [string, number];
+        const until = new Date(Date.now() + Number(hours) * 3_600_000);
+        const row = store.suspensions.find((r) => r.user_id === userId);
+        const current = row?.suspended_until as Date | undefined;
+        const next = current && current > until ? current : until;
+        if (row) row.suspended_until = next;
+        else store.suspensions.push({ user_id: userId, suspended_until: next });
+        return Promise.resolve([{ suspended_until: next }]);
+      }
       if (!sql.includes('INSERT INTO havit.user_penalties')) {
         throw new Error('unexpected SQL');
       }
       if (failPenaltyInsert) throw new Error('db down');
       const [user_id, report_id, target_type, target_id, reason, issued_by] =
         params as string[];
+      const suspension_hours = params[6];
       const conflict = store.penalties.some(
         (p) => p.target_type === target_type && p.target_id === target_id,
       );
@@ -261,6 +275,7 @@ function buildHarness() {
         target_id,
         reason,
         issued_by,
+        suspension_hours,
         penalty_type: 'strike',
       });
       return Promise.resolve([{ id }]);
@@ -322,6 +337,44 @@ describe('WorkoutPostReportsService', () => {
   });
 
   describe('report -> pending -> resolve (hide + penalty)', () => {
+    // Moderation penalty: a strike suspends the author's activity for a fixed time per reason.
+    it.each([
+      ['spam', 24],
+      ['harassment', 72],
+      ['hate_speech', 168],
+    ] as const)(
+      'a %s strike suspends the author for %d hours',
+      async (reason, hours) => {
+        await h.service.create(REPORTER, {
+          targetType: 'post',
+          targetId: POST_ID,
+          reason,
+        });
+        const before = Date.now();
+        await h.service.resolve(1, ADMIN, { action: 'hide', penalize: true });
+
+        const until = h.store.suspensions.find((r) => r.user_id === AUTHOR)!
+          .suspended_until as Date;
+        expect(until.getTime() - before).toBeGreaterThanOrEqual(
+          hours * 3_600_000 - 5_000,
+        );
+        expect(until.getTime() - before).toBeLessThanOrEqual(
+          hours * 3_600_000 + 5_000,
+        );
+        expect(h.store.penalties[0]).toMatchObject({ suspension_hours: hours });
+      },
+    );
+
+    it('hiding without a strike suspends nobody', async () => {
+      await h.service.create(REPORTER, {
+        targetType: 'post',
+        targetId: POST_ID,
+        reason: 'spam',
+      });
+      await h.service.resolve(1, ADMIN, { action: 'hide' });
+      expect(h.store.suspensions).toHaveLength(0);
+    });
+
     it('hides the post, audits the report, records one strike, and empties the queue', async () => {
       const created = await h.service.create(REPORTER, {
         targetType: 'post',
@@ -695,7 +748,13 @@ describe('WorkoutPostReportsService', () => {
         },
         expect.objectContaining({
           type: 'content_hidden',
-          data: { targetType: 'comment', strike: 'true' },
+          // `reason` of that report decides the fixed suspension that goes with the strike.
+          data: expect.objectContaining({
+            targetType: 'comment',
+            strike: 'true',
+            suspendedHours: expect.any(String),
+            suspendedUntil: expect.any(String),
+          }),
         }),
       ]);
       const serialized = JSON.stringify(calls);

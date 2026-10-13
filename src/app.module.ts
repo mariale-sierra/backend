@@ -3,7 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
+import { RedisThrottlerStorage } from './cache/redis-throttler-storage';
 import { ScheduleModule } from '@nestjs/schedule';
 import { CacheModule } from './cache/cache.module';
 import { AuthModule } from './auth/auth.module';
@@ -23,6 +23,7 @@ import { ChatsModule } from './chats/chats.module';
 import { SpacesModule } from './spaces/spaces.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { SuspensionGuard } from './auth/guards/suspension.guard';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { validateEnv } from './config/env.validation';
@@ -56,7 +57,9 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
     // shares one real counter in Redis instead — same env var, same
     // zero-risk/env-gated rollout as RedisCacheService itself (unset =
     // old in-memory behavior, no code change needed to roll back). See
-    // backend/performance/B1-REDIS.md.
+    // backend/performance/B1-REDIS.md. If Redis is unreachable the storage
+    // falls back to that same in-memory Map instead of failing every request
+    // (see RedisThrottlerStorage).
     ThrottlerModule.forRootAsync({
       useFactory: () => ({
         throttlers: [
@@ -67,7 +70,7 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
           },
         ],
         storage: process.env.REDIS_URL
-          ? new ThrottlerStorageRedisService(process.env.REDIS_URL)
+          ? new RedisThrottlerStorage(process.env.REDIS_URL)
           : undefined,
       }),
     }),
@@ -149,6 +152,11 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    // Right after the JWT guard (so request.user is set): a moderation suspension blocks writes.
+    {
+      provide: APP_GUARD,
+      useClass: SuspensionGuard,
     },
     {
       provide: APP_GUARD,

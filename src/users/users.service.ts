@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, ILike, In, IsNull, Not, Repository } from 'typeorm';
+import { BannedUserResponseDto } from './dto/banned-user-response.dto';
 import { User } from './entities/user.entity';
 import { UserProfile } from './entities/user-profile.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
@@ -18,6 +19,7 @@ import {
 import { FollowsService } from '../follows/follows.service';
 import { ModerationService } from '../openai/moderation.service';
 import { getLocalDayBoundsUtc } from '../common/timezone.util';
+import { assertOwnUploadUrl } from '../uploads/upload-url.util';
 import { getCycleDayInfo } from '../common/cycle-day.util';
 import {
   getCurrentStreakDays,
@@ -72,8 +74,12 @@ export class UsersService {
    * JwtAuthGuard rejects the user's already-issued JWTs within ~30 s (its cached
    * per-user account check), which makes the app sign them out.
    */
+  // A deleted account (anonymized, deleted_at set) doesn't exist for ban or
+  // unban either — unbanning one used to flip it back to is_active = true.
   async banUser(targetUserId: string): Promise<{ message: string }> {
-    const user = await this.userRepo.findOne({ where: { id: targetUserId } });
+    const user = await this.userRepo.findOne({
+      where: { id: targetUserId, deleted_at: IsNull() },
+    });
     if (!user) throw new NotFoundException('User not found');
 
     user.is_active = false;
@@ -82,12 +88,40 @@ export class UsersService {
   }
 
   async unbanUser(targetUserId: string): Promise<{ message: string }> {
-    const user = await this.userRepo.findOne({ where: { id: targetUserId } });
+    const user = await this.userRepo.findOne({
+      where: { id: targetUserId, deleted_at: IsNull() },
+    });
     if (!user) throw new NotFoundException('User not found');
 
     user.is_active = true;
     await this.userRepo.save(user);
     return { message: 'User unbanned successfully' };
+  }
+
+  /**
+   * Accounts an admin banned and can unban (B8): is_active = false is only
+   * ever written by banUser or by account deletion, and a deleted account
+   * also has deleted_at set — so this is exactly the banned ones. Without it
+   * a banned user was unreachable from the app (their public profile 404s).
+   */
+  async listBannedUsers(): Promise<BannedUserResponseDto[]> {
+    const users = await this.userRepo.find({
+      where: { is_active: false, deleted_at: IsNull() },
+      select: ['id', 'username'],
+      order: { username: 'ASC' },
+    });
+    if (users.length === 0) return [];
+
+    const profiles = await this.profileRepo.find({
+      where: { user_id: In(users.map((u) => u.id)) },
+    });
+    const profileByUser = new Map(profiles.map((p) => [p.user_id, p]));
+    return users.map((u) => ({
+      id: u.id,
+      username: u.username,
+      display_name: profileByUser.get(u.id)?.display_name ?? null,
+      profile_image_url: profileByUser.get(u.id)?.profile_image_url ?? null,
+    }));
   }
 
   async findByEmail(email: string) {
@@ -194,6 +228,7 @@ export class UsersService {
     userId: string,
     profileImageUrl: string,
   ): Promise<ProfileResponseDto> {
+    assertOwnUploadUrl(profileImageUrl, userId, 'profile_image_url');
     const user = await this.userRepo.findOne({
       where: { id: userId },
       select: ['id', 'username', 'email', 'is_active'],

@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 
 import { Routine } from './entities/routine.entity';
 import { RoutineExercise } from './entities/routine-exercise.entity';
@@ -22,11 +22,17 @@ import {
 } from './dto/add-routine-exercise.dto';
 import { MetricType } from '../metrics/entities/metric-type.entity';
 import { buildTargetValueColumns } from '../metrics/target-value.util';
+import {
+  ExerciseSubstitutionService,
+  type SubstitutionPair,
+} from '../exercises/exercise-substitution.service';
+import { filterTargetsForSubstitute } from '../exercises/lib/exercise-substitution';
 
 @Injectable()
 export class RoutineService {
   constructor(
     private challengeService: ChallengesService,
+    private substitutionService: ExerciseSubstitutionService,
     private dataSource: DataSource,
     @InjectRepository(Routine)
     private routineRepo: Repository<Routine>,
@@ -237,6 +243,7 @@ export class RoutineService {
     challengeId: string,
     userId: string,
     timezone: string = 'UTC',
+    options: { locationCode?: string; substitutions?: SubstitutionPair[] } = {},
   ) {
     const today = await this.challengeService.getToday(
       challengeId,
@@ -293,12 +300,65 @@ export class RoutineService {
       .addOrderBy('sets.set_number', 'ASC')
 
       .getMany();
+
+    // Sprint 9, B7: locations the routine can be done at, and (optionally) the
+    // caller's own substitutions applied IN MEMORY only -- routine_exercises
+    // rows are shared by every participant and are never written here.
+    const originalExerciseIds = exercises.map((e) => e.exercise_id);
+    const locations =
+      await this.substitutionService.getLocationAvailability(
+        originalExerciseIds,
+      );
+    const substitutes = await this.substitutionService.resolveSubstitutions(
+      originalExerciseIds,
+      options.substitutions ?? [],
+      options.locationCode,
+    );
+    let effectiveExercises = exercises;
+    if (substitutes.size > 0) {
+      const substituteEntities = await this.exerciseRepo.find({
+        where: { id: In([...substitutes.values()].map((s) => s.id)) },
+        relations: { exercise_metrics: { metricType: true } },
+      });
+      const byId = new Map(substituteEntities.map((e) => [e.id, e]));
+      effectiveExercises = exercises.map((re) => {
+        const profile = substitutes.get(re.exercise_id);
+        const entity = profile && byId.get(profile.id);
+        if (!profile || !entity) return re;
+        return {
+          ...re,
+          exercise: entity,
+          exercise_id: entity.id,
+          originalExercise: { id: re.exercise.id, name: re.exercise.name },
+          targets: filterTargetsForSubstitute(
+            (re.targets ?? []).map((t) => ({
+              ...t,
+              metricTypeId: t.metric_type_id,
+            })),
+            profile.metrics,
+          ),
+          sets: (re.sets ?? []).map((set) => ({
+            ...set,
+            targets: filterTargetsForSubstitute(
+              (set.targets ?? []).map((t) => ({
+                ...t,
+                metricTypeId: t.metric_type_id,
+              })),
+              profile.metrics,
+            ),
+          })),
+        } as RoutineExercise;
+      });
+    }
+
     return {
       hasWorkout: true,
       currentDay: today.currentDay,
       currentDayInCycle: today.currentDayInCycle,
       routine_id: today.routine_id,
-      exercises,
+      locationCode: options.locationCode ?? null,
+      locations,
+      exercises: effectiveExercises,
     };
   }
 
