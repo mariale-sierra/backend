@@ -8,6 +8,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import {
   ContentReport,
+  REPORT_REASON_SUSPENSION_HOURS,
   ReportTargetType,
 } from './entities/content-report.entity';
 import { UserPenalty } from './entities/user-penalty.entity';
@@ -291,6 +292,7 @@ export class WorkoutPostReportsService {
     const note = dto.note?.trim() || null;
     let resolved: ContentReport | undefined;
     let siblingReporters: Array<{ reportId: number; reporterId: string }> = [];
+    let suspension: { hours: number; until: Date } | null | undefined;
 
     const result = await this.dataSource.transaction<ResolveReportResultDto>(
       async (manager) => {
@@ -331,10 +333,11 @@ export class WorkoutPostReportsService {
           }
 
           if (penalize) {
+            const hours = REPORT_REASON_SUSPENSION_HOURS[report.reason] ?? 24;
             const inserted: Array<{ id: number }> = await manager.query(
               `INSERT INTO havit.user_penalties
-               (user_id, report_id, target_type, target_id, penalty_type, reason, issued_by)
-             VALUES ($1, $2, $3, $4, 'strike', $5, $6)
+               (user_id, report_id, target_type, target_id, penalty_type, reason, issued_by, suspension_hours)
+             VALUES ($1, $2, $3, $4, 'strike', $5, $6, $7)
              ON CONFLICT (target_type, target_id) DO NOTHING
              RETURNING id`,
               [
@@ -344,9 +347,28 @@ export class WorkoutPostReportsService {
                 report.target_id,
                 note ?? report.reason,
                 adminId,
+                hours,
               ],
             );
             penaltyRecorded = inserted.length > 0;
+
+            // A new strike suspends the author's activity for the fixed time of this reason;
+            // an existing, longer suspension is never shortened.
+            if (penaltyRecorded) {
+              // TypeORM returns [rows, affectedCount] for UPDATE ... RETURNING on Postgres.
+              const raw: unknown = await manager.query(
+                `UPDATE havit.users
+                 SET suspended_until = GREATEST(COALESCE(suspended_until, now()), now() + make_interval(hours => $2))
+                 WHERE id = $1
+                 RETURNING suspended_until`,
+                [report.target_owner_id, hours],
+              );
+              const first = Array.isArray(raw) ? raw[0] : undefined;
+              const row = (Array.isArray(first) ? first[0] : first) as
+                | { suspended_until: Date }
+                | undefined;
+              if (row) suspension = { hours, until: row.suspended_until };
+            }
           }
 
           // Once the content is hidden, every other pending report about it is
@@ -411,7 +433,12 @@ export class WorkoutPostReportsService {
     );
 
     if (resolved) {
-      this.notifyResolution(resolved, result, siblingReporters);
+      this.notifyResolution(
+        resolved,
+        result,
+        siblingReporters,
+        suspension ?? null,
+      );
     }
     return result;
   }
@@ -426,6 +453,7 @@ export class WorkoutPostReportsService {
     report: ContentReport,
     result: ResolveReportResultDto,
     siblingReporters: Array<{ reportId: number; reporterId: string }>,
+    suspension: { hours: number; until: Date } | null,
   ): void {
     const reporters = [
       { reportId: Number(report.id), reporterId: report.reporter_id },
@@ -447,6 +475,12 @@ export class WorkoutPostReportsService {
         data: {
           targetType: report.target_type,
           strike: String(result.penaltyRecorded),
+          ...(suspension
+            ? {
+                suspendedHours: String(suspension.hours),
+                suspendedUntil: new Date(suspension.until).toISOString(),
+              }
+            : {}),
         },
       });
     }

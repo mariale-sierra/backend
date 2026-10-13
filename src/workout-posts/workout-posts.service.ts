@@ -459,6 +459,7 @@ export class WorkoutPostsService {
        LEFT JOIN havit.challenges c ON c.id = wl.challenge_id
        WHERE wl.challenge_id = $1 AND p.is_hidden = false AND p.is_active = true
          ${moderationFilter} ${this.postVisibilityFilter(viewerParamIndex)}
+         ${this.reportedByViewerFilter(viewerParamIndex)}
        ORDER BY p.created_at DESC`,
       params,
     );
@@ -536,6 +537,21 @@ export class WorkoutPostsService {
    * rule fetchPaginatedPhotos() applies for GET /workout-posts/user/:userId),
    * so a post's visibility doesn't depend on which endpoint reads it.
    */
+  /**
+   * Content the viewer reported disappears from THEIR views right away and stays gone while the
+   * report is pending (or was acted on). A report the admin dismissed lets it come back. Other
+   * people keep seeing the post until a reviewer decides, which is what `is_hidden` is for.
+   */
+  private reportedByViewerFilter(viewerParamIndex: number): string {
+    return `AND NOT EXISTS (
+      SELECT 1 FROM havit.content_reports cr
+      WHERE cr.reporter_id = $${viewerParamIndex}
+        AND cr.target_type = 'post'
+        AND cr.target_id = p.id::text
+        AND cr.status <> 'dismissed'
+    )`;
+  }
+
   private postVisibilityFilter(viewerParamIndex: number): string {
     return `AND (
       p.visibility != 'private' OR p.user_id = $${viewerParamIndex}
@@ -638,7 +654,7 @@ export class WorkoutPostsService {
        LEFT JOIN havit.challenges c ON c.id = wl.challenge_id
        LEFT JOIN havit.challenge_user_map cum
               ON cum.challenge_id = wl.challenge_id AND cum.user_id = p.user_id
-       WHERE ${whereClause} AND p.is_hidden = false AND p.is_active = true ${moderationFilter} ${visibilityFilter}
+       WHERE ${whereClause} AND p.is_hidden = false AND p.is_active = true ${moderationFilter} ${visibilityFilter} ${this.reportedByViewerFilter(viewerParamIndex)}
        ORDER BY p.created_at DESC`,
       params,
     );
@@ -781,7 +797,7 @@ export class WorkoutPostsService {
        LEFT JOIN havit.challenges c ON c.id = wl.challenge_id
        LEFT JOIN havit.challenge_user_map cum
               ON cum.challenge_id = wl.challenge_id AND cum.user_id = p.user_id
-       WHERE ${baseWhereClause} AND p.is_hidden = false AND p.is_active = true ${moderationFilter} ${visibilityFilter} ${challengePrivacyFilter} ${cursorFilter}
+       WHERE ${baseWhereClause} AND p.is_hidden = false AND p.is_active = true ${moderationFilter} ${visibilityFilter} ${challengePrivacyFilter} ${this.reportedByViewerFilter(viewerParamIndex)} ${cursorFilter}
        ORDER BY p.created_at DESC, p.id DESC
        LIMIT $${limitParamIndex}`,
       params,
@@ -882,9 +898,11 @@ export class WorkoutPostsService {
     const params: unknown[] = [];
 
     let visibilityFilter = `p.visibility = 'public'`;
+    let reportedFilter = '';
     if (options.viewerId) {
       params.push(options.viewerId);
       const viewerParamIndex = params.length;
+      reportedFilter = this.reportedByViewerFilter(viewerParamIndex);
       visibilityFilter = `(
         p.visibility = 'public'
         OR (
@@ -930,6 +948,7 @@ export class WorkoutPostsService {
          AND p.is_active = true
          AND c.visibility != 'private'
          AND c.is_active = true
+         ${reportedFilter}
          ${cursorFilter}
        ORDER BY p.created_at DESC, p.id DESC
        LIMIT $${limitParamIndex}`,

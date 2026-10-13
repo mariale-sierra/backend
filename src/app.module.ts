@@ -23,6 +23,7 @@ import { ChatsModule } from './chats/chats.module';
 import { SpacesModule } from './spaces/spaces.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { SuspensionGuard } from './auth/guards/suspension.guard';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { validateEnv } from './config/env.validation';
@@ -151,6 +152,11 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    // Right after the JWT guard (so request.user is set): a moderation suspension blocks writes.
+    {
+      provide: APP_GUARD,
+      useClass: SuspensionGuard,
     },
     {
       provide: APP_GUARD,

@@ -110,6 +110,17 @@ export class WorkoutPostCommentsService {
       .where('c.workout_post_id = :postId', { postId })
       .andWhere('c.is_active = true')
       .andWhere('c.is_hidden = false')
+      // Comments the viewer reported vanish for them at once (until a reviewer dismisses it).
+      .andWhere(
+        `NOT EXISTS (
+          SELECT 1 FROM havit.content_reports cr
+          WHERE cr.reporter_id = :viewerId
+            AND cr.target_type = 'comment'
+            AND cr.target_id = CAST(c.id AS text)
+            AND cr.status <> 'dismissed'
+        )`,
+        { viewerId: userId },
+      )
       .orderBy('c.id', 'ASC')
       .take(limit + 1);
 

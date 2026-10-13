@@ -22,6 +22,20 @@ export const REPORT_REASONS = [
 ] as const;
 export type ReportReason = (typeof REPORT_REASONS)[number];
 
+/**
+ * Fixed suspension (hours of blocked activity) that comes with a strike, by the reason of
+ * the report that led to it. Lighter conduct = a day; serious conduct = a week.
+ */
+export const REPORT_REASON_SUSPENSION_HOURS: Record<ReportReason, number> = {
+  spam: 24,
+  other: 24,
+  self_harm: 24,
+  harassment: 72,
+  nudity: 72,
+  hate_speech: 168,
+  violence: 168,
+};
+
 export type ReportStatus = 'pending' | 'dismissed' | 'actioned';
 
 export const REPORT_RESOLUTION_ACTIONS = ['dismiss', 'hide'] as const;

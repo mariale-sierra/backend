@@ -1082,4 +1082,103 @@ describeDb('API integration & regression (real Postgres)', () => {
         .expect(200);
     });
   });
+  // R13 — moderación: lo que reporto desaparece para mí al instante, y una falta
+  // suspende la actividad (escrituras) del autor por un tiempo fijo según el motivo.
+  describe('R13 regresión: reportes ocultan al reportante y una falta suspende al autor', () => {
+    it('oculta el post al reportante, no a los demás; la falta suspende 7 días por hate_speech y bloquea escrituras', async () => {
+      const author = await signUp();
+      const reporter = await signUp();
+      const other = await signUp();
+      const admin = await signUp();
+      await ds.query(`UPDATE havit.users SET is_admin = true WHERE id = $1`, [
+        admin.userId,
+      ]);
+      const authorAuth = { Authorization: `Bearer ${author.token}` };
+      const reporterAuth = { Authorization: `Bearer ${reporter.token}` };
+      const otherAuth = { Authorization: `Bearer ${other.token}` };
+      const adminAuth = { Authorization: `Bearer ${admin.token}` };
+
+      const challengeId = await createChallenge(author.userId);
+      await http()
+        .post('/workout-logs/progress')
+        .set(authorAuth)
+        .send({
+          challengeId,
+          imageUrl: 'https://example.com/r13.jpg',
+          visibility: 'public',
+        })
+        .expect(201);
+      const [{ id: postId }] = await ds.query(
+        `SELECT id FROM havit.workout_posts WHERE user_id = $1`,
+        [author.userId],
+      );
+      await ds.query(
+        `UPDATE havit.workout_posts SET moderation_status = 'approved' WHERE id = $1`,
+        [postId],
+      );
+
+      const postsOf = async (auth: { Authorization: string }) =>
+        (
+          await http()
+            .get(`/workout-posts/user/${author.userId}`)
+            .set(auth)
+            .expect(200)
+        ).body.map((p: { id: string }) => String(p.id));
+
+      expect(await postsOf(reporterAuth)).toContain(postId);
+
+      await http()
+        .post('/reports')
+        .set(reporterAuth)
+        .send({ targetType: 'post', targetId: postId, reason: 'hate_speech' })
+        .expect(201);
+
+      // Gone for the reporter right away; everyone else still sees it until a reviewer decides.
+      expect(await postsOf(reporterAuth)).not.toContain(postId);
+      expect(await postsOf(otherAuth)).toContain(postId);
+
+      const [{ id: reportId }] = await ds.query(
+        `SELECT id FROM havit.content_reports WHERE reporter_id = $1`,
+        [reporter.userId],
+      );
+      await http()
+        .patch(`/reports/${reportId}/resolve`)
+        .set(adminAuth)
+        .send({ action: 'hide', penalize: true })
+        .expect(200);
+
+      const [{ hours }] = await ds.query(
+        `SELECT round(extract(epoch FROM (suspended_until - now())) / 3600)::int AS hours
+         FROM havit.users WHERE id = $1`,
+        [author.userId],
+      );
+      expect(hours).toBe(168);
+
+      // Suspended: writes answer 403 ACCOUNT_SUSPENDED, reading keeps working.
+      const blocked = await http()
+        .post('/workout-logs/progress')
+        .set(authorAuth)
+        .send({
+          challengeId: await createChallenge(author.userId),
+          imageUrl: 'https://example.com/r13b.jpg',
+        })
+        .expect(403);
+      expect(blocked.body.code).toBe('ACCOUNT_SUSPENDED');
+      await http().get('/users/me/challenges').set(authorAuth).expect(200);
+
+      // The penalty ends by itself.
+      await ds.query(
+        `UPDATE havit.users SET suspended_until = now() - interval '1 minute' WHERE id = $1`,
+        [author.userId],
+      );
+      await http()
+        .post('/workout-logs/progress')
+        .set(authorAuth)
+        .send({
+          challengeId: await createChallenge(author.userId),
+          imageUrl: 'https://example.com/r13c.jpg',
+        })
+        .expect(201);
+    });
+  });
 });
