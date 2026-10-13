@@ -10,6 +10,7 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  IsUrl,
   IsUUID,
   MaxLength,
 } from 'class-validator';
@@ -51,6 +52,11 @@ export class CreateWorkoutProgressDto {
   })
   @IsOptional()
   @IsString()
+  @IsUrl(
+    { protocols: ['https'], require_protocol: true },
+    { message: 'imageUrl must be a valid https URL' },
+  )
+  @MaxLength(500, { message: 'imageUrl must be at most 500 characters' })
   imageUrl?: string;
 
   @ApiPropertyOptional({

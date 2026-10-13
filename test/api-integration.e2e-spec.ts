@@ -104,6 +104,9 @@ describeDb('API integration & regression (real Postgres)', () => {
     process.env.JWT_SECRET ??= 'integration-test-secret';
     // El rate limit global no es lo que se prueba aquí.
     process.env.THROTTLE_LIMIT = '100000';
+    // Definida (vacía) para que un .env local no la rellene: el filtro de imageUrl solo exige
+    // 'su carpeta de R2' cuando hay URL pública configurada, y aquí se prueba con una explícita.
+    process.env.CLOUDFLARE_R2_PUBLIC_URL = '';
 
     const { AppModule } = await import('../src/app.module');
     const moduleRef = await Test.createTestingModule({
@@ -407,7 +410,10 @@ describeDb('API integration & regression (real Postgres)', () => {
       );
 
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        const res = await http().get(`/challenges/${challengeId}`).expect(200);
+        const res = await http()
+          .get(`/challenges/${challengeId}`)
+          .set({ Authorization: `Bearer ${user.token}` })
+          .expect(200);
         const [day] = res.body.cycle_days;
         expect(
           day.exercises.map((e: { exercise_id: number }) => e.exercise_id),
@@ -658,7 +664,10 @@ describeDb('API integration & regression (real Postgres)', () => {
         .expect(200);
 
       expect(await snapshot()).toEqual(before);
-      const detail = await http().get(`/challenges/${challengeId}`).expect(200);
+      const detail = await http()
+        .get(`/challenges/${challengeId}`)
+        .set(memberAuth)
+        .expect(200);
       expect(detail.body.status).toBe('open');
       await http()
         .post(`/challenges/${challengeId}/join`)
@@ -1179,6 +1188,100 @@ describeDb('API integration & regression (real Postgres)', () => {
           imageUrl: 'https://example.com/r13c.jpg',
         })
         .expect(201);
+    });
+  });
+  // R14 — auditoría OWASP (semana 1): retos solo con sesión, imageUrl propia, 413 y 409 en carreras.
+  describe('R14 regresión: endurecimiento de la auditoría OWASP', () => {
+    it('los retos (lista, detalle y autor) ya no se leen sin token', async () => {
+      const owner = await signUp();
+      const id = await createChallenge(owner.userId);
+      await http().get('/challenges').expect(401);
+      await http().get(`/challenges/${id}`).expect(401);
+      await http().get(`/challenges/${id}/author`).expect(401);
+      const auth = { Authorization: `Bearer ${owner.token}` };
+      await http().get('/challenges').set(auth).expect(200);
+      await http().get(`/challenges/${id}`).set(auth).expect(200);
+    });
+
+    it('imageUrl: solo https y, con R2 configurado, solo archivos del propio usuario', async () => {
+      const user = await signUp();
+      const other = await signUp();
+      const auth = { Authorization: `Bearer ${user.token}` };
+      const post = (challengeId: string, imageUrl: string) =>
+        http()
+          .post('/workout-logs/progress')
+          .set(auth)
+          .send({ challengeId, imageUrl });
+
+      const bad = await createChallenge(user.userId);
+      for (const url of [
+        'file:///etc/passwd',
+        'javascript:alert(1)',
+        'http://169.254.169.254/latest/meta-data/',
+        'ftp://evil.example/x.jpg',
+        `https://example.com/${'a'.repeat(600)}`,
+      ]) {
+        await post(bad, url).expect(400);
+      }
+      expect(
+        await ds.query(`SELECT 1 FROM havit.workout_logs WHERE user_id = $1`, [
+          user.userId,
+        ]),
+      ).toHaveLength(0);
+
+      const previous = process.env.CLOUDFLARE_R2_PUBLIC_URL;
+      process.env.CLOUDFLARE_R2_PUBLIC_URL = 'https://pub-test.r2.dev';
+      try {
+        await post(
+          bad,
+          `https://pub-test.r2.dev/uploads/${other.userId}/a.jpg`,
+        ).expect(400);
+        await post(bad, 'https://example.com/uploads/x/a.jpg').expect(400);
+        await post(
+          bad,
+          `https://pub-test.r2.dev/uploads/${user.userId}/a.jpg`,
+        ).expect(201);
+      } finally {
+        if (previous === undefined) delete process.env.CLOUDFLARE_R2_PUBLIC_URL;
+        else process.env.CLOUDFLARE_R2_PUBLIC_URL = previous;
+      }
+    });
+
+    it('un cuerpo enorme responde 413 y no 500', async () => {
+      const res = await http()
+        .post('/auth/login')
+        .set('Content-Type', 'application/json')
+        .send(
+          JSON.stringify({ email: 'a@b.co', password: 'x'.repeat(2_000_000) }),
+        );
+      expect(res.status).toBe(413);
+    });
+
+    it('registros simultáneos con el mismo correo/usuario: uno entra, el resto 409, ningún 500', async () => {
+      const tag = randomUUID().slice(0, 8);
+      const body = {
+        email: `race_${tag}@example.com`,
+        username: `race_${tag}`,
+        password: 'password123',
+        acceptTerms: true,
+        confirmAge16: true,
+      };
+      const statuses = (
+        await Promise.all(
+          Array.from({ length: 12 }, () =>
+            http().post('/auth/register').send(body),
+          ),
+        )
+      ).map((r) => r.status);
+      expect(statuses.filter((s) => s === 200)).toHaveLength(1);
+      expect(statuses.filter((s) => s >= 500)).toHaveLength(0);
+      expect(statuses.filter((s) => s === 409)).toHaveLength(11);
+    });
+
+    it('Swagger y CORS abiertos ya no son el valor por defecto', async () => {
+      // The e2e app is built from AppModule (main.ts is not executed), so the switches are
+      // covered by src/config/http-config.spec.ts; here we only check no docs route leaks.
+      await http().get('/api-docs-json').expect(404);
     });
   });
 });

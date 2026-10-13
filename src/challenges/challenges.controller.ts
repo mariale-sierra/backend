@@ -37,7 +37,6 @@ import { CreateWorkoutProgressDto } from '../workout-log/dto/create-workout-prog
 import { UseGuards } from '@nestjs/common';
 import { ChallengeProgressSummaryDto } from './dto/challenge-progress-summary.dto';
 import { UpdateChallengeCycleDayDto } from './dto/update-challenge-cycle-day.dto';
-import { Public } from '../auth/decorators/public.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { resolveRequestTimezone } from '../common/timezone.util';
@@ -173,7 +172,6 @@ export class ChallengesController {
     );
   }
 
-  @Public()
   @Get()
   @ApiOperation({
     summary: 'Obtener todos los desafíos',
@@ -202,7 +200,9 @@ export class ChallengesController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
-    const cursor = query.cursor ? decodeCursor(query.cursor, 'uuid') : undefined;
+    const cursor = query.cursor
+      ? decodeCursor(query.cursor, 'uuid')
+      : undefined;
 
     const { nextCursor, ...body } = await this.challengesService.findAll(
       cursor,
@@ -413,7 +413,6 @@ export class ChallengesController {
     return this.challengesService.reopenChallenge(id);
   }
 
-  @Public()
   @Get(':id/author')
   @ApiParam({ name: 'id', description: 'ID del desafío' })
   @ApiOperation({
@@ -427,7 +426,6 @@ export class ChallengesController {
     return this.challengesService.getChallengeAuthor(id);
   }
 
-  @Public()
   @Get(':id')
   @ApiParam({ name: 'id', description: 'ID del desafío' })
   @ApiOperation({

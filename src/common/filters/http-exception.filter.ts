@@ -34,6 +34,19 @@ interface StandardErrorBody {
  * `new Error(...)` or other unhandled exception still produces this shape
  * (as a 500) instead of Express's default HTML error page.
  */
+/** 4xx status carried by a non-Nest error (http-errors), or undefined. */
+function clientErrorStatus(exception: unknown): number | undefined {
+  if (!exception || typeof exception !== 'object') return undefined;
+  const { status, statusCode } = exception as {
+    status?: unknown;
+    statusCode?: unknown;
+  };
+  const value = typeof status === 'number' ? status : statusCode;
+  return typeof value === 'number' && value >= 400 && value < 500
+    ? value
+    : undefined;
+}
+
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger('ExceptionsHandler');
@@ -44,9 +57,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const request = ctx.getRequest<Request>();
 
     const isHttpException = exception instanceof HttpException;
+    // Errors raised by Express middleware (body-parser: 413 payload too large, 400 malformed
+    // body...) are not Nest HttpExceptions but carry the right 4xx in `status`/`statusCode`.
+    const clientStatus = isHttpException
+      ? undefined
+      : clientErrorStatus(exception);
     const statusCode = isHttpException
       ? exception.getStatus()
-      : HttpStatus.INTERNAL_SERVER_ERROR;
+      : (clientStatus ?? HttpStatus.INTERNAL_SERVER_ERROR);
 
     let message: string | string[] = STATUS_CODES[statusCode] ?? 'Error';
     let error: string = STATUS_CODES[statusCode] ?? 'Error';
@@ -76,6 +94,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
       } else {
         message = exception.message;
       }
+    } else if (clientStatus) {
+      // The caller's fault, not ours: no stack, not an ERROR (a flood of oversized bodies used
+      // to write one error-with-stack per request).
+      this.logger.warn(
+        `${request.method} ${request.originalUrl ?? request.url}: ${statusCode} ${
+          exception instanceof Error ? exception.message : ''
+        }`,
+      );
     } else {
       // Unhandled/unexpected error (e.g. a plain `new Error(...)`, a DB
       // driver error, etc). Log the full detail server-side; the client

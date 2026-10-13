@@ -19,6 +19,7 @@ import {
 import { FollowsService } from '../follows/follows.service';
 import { ModerationService } from '../openai/moderation.service';
 import { getLocalDayBoundsUtc } from '../common/timezone.util';
+import { assertOwnUploadUrl } from '../uploads/upload-url.util';
 import { getCycleDayInfo } from '../common/cycle-day.util';
 import {
   getCurrentStreakDays,
@@ -227,6 +228,7 @@ export class UsersService {
     userId: string,
     profileImageUrl: string,
   ): Promise<ProfileResponseDto> {
+    assertOwnUploadUrl(profileImageUrl, userId, 'profile_image_url');
     const user = await this.userRepo.findOne({
       where: { id: userId },
       select: ['id', 'username', 'email', 'is_active'],

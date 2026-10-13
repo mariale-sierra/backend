@@ -2,6 +2,20 @@
 
 Alcance: backend NestJS (`backend/`), app Expo (`frontend/`) y el pipeline de despliegue (`raiz/`, `.github/workflows`). Sigue al escaneo ZAP de B2 (2026-10-03, ver historial git de `docs/security/B2-SEGURIDAD-Y-LEGAL.md`) y lo amplía con pruebas autenticadas, lógica de negocio, dependencias y carga.
 
+## 0. Estado de remediación (semana 1, 2026-10-13)
+
+| Hallazgo | Estado | Qué se hizo |
+|---|---|---|
+| H2 `testuser` sembrado | **Corregido en código** (efecto en producción al desplegar) | El seed salió de `database/seeds/` y vive en `database/demo/` (solo `npm run db:demo`). La migración `2026-10-13-02-disable-seeded-testuser.sql` desactiva la cuenta y anula su hash **solo si todavía tiene la contraseña publicada** (no la borra). Opcional, a mano en la base real: `DELETE FROM havit.users WHERE email = 'testuser@havit.dev';` |
+| H3 Retos sin sesión | **Corregido** | `GET /challenges`, `/challenges/:id` y `/challenges/:id/author` exigen JWT (401 sin token). **Decisión:** los retos privados siguen apareciendo en Explorar para usuarios con sesión, porque HU-18 ("solicitar el ingreso a uno privado") necesita que se puedan encontrar; ocultarlos de la lista exigiría otro mecanismo de descubrimiento (invitaciones/enlace). Queda como decisión de producto. |
+| H4 `imageUrl` | **Corregido** | `@IsUrl(https)` + máx. 500 en el DTO; en el servicio, con `CLOUDFLARE_R2_PUBLIC_URL` configurado la URL debe estar bajo `<R2>/uploads/<tu userId>/`. La foto de perfil aplica la misma regla. Sin R2 configurado (local/tests) solo se exige https y longitud. |
+| H5 Dependencias backend | **Parcial** | `npm audit fix` (solo lockfile): de 10 vulnerabilidades de producción (1 crítica, 5 altas) a 2 (`@nestjs/swagger` → `js-yaml`), cuyo arreglo exige subir `@nestjs/swagger` de versión mayor; queda para una tarea aparte. Frontend: pendiente (sección 6, punto 4). |
+| M5 CORS / Swagger | **Corregido** | Sin `CORS_ORIGINS` ya no hay CORS (antes reflejaba cualquier origen). Swagger UI y `/api-docs-json` solo con `ENABLE_SWAGGER=true`. |
+| M6 413 y 500 en registro | **Corregido** | Errores 4xx de Express (cuerpo grande) conservan su estado (413) y se registran como `warn` sin stack; el registro concurrente (correo o usuario repetido) devuelve 409 en lugar de 500. |
+| H1, M1–M4, M7–M9 | Pendientes | Ver plan (sección 6). |
+
+**Despliegue — qué cambia en el servidor:** (1) Swagger desaparece hasta definir `ENABLE_SWAGGER=true` en el `.env` del servidor; (2) CORS queda apagado: si se publica una versión **web** de la app, hay que definir `CORS_ORIGINS=https://tu-dominio`; la app móvil no se ve afectada; (3) la migración desactiva `testuser` al arrancar; (4) quien consuma esos tres endpoints de retos sin token (scripts, Postman) ahora recibe 401.
+
 ## 1. Cómo se probó (y qué NO se probó)
 
 | Qué | Cómo |
