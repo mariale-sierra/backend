@@ -9,6 +9,7 @@ import { WorkoutLogExerciseTarget } from './entities/workout-log-exercise-target
 import { RoutineExercise } from '../routine/entities/routine-exercise.entity';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
+import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
 import { RedisCacheService } from '../cache/redis-cache.service';
 import { ExerciseSubstitutionService } from '../exercises/exercise-substitution.service';
@@ -92,8 +93,12 @@ describe('WorkoutLogService - per-user location substitutions (B7)', () => {
         { provide: getRepositoryToken(RoutineExercise), useValue: {} },
         { provide: getRepositoryToken(WorkoutLog), useValue: workoutRepo },
         { provide: getRepositoryToken(WorkoutLogExercise), useValue: {} },
-        { provide: getRepositoryToken(Challenge), useValue: { findOne: jest.fn() } },
+        {
+          provide: getRepositoryToken(Challenge),
+          useValue: { findOne: jest.fn() },
+        },
         { provide: getRepositoryToken(ChallengeUserMap), useValue: {} },
+        { provide: getRepositoryToken(ChallengeCycleDay), useValue: {} },
         { provide: WorkoutPostsService, useValue: { create: jest.fn() } },
         { provide: DataSource, useValue: dataSource },
       ],
@@ -172,7 +177,9 @@ describe('WorkoutLogService - per-user location substitutions (B7)', () => {
     expect(first.exercise).toBe(routineRows[0].exercise);
     expect(first.originalExercise).toBeNull();
     expect(substitution.getLocationByCode).not.toHaveBeenCalled();
-    expect(targetRows().filter((t) => t.workoutLogExercise === first)).toHaveLength(2);
+    expect(
+      targetRows().filter((t) => t.workoutLogExercise === first),
+    ).toHaveLength(2);
   });
 
   it('rejects an invalid substitution before persisting anything else (400, rolled back)', async () => {
@@ -224,7 +231,10 @@ describe('WorkoutLogService - per-user location substitutions (B7)', () => {
       await service.findOne(7, 'user-a');
       const call = workoutRepo.findOne.mock.calls[0][0];
       expect(call.relations).toEqual(
-        expect.arrayContaining(['exercises.exercise', 'exercises.originalExercise']),
+        expect.arrayContaining([
+          'exercises.exercise',
+          'exercises.originalExercise',
+        ]),
       );
     });
 

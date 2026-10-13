@@ -84,6 +84,12 @@ describeDb('API integration & regression (real Postgres)', () => {
        VALUES ($1, 'it challenge', 'public', $2, 30, $3)`,
       [id, ownerId, status],
     );
+    // As ChallengesService.createChallenge does: the creator is an active owner-member.
+    await ds.query(
+      `INSERT INTO havit.challenge_user_map (challenge_id, user_id, role, status)
+       VALUES ($1, $2, 'owner', 'active')`,
+      [id, ownerId],
+    );
     return id;
   };
 
@@ -200,6 +206,67 @@ describeDb('API integration & regression (real Postgres)', () => {
         .post('/workout-logs/progress')
         .set(auth)
         .send({ challengeId: closedId, imageUrl: 'https://example.com/x.jpg' })
+        .expect(400);
+    });
+  });
+
+  // R12 — BUG-04: registrar progreso exige ser participante activo del reto.
+  describe('R12 regresión: progreso solo para participantes activos', () => {
+    it('un no miembro recibe 403 sin escribir nada; al unirse puede; al abandonar vuelve a 403', async () => {
+      const owner = await registerAndLogin();
+      const stranger = await registerAndLogin();
+      const auth = { Authorization: `Bearer ${stranger.token}` };
+      const challengeId = await createChallenge(owner.userId);
+      const body = { challengeId, imageUrl: 'https://example.com/r12.jpg' };
+
+      await http()
+        .post('/workout-logs/progress')
+        .set(auth)
+        .send(body)
+        .expect(403);
+      await http().post('/workout-logs/progress').send(body).expect(401);
+      const none = await ds.query(
+        `SELECT 1 FROM havit.workout_logs WHERE user_id = $1`,
+        [stranger.userId],
+      );
+      expect(none).toHaveLength(0);
+
+      const publicId = await createChallenge(owner.userId);
+      await http().post(`/challenges/${publicId}/join`).set(auth).expect(201);
+      await http()
+        .post('/workout-logs/progress')
+        .set(auth)
+        .send({
+          challengeId: publicId,
+          imageUrl: 'https://example.com/r12b.jpg',
+        })
+        .expect(201);
+
+      await http().patch(`/challenges/${publicId}/leave`).set(auth);
+      await http()
+        .post('/workout-logs/progress')
+        .set(auth)
+        .send({
+          challengeId: publicId,
+          imageUrl: 'https://example.com/r12c.jpg',
+        })
+        .expect(403);
+    });
+
+    it('una rutina que no es del reto responde 400', async () => {
+      const user = await registerAndLogin();
+      const auth = { Authorization: `Bearer ${user.token}` };
+      const challengeId = await createChallenge(user.userId);
+      await http().post(`/challenges/${challengeId}/join`).set(auth);
+
+      await http()
+        .post('/workout-logs/progress')
+        .set(auth)
+        .send({
+          challengeId,
+          routineId: 987654,
+          imageUrl: 'https://example.com/r12d.jpg',
+        })
         .expect(400);
     });
   });
@@ -748,6 +815,12 @@ describeDb('API integration & regression (real Postgres)', () => {
         `INSERT INTO havit.routine_exercises (routine_id, exercise_id, order_index)
          VALUES ($1, 9, 1)`,
         [routineId],
+      );
+      // BUG-04: the routine has to be one of the challenge's own cycle days.
+      await ds.query(
+        `INSERT INTO havit.challenge_cycle_days (challenge_id, day_in_cycle, routine_id, day_type)
+         VALUES ($1, 1, $2, 'workout')`,
+        [challengeId, routineId],
       );
       const post = (
         userAuth: { Authorization: string },

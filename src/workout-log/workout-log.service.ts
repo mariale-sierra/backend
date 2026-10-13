@@ -18,6 +18,7 @@ import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
 import { assertOwnership } from '../auth/utils/assert-ownership';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
+import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
 import {
   getLocalCalendarDate,
   getLocalDayBoundsUtc,
@@ -72,6 +73,9 @@ export class WorkoutLogService {
 
     @InjectRepository(ChallengeUserMap)
     private challengeUserMapRepo: Repository<ChallengeUserMap>,
+
+    @InjectRepository(ChallengeCycleDay)
+    private cycleDayRepo: Repository<ChallengeCycleDay>,
 
     private readonly cache: RedisCacheService,
 
@@ -132,6 +136,8 @@ export class WorkoutLogService {
       if (challenge.status === 'closed') {
         throw new BadRequestException('This challenge is closed');
       }
+
+      await this.assertCanLogChallengeProgress(dto, challenge);
 
       // Bounded by the user's local calendar day, not the server's UTC
       // clock, so the one-log-per-day gate agrees with the "completed
@@ -432,6 +438,42 @@ export class WorkoutLogService {
 
     relation.status = 'completed';
     await this.challengeUserMapRepo.save(relation);
+  }
+
+  /**
+   * BUG-04: progress in a challenge needs an active membership in it, and a
+   * `routineId` the client sends must be one of that challenge's own cycle-day
+   * routines (the B7 substitutions are validated against that routine, so an
+   * arbitrary one would let a log borrow someone else's exercises). Both run
+   * before anything is written. A rest-day log has no routine to check.
+   */
+  private async assertCanLogChallengeProgress(
+    dto: { userId: string; challengeId?: string; routineId?: number },
+    challenge: Challenge,
+  ): Promise<void> {
+    const isMember = await this.challengeUserMapRepo.exists({
+      where: {
+        challenge_id: challenge.id,
+        user_id: dto.userId,
+        status: 'active',
+      },
+    });
+    if (!isMember) {
+      throw new ForbiddenException(
+        'You must be an active participant of this challenge to log progress',
+      );
+    }
+
+    if (dto.routineId) {
+      const belongs = await this.cycleDayRepo.exists({
+        where: { challenge_id: challenge.id, routine_id: dto.routineId },
+      });
+      if (!belongs) {
+        throw new BadRequestException(
+          'The routine does not belong to this challenge',
+        );
+      }
+    }
   }
 
   /**

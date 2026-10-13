@@ -15,6 +15,7 @@ import { WorkoutLogExercise } from './entities/workout-log-exercise.entity';
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
+import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
 import { RedisCacheService } from '../cache/redis-cache.service';
 
 const createMockRepo = () => ({
@@ -25,6 +26,8 @@ const createMockRepo = () => ({
   create: jest.fn((v) => v),
   createQueryBuilder: jest.fn(),
   count: jest.fn(),
+  // Default: the caller is a member / the routine belongs to the challenge.
+  exists: jest.fn().mockResolvedValue(true),
 });
 
 // Same pass-through mock as exercises.service.spec.ts — real code path by
@@ -49,6 +52,7 @@ describe('WorkoutLogService', () => {
   let workoutPostsService: { create: jest.Mock; tagUsers: jest.Mock };
   let challengeRepo: ReturnType<typeof createMockRepo>;
   let challengeUserMapRepo: ReturnType<typeof createMockRepo>;
+  let cycleDayRepo: ReturnType<typeof createMockRepo>;
   let cache: ReturnType<typeof createMockCache>;
 
   const OWNER_ID = 'owner-1';
@@ -65,6 +69,7 @@ describe('WorkoutLogService', () => {
     workoutPostsService = { create: jest.fn(), tagUsers: jest.fn() };
     challengeRepo = createMockRepo();
     challengeUserMapRepo = createMockRepo();
+    cycleDayRepo = createMockRepo();
     cache = createMockCache();
 
     const module: TestingModule = await Test.createTestingModule({
@@ -92,6 +97,10 @@ describe('WorkoutLogService', () => {
         },
         { provide: getRepositoryToken(Challenge), useValue: challengeRepo },
         {
+          provide: getRepositoryToken(ChallengeCycleDay),
+          useValue: cycleDayRepo,
+        },
+        {
           provide: getRepositoryToken(ChallengeUserMap),
           useValue: challengeUserMapRepo,
         },
@@ -102,6 +111,37 @@ describe('WorkoutLogService', () => {
   });
 
   describe('createWorkout', () => {
+    // BUG-04
+    it('rejects progress from someone who is not an active participant', async () => {
+      challengeRepo.findOne.mockResolvedValue(OPEN_CHALLENGE);
+      challengeUserMapRepo.exists.mockResolvedValue(false);
+
+      await expect(
+        service.createWorkout({
+          userId: 'stranger',
+          challengeId: 'challenge-1',
+          imageUrl: 'https://example.com/x.jpg',
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(workoutRepo.findOne).not.toHaveBeenCalled();
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('rejects a routine that is not part of the challenge', async () => {
+      challengeRepo.findOne.mockResolvedValue(OPEN_CHALLENGE);
+      cycleDayRepo.exists.mockResolvedValue(false);
+
+      await expect(
+        service.createWorkout({
+          userId: OWNER_ID,
+          challengeId: 'challenge-1',
+          routineId: 999,
+          imageUrl: 'https://example.com/x.jpg',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
     it('should reject a second progress log for the same challenge on the same day', async () => {
       challengeRepo.findOne.mockResolvedValue(OPEN_CHALLENGE);
       workoutRepo.findOne.mockResolvedValue({
