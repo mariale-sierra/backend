@@ -30,6 +30,39 @@ function loadEnvFile() {
   }
 }
 
+/**
+ * TLS for the runner, verified by default (chain + host name, like libpq's
+ * verify-full). Mirror of resolveDbSsl() in src/config/db-ssl.ts — this file
+ * runs before any build, so it can't import the TS one; db-ssl.spec.ts checks
+ * both give the same result. DB_SSL=false is for a local Postgres only.
+ * `host` is set explicitly because pg only passes it to tls.connect when it
+ * is a DNS name; for an IP the certificate would be checked against
+ * "localhost".
+ */
+function resolveDbSsl(env, host) {
+  if (env.DB_SSL === 'false') return false;
+
+  const rejectUnauthorized = env.DB_SSL_REJECT_UNAUTHORIZED !== 'false';
+  if (!rejectUnauthorized) {
+    console.warn(
+      '[db] DB_SSL_REJECT_UNAUTHORIZED=false: the Postgres server certificate is NOT verified',
+    );
+  }
+
+  const options = { rejectUnauthorized };
+  if (host) options.host = host;
+  if (env.DB_SSL_CA_PATH) {
+    try {
+      options.ca = fs.readFileSync(env.DB_SSL_CA_PATH, 'utf8');
+    } catch (err) {
+      throw new Error(
+        `DB_SSL_CA_PATH=${env.DB_SSL_CA_PATH} could not be read: ${err.message}`,
+      );
+    }
+  }
+  return options;
+}
+
 function createClient() {
   loadEnvFile();
 
@@ -39,9 +72,7 @@ function createClient() {
     user: process.env.DB_USERNAME,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_DATABASE,
-    // Azure Postgres requires TLS (default). A local Postgres container does
-    // not speak SSL, so set DB_SSL=false to disable it for local dev only.
-    ssl: process.env.DB_SSL === 'false' ? false : { rejectUnauthorized: false },
+    ssl: resolveDbSsl(process.env, process.env.DB_HOST),
     // Fail fast instead of hanging forever when the DB is unreachable —
     // connectWithRetry() turns this into bounded retries.
     connectionTimeoutMillis: 10_000,
@@ -119,6 +150,7 @@ module.exports = {
   DATABASE_DIR,
   PHASES,
   loadEnvFile,
+  resolveDbSsl,
   createClient,
   connectWithRetry,
   listAllSqlFiles,

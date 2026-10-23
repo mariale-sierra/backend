@@ -1,0 +1,20 @@
+# Throttler detras de Caddy (THROTTLE_LIMIT=3/min, TRUST_PROXY=loopback,uniquelocal) — 2026-10-23T19:07:12Z
+# Tres contenedores simultaneos en la red Docker, cada uno con su IP, todos pasando por Caddy (HTTPS).
+### Cliente A: la 4a peticion debe ser 429
+IP del cliente: 172.24.0.6
+  req 1 -> 200
+  req 2 -> 200
+  req 3 -> 200
+  req 4 -> 429
+### Cliente B (otra IP, justo despues de que A agoto su cupo): debe tener su propio cupo
+IP del cliente: 172.24.0.7
+  req 1 -> 200
+  req 2 -> 200
+  req 3 -> 200
+  req 4 -> 429
+### Cliente C rotando un X-Forwarded-For falso: Caddy lo reemplaza, la 4a debe ser 429
+IP del cliente: 172.24.0.8
+  req 1 (X-Forwarded-For: 1.2.3.1) -> 200
+  req 2 (X-Forwarded-For: 1.2.3.2) -> 200
+  req 3 (X-Forwarded-For: 1.2.3.3) -> 200
+  req 4 (X-Forwarded-For: 1.2.3.4) -> 429

@@ -1,0 +1,18 @@
+# PgBouncer server_tls_sslmode=verify-full — 2026-10-23T19:10:13Z
+### 1. CA correcta + host del certificado (pg.havit.test) -> debe funcionar
+consulta OK via pgbouncer
+2026-10-23 19:10:18.304 UTC [1] LOG C-0xffff81dbf3b0: havit/havit@172.24.0.2:56232 login attempt: db=havit user=havit tls=no replication=no
+2026-10-23 19:10:18.344 UTC [1] LOG S-0xffff81d623d0: havit/havit@172.24.0.2:5432 SSL established: TLSv1.3/TLS_AES_256_GCM_SHA384
+### 2. CA no confiable (rogue) -> debe fallar
+psql: error: connection to server at "pgbouncer" (172.24.0.4), port 6432 failed: FATAL:  client_login_timeout (server down)
+2026-10-23 19:11:07.969 UTC [1] WARNING TLS handshake error: handshake failed: error:0A000086:SSL routines::certificate verify failed
+### 3. Bundle real de Azure contra este servidor (CA ajena) -> debe fallar
+psql: error: connection to server at "pgbouncer" (172.24.0.4), port 6432 failed: FATAL:  client_login_timeout (server down)
+2026-10-23 19:12:12.780 UTC [1] WARNING TLS handshake error: handshake failed: error:0A000086:SSL routines::certificate verify failed
+### 4. CA correcta pero host 'pg' (no esta en el SAN) -> debe fallar
+psql: error: connection to server at "pgbouncer" (172.24.0.4), port 6432 failed: FATAL:  client_login_timeout (server down)
+2026-10-23 19:13:16.875 UTC [1] WARNING TLS handshake error: name `pg' not present in server certificate
+### 5. Restaurado
+consulta OK via pgbouncer
+2026-10-23 19:13:36.465 UTC [1] LOG C-0xffff8f3223b0: havit/havit@172.24.0.2:55876 login attempt: db=havit user=havit tls=no replication=no
+2026-10-23 19:13:36.487 UTC [1] LOG S-0xffff8f2c53d0: havit/havit@172.24.0.2:5432 SSL established: TLSv1.3/TLS_AES_256_GCM_SHA384

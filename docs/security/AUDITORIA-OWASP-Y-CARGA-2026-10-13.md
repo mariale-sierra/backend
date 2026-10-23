@@ -12,7 +12,9 @@ Alcance: backend NestJS (`backend/`), app Expo (`frontend/`) y el pipeline de de
 | H5 Dependencias backend | **Parcial** | `npm audit fix` (solo lockfile): de 10 vulnerabilidades de producción (1 crítica, 5 altas) a 2 (`@nestjs/swagger` → `js-yaml`), cuyo arreglo exige subir `@nestjs/swagger` de versión mayor; queda para una tarea aparte. Frontend: pendiente (sección 6, punto 4). |
 | M5 CORS / Swagger | **Corregido** | Sin `CORS_ORIGINS` ya no hay CORS (antes reflejaba cualquier origen). Swagger UI y `/api-docs-json` solo con `ENABLE_SWAGGER=true`. |
 | M6 413 y 500 en registro | **Corregido** | Errores 4xx de Express (cuerpo grande) conservan su estado (413) y se registran como `warn` sin stack; el registro concurrente (correo o usuario repetido) devuelve 409 en lugar de 500. |
-| H1, M1–M4, M7–M9 | Pendientes | Ver plan (sección 6). |
+| H1 Sin HTTPS | **Parcial (B3, sprint 10)** | Caddy como proxy HTTPS con redirección 308 HTTP→HTTPS y certificado automático (`raiz/docker-compose.yml`, `raiz/caddy/Caddyfile`); `trust proxy` acotado (`TRUST_PROXY`); el APK de `preview`/`production` exige URL `https://` y sale con `usesCleartextTraffic=false`. **Falta infraestructura:** etiqueta DNS en Azure, abrir 80/443 en el NSG, publicar el APK HTTPS y después cerrar el 3000. Ver `docs/sprint-10/B3-https-transporte.md`. |
+| M9 TLS a Postgres sin verificar | **Corregido en código (B3)** | Verificación de cadena y nombre activa por defecto en la app y el runner (`src/config/db-ssl.ts`, `database/scripts/lib.js`) con las raíces de Azure en `certs/azure-postgres-root-cas.pem`; PgBouncer en `verify-full`. Efecto en el servidor al desplegar `main`. |
+| M1–M4, M7–M8 | Pendientes | Ver plan (sección 6). |
 
 **Despliegue — qué cambia en el servidor:** (1) Swagger desaparece hasta definir `ENABLE_SWAGGER=true` en el `.env` del servidor; (2) CORS queda apagado: si se publica una versión **web** de la app, hay que definir `CORS_ORIGINS=https://tu-dominio`; la app móvil no se ve afectada; (3) la migración desactiva `testuser` al arrancar; (4) quien consuma esos tres endpoints de retos sin token (scripts, Postman) ahora recibe 401.
 
