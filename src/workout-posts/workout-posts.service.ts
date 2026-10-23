@@ -18,6 +18,17 @@ import { WorkoutPostReactionsService } from './workout-post-reactions.service';
 import { WorkoutPostCommentsService } from './workout-post-comments.service';
 import { HashtagsService } from './hashtags/hashtags.service';
 
+const MODERATION_STATUSES = new Set<string>(
+  Object.values(WorkoutPostModerationStatus),
+);
+
+/** The raw `moderation_status` column (NULL on a DB without moderation columns). */
+function isModerationStatus(
+  value: string | null,
+): value is WorkoutPostModerationStatus {
+  return value !== null && MODERATION_STATUSES.has(value);
+}
+
 /** Shape consumed by the frontend (types/challenge.ts ChallengePhoto). */
 export interface ChallengePhoto {
   id: string;
@@ -45,6 +56,14 @@ export interface ChallengePhoto {
     profileImageUrl: string | null;
   }>;
   hashtags: string[];
+  /**
+   * Sprint 10, B2: where the author's own photo stands in the async
+   * moderation (pending → approved | rejected), so the app can say "in
+   * review" / "not published" instead of showing every upload the same way.
+   * Only present when the viewer IS the author: anyone else only ever gets
+   * approved posts, and another user's moderation state is not theirs to see.
+   */
+  moderationStatus?: WorkoutPostModerationStatus;
 }
 
 /** Wire contract GET /feed must return exactly (frontend/types/feed.ts
@@ -712,6 +731,9 @@ export class WorkoutPostsService {
         commentsCount: commentsCountByPost.get(id) ?? 0,
         recentReactors: recentReactorsByPost.get(id) ?? [],
         hashtags: hashtagsByPost.get(id) ?? [],
+        ...(r.user_id === viewerId && isModerationStatus(r.moderation_status)
+          ? { moderationStatus: r.moderation_status }
+          : {}),
       };
     });
   }
