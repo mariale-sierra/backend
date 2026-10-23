@@ -1,0 +1,32 @@
+# Transporte HTTPS via Caddy (stack local, API_DOMAIN sin definir => localhost + CA interna de Caddy) — 2026-10-23T19:05:39Z
+### 1. HTTP -> HTTPS
+HTTP/1.1 308 Permanent Redirect
+Location: https://localhost/
+### 2. HTTPS con la CA de Caddy (curl -v)
+{ [122 bytes data]
+{ [19 bytes data]
+{ [927 bytes data]
+{ [78 bytes data]
+{ [36 bytes data]
+* SSL connection using TLSv1.3 / AEAD-CHACHA20-POLY1305-SHA256 / [blank] / UNDEF
+*  subject: [NONE]
+*  expire date: Oct 24 07:05:25 2026 GMT
+*  subjectAltName: host "localhost" matched cert's "localhost"
+*  issuer: CN=Caddy Local Authority - ECC Intermediate
+*  SSL certificate verify ok.
+< HTTP/2 200 
+< strict-transport-security: max-age=31536000; includeSubDomains
+{ [37 bytes data]
+{"status":"ok","service":"havit-api"}
+### 3. openssl s_client
+New, TLSv1.3, Cipher is TLS_AES_128_GCM_SHA256
+Protocol: TLSv1.3
+Verify return code: 0 (ok)
+    Protocol  : TLSv1.3
+    Cipher    : TLS_AES_128_GCM_SHA256
+### 4. openssl s_client con hostname incorrecto
+Verify return code: 62 (hostname mismatch)
+### 5. Cliente sin la CA en su almacen
+curl: (60) SSL certificate problem: unable to get local issuer certificate
+### 6. TLS 1.1
+80FF3CF001000000:error:0A0000BF:SSL routines:tls_setup_handshake:no protocols available:ssl/statem/statem_lib.c:156:

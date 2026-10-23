@@ -1,0 +1,21 @@
+# Runner de migraciones (database/scripts/lib.js) contra Postgres 16 con TLS obligatorio y CA de prueba — 2026-10-23T19:00:35Z
+### 1. CA de prueba + hostname correcto (localhost) -> debe conectar
+OK conectado {"ssl":true,"version":"TLSv1.3"}
+### 2. CA no confiable (bundle real de Azure) -> debe fallar
+RECHAZADO UNABLE_TO_VERIFY_LEAF_SIGNATURE unable to verify the first certificate; if the root CA is installed locally, try running Node.js with --use-system-ca
+### 3. CA no confiable (rogue CA) -> debe fallar
+RECHAZADO UNABLE_TO_VERIFY_LEAF_SIGNATURE unable to verify the first certificate; if the root CA is installed locally, try running Node.js with --use-system-ca
+### 4. Hostname que el certificado no cubre (127.0.0.1) -> debe fallar
+RECHAZADO ERR_TLS_CERT_ALTNAME_INVALID Hostname/IP does not match certificate's altnames: IP: 127.0.0.1 is not in the cert's list: 
+### 5. Sin DB_SSL_CA_PATH (solo raices de Node) contra CA privada -> debe fallar
+RECHAZADO UNABLE_TO_VERIFY_LEAF_SIGNATURE unable to verify the first certificate; if the root CA is installed locally, try running Node.js with --use-system-ca
+### 6. DB_SSL=false contra servidor que exige TLS -> debe fallar
+RECHAZADO 28000 pg_hba.conf rejects connection for host "172.24.0.1", user "havit", database "havit", no encryption
+### 7. DB_SSL_CA_PATH inexistente -> debe fallar al arrancar
+RECHAZADO  DB_SSL_CA_PATH=/no/existe.pem could not be read: ENOENT: no such file or directory, open '/no/existe.pem'
+### 8. npm run db:migrate completo con verificacion (CA de prueba)
+[db] applying seeds/2026-09-03-02-seed-muscle-svg-parts.sql
+[db] applying seeds/2026-10-05-01-notification-types.sql
+[db] applied 65 file(s)
+### 9. Re-ejecucion (no-op)
+[db] nothing to apply, schema is up to date
