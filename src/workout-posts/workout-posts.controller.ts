@@ -34,7 +34,8 @@ export class WorkoutPostsController {
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Fotos de progreso del usuario autenticado',
-    description: 'Devuelve todas las fotos de progreso del usuario (perfil).',
+    description:
+      'Devuelve todas las fotos de progreso del usuario (perfil). Cada foto trae moderationStatus (pending | approved | rejected), porque todas son del propio usuario.',
   })
   getMyPhotos(@CurrentUser() user: AuthenticatedUser, @Req() req) {
     return this.workoutPostsService.getUserPhotos(
@@ -102,7 +103,7 @@ export class WorkoutPostsController {
   @ApiOperation({
     summary: 'Publicaciones de un usuario',
     description:
-      "Si :userId es el usuario autenticado, devuelve sus propias publicaciones (mismas reglas que /workout-posts/mine). Si es otro usuario, solo publicaciones con visibility='public' AND moderation_status='approved' — no implica ni depende de un sistema de seguidores.",
+      "Si :userId es el usuario autenticado, devuelve sus propias publicaciones (mismas reglas que /workout-posts/mine). Si es otro usuario, solo publicaciones con visibility='public' AND moderation_status='approved' — no implica ni depende de un sistema de seguidores. moderationStatus (pending | approved | rejected) solo viene en las publicaciones propias.",
   })
   @ApiHeader({
     name: 'X-Next-Cursor',

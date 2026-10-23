@@ -1032,6 +1032,46 @@ describe('WorkoutPostsService', () => {
         }),
       );
     });
+
+    describe('moderationStatus (Sprint 10, B2)', () => {
+      async function postsFor(viewerId: string, row: Record<string, unknown>) {
+        userRepo.findOne.mockResolvedValue({ id: 'author-1', is_active: true });
+        postRepo.manager.query.mockResolvedValueOnce([row]); // main query
+        postRepo.manager.query.mockResolvedValueOnce([]); // metricsByWorkoutLog: base rows
+        postRepo.manager.query.mockResolvedValueOnce([]); // metricsByWorkoutLog: exercise-level metric rows
+        const { photos } = await service.getUserPosts('author-1', viewerId, {
+          limit: 20,
+        });
+        return photos;
+      }
+
+      it.each(['pending', 'approved', 'rejected'])(
+        "gives the author their own post's %s status",
+        async (status) => {
+          const photos = await postsFor(
+            'author-1',
+            photoRow({ user_id: 'author-1', moderation_status: status }),
+          );
+          expect(photos[0].moderationStatus).toBe(status);
+        },
+      );
+
+      it("never tells another viewer about someone else's moderation status", async () => {
+        const photos = await postsFor(
+          VIEWER_ID,
+          photoRow({ user_id: 'author-1', moderation_status: 'approved' }),
+        );
+        expect(photos[0]).not.toHaveProperty('moderationStatus');
+      });
+
+      it('leaves the field out when the database has no moderation columns (NULL)', async () => {
+        const photos = await postsFor(
+          'author-1',
+          photoRow({ user_id: 'author-1', moderation_status: null }),
+        );
+        expect(photos[0]).not.toHaveProperty('moderationStatus');
+      });
+    });
   });
 
   // ---------------------------------------------------------------------
