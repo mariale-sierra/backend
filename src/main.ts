@@ -1,19 +1,28 @@
 // Must be first: pins the process to UTC before any Date/DB work. See file.
 import './set-timezone';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { isSwaggerEnabled, resolveCorsOrigin } from './config/http-config';
+import { resolveTrustProxy } from './config/trust-proxy';
 import {
   helmetOptions,
   securityHeadersMiddleware,
 } from './config/security-headers';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  const publicApiUrl = process.env.PUBLIC_API_URL ?? 'http://20.63.84.1:3000';
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // Swagger's "servers" entry. Unset = same origin as the page, so it works
+  // both behind Caddy (https) and on a local http dev server.
+  const publicApiUrl = process.env.PUBLIC_API_URL ?? '/';
+
+  // Behind Caddy (B3) req.ip must be the real client, or the throttler puts
+  // every user in one bucket. Only the hops listed in TRUST_PROXY are
+  // believed — see config/trust-proxy.ts.
+  app.set('trust proxy', resolveTrustProxy(process.env));
 
   // CSP / COEP / COOP / CORP live in config/security-headers.ts; Permissions-
   // Policy and Cache-Control come from securityHeadersMiddleware (helmet has

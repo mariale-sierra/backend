@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { ACCESS_TOKEN_TTL_SECONDS } from '../refresh-tokens.service';
 
 describe('JwtAuthGuard', () => {
   let guard: JwtAuthGuard;
@@ -26,6 +27,8 @@ describe('JwtAuthGuard', () => {
   };
 
   beforeEach(() => {
+    // The session cache is shared by every guard instance in the process.
+    JwtAuthGuard.clearSessionCache();
     jwtService = { verifyAsync: jest.fn() };
     configService = { getOrThrow: jest.fn().mockReturnValue('test-secret') };
     reflector = { getAllAndOverride: jest.fn().mockReturnValue(false) };
@@ -154,6 +157,223 @@ describe('JwtAuthGuard', () => {
     it('lets the request through if the account lookup itself fails', async () => {
       dataSource.query.mockRejectedValue(new Error('connection reset'));
       await expect(guard.canActivate(authed())).resolves.toBe(true);
+    });
+  });
+
+  // B4: a token with a `sid` is tied to its refresh token family.
+  describe('session (sid) still alive', () => {
+    const sid = '7d0f3a52-9b8e-4c1d-a6f2-3e5b8c9d0a1b';
+    const payload = { sub: 'user-1', email: 'a@a.com', username: 'a', sid };
+    const authed = () =>
+      buildContext({ authorization: 'Bearer valid.token.here' });
+
+    beforeEach(() => {
+      jwtService.verifyAsync.mockResolvedValue(payload);
+      dataSource.query.mockResolvedValue([
+        { is_active: true, deleted_at: null, session_active: true },
+      ]);
+    });
+
+    it('checks the account and the session in the same lookup', async () => {
+      await expect(guard.canActivate(authed())).resolves.toBe(true);
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = dataSource.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      // The family row is the single source of truth of the session.
+      expect(sql).toContain('havit.refresh_token_families');
+      expect(sql).toContain('revoked_at IS NULL');
+      expect(sql).toContain('expires_at > now()');
+      expect(params).toEqual(['user-1', sid]);
+    });
+
+    it('rejects an access token whose session was logged out or revoked', async () => {
+      dataSource.query.mockResolvedValue([
+        { is_active: true, deleted_at: null, session_active: false },
+      ]);
+      await expect(guard.canActivate(authed())).rejects.toThrow(
+        'Session is no longer valid',
+      );
+    });
+
+    it('cuts a cached session off immediately once it is forgotten (logout on this instance)', async () => {
+      await guard.canActivate(authed());
+      dataSource.query.mockResolvedValue([
+        { is_active: true, deleted_at: null, session_active: false },
+      ]);
+      // Still cached: no new lookup.
+      await expect(guard.canActivate(authed())).resolves.toBe(true);
+
+      JwtAuthGuard.forgetSession(sid);
+
+      await expect(guard.canActivate(authed())).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    // Post-audit B4-02-F02: a lookup that started before the logout committed
+    // must not put the session back into the cache after forgetSession().
+    it('does not re-cache a session revoked while its lookup was in flight', async () => {
+      let answer: (rows: unknown) => void = () => undefined;
+      dataSource.query.mockImplementationOnce(
+        () => new Promise((resolve) => (answer = resolve)),
+      );
+      const inFlight = guard.canActivate(authed());
+      await Promise.resolve();
+
+      // The logout commits and evicts while the stale lookup is pending...
+      JwtAuthGuard.forgetSession(sid);
+      // ...which then answers with the pre-logout snapshot.
+      answer([{ is_active: true, deleted_at: null, session_active: true }]);
+
+      await expect(inFlight).rejects.toThrow('Session is no longer valid');
+      // Nothing cached: the next request is refused too.
+      await expect(guard.canActivate(authed())).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('refuses a session revoked on this process without querying, until the database can tell', async () => {
+      jest.useFakeTimers();
+      try {
+        JwtAuthGuard.forgetSession(sid);
+        await expect(guard.canActivate(authed())).rejects.toThrow(
+          UnauthorizedException,
+        );
+        expect(dataSource.query).not.toHaveBeenCalled();
+
+        // Two cache windows later the local mark is gone and the committed
+        // revocation is read from the database instead.
+        jest.advanceTimersByTime(60_001);
+        dataSource.query.mockResolvedValue([
+          { is_active: true, deleted_at: null, session_active: false },
+        ]);
+        await expect(guard.canActivate(authed())).rejects.toThrow(
+          UnauthorizedException,
+        );
+        expect(dataSource.query).toHaveBeenCalledTimes(1);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('forgetting one session leaves the other sessions of the same user alone', async () => {
+      JwtAuthGuard.forgetSession('0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d');
+      await expect(guard.canActivate(authed())).resolves.toBe(true);
+    });
+
+    it('catches a revocation made elsewhere after the cache window', async () => {
+      jest.useFakeTimers();
+      try {
+        await guard.canActivate(authed());
+        dataSource.query.mockResolvedValue([
+          { is_active: true, deleted_at: null, session_active: false },
+        ]);
+        jest.advanceTimersByTime(30_001);
+        await expect(guard.canActivate(authed())).rejects.toThrow(
+          UnauthorizedException,
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('shares the cache between guard instances (APP_GUARD and @UseGuards)', async () => {
+      await guard.canActivate(authed());
+      const other = new JwtAuthGuard(
+        jwtService as unknown as JwtService,
+        configService as unknown as ConfigService,
+        reflector as unknown as Reflector,
+        dataSource as unknown as DataSource,
+      );
+      await other.canActivate(authed());
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('caches each session separately (logging one device out keeps the other)', async () => {
+      await guard.canActivate(authed());
+      jwtService.verifyAsync.mockResolvedValue({
+        ...payload,
+        sid: '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d',
+      });
+      await guard.canActivate(authed());
+      expect(dataSource.query).toHaveBeenCalledTimes(2);
+    });
+
+    it('refuses a sid that is not a UUID without querying', async () => {
+      jwtService.verifyAsync.mockResolvedValue({
+        ...payload,
+        sid: "x' OR 1=1",
+      });
+      await expect(guard.canActivate(authed())).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(dataSource.query).not.toHaveBeenCalled();
+    });
+
+    it('keeps accepting a 7-day token from before B4 (no sid) with the account-only check', async () => {
+      jwtService.verifyAsync.mockResolvedValue({
+        sub: 'user-1',
+        email: 'a@a.com',
+        username: 'a',
+      });
+      dataSource.query.mockResolvedValue([
+        { is_active: true, deleted_at: null },
+      ]);
+      await expect(guard.canActivate(authed())).resolves.toBe(true);
+      expect(dataSource.query).toHaveBeenCalledWith(
+        'SELECT is_active, deleted_at FROM havit.users WHERE id = $1',
+        ['user-1'],
+      );
+    });
+  });
+
+  // Post-audit: the 15-minute expiry checked with a real JwtService and a
+  // controlled clock, not only `exp - iat = 900`. (Date.now is stubbed
+  // rather than using fake timers: jsonwebtoken's async callbacks would hang.)
+  describe('real access token expiry', () => {
+    const realJwt = new JwtService({});
+    const SECRET = 'expiry-test-secret';
+    const start = new Date('2026-10-23T12:00:00Z').getTime();
+    let now = start;
+
+    beforeEach(() => {
+      now = start;
+      jest.spyOn(Date, 'now').mockImplementation(() => now);
+      configService.getOrThrow.mockReturnValue(SECRET);
+      guard = new JwtAuthGuard(
+        realJwt,
+        configService as unknown as ConfigService,
+        reflector as unknown as Reflector,
+        dataSource as unknown as DataSource,
+      );
+      dataSource.query.mockResolvedValue([
+        { is_active: true, deleted_at: null, session_active: true },
+      ]);
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it('accepts the token until its 15 minutes are over and refuses it from then on', async () => {
+      const token = await realJwt.signAsync(
+        {
+          sub: 'user-1',
+          email: 'a@a.com',
+          username: 'a',
+          sid: '7d0f3a52-9b8e-4c1d-a6f2-3e5b8c9d0a1b',
+        },
+        { secret: SECRET, expiresIn: ACCESS_TOKEN_TTL_SECONDS },
+      );
+      const ctx = () => buildContext({ authorization: `Bearer ${token}` });
+
+      now = start + (15 * 60 - 1) * 1000;
+      await expect(guard.canActivate(ctx())).resolves.toBe(true);
+
+      now = start + 15 * 60 * 1000;
+      await expect(guard.canActivate(ctx())).rejects.toThrow(
+        'Invalid or expired token',
+      );
     });
   });
 });

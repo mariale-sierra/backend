@@ -1,0 +1,12 @@
+# B4-02-F01: reproduccion con el codigo ANTERIOR (commit 04dfe2d) contra Postgres 18 local, base desechable havit_b4_test
+# B2_TEST_DB_URL=postgres://<usuario local>@localhost:5432/havit_b4_test npx jest --ci refresh-tokens.integration
+    ✕ a logout that runs while the same family is being rotated leaves no live successor (27 ms)
+    ✕ a reuse detected while the head is being rotated revokes the successor too (46 ms)
+    ✓ two refreshes with the same token: exactly one rotates and the family ends revoked (13 ms)
+    ✓ a revoked family never comes back: no token of its chain renews, before or after (11 ms)
+    ✓ two sessions of the same user stay isolated: revoking A during a rotation of B leaves B alive (12 ms)
+    ✓ a crash in the middle of a rotation leaves nothing half-committed (12 ms)
+    ✓ mixed concurrent rotations, reuses and logouts on one family never deadlock nor leave it alive (81 ms)
+    Received promise resolved instead of rejected
+    Received promise resolved instead of rejected
+Tests:       2 failed, 5 passed, 7 total

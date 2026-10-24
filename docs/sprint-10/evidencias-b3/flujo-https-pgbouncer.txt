@@ -1,0 +1,20 @@
+# Flujo real por HTTPS (Caddy) -> Nest -> PgBouncer (verify-full) -> Postgres TLS — 2026-10-23T19:08:47Z
+### POST /auth/register
+200
+### POST /auth/login
+token recibido: 369 caracteres
+### GET /users/me con Bearer
+401
+### Conexiones que ve Postgres (pg_stat_ssl)
+172.24.0.4|t|TLSv1.3
+### IP de PgBouncer
+172.24.0.4
+### Config TLS efectiva de PgBouncer
+server_tls_sslmode = verify-full
+server_tls_ca_file = /etc/pgbouncer/certs/azure-postgres-root-cas.pem
+### (corrida 2, 2026-10-23T19:10:03Z) POST /auth/login -> accessToken de 251 caracteres
+### GET /users/me con Bearer (lee de Postgres via PgBouncer)
+username: b3tls
+HTTP 200
+### GET /challenges con Bearer
+HTTP 200

@@ -1,0 +1,65 @@
+# B3 local verification stack (throwaway). Mirrors raiz/docker-compose.yml topology
+# with a TLS Postgres + test CA instead of Azure.
+name: havit-b3-e2e
+services:
+  pg:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: havit
+      POSTGRES_PASSWORD: havit-test-only
+      POSTGRES_DB: havit
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    volumes:
+      - ./certs:/certs-src:ro
+      - ./pg_hba.conf:/etc/pg/pg_hba.conf:ro
+    entrypoint: ["sh","-c","mkdir -p /tls && cp /certs-src/server.crt /certs-src/server.key /tls/ && chown postgres /tls/* && chmod 600 /tls/server.key && exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/tls/server.crt -c ssl_key_file=/tls/server.key -c hba_file=/etc/pg/pg_hba.conf -c ssl_min_protocol_version=TLSv1.2"]
+    ports: ["127.0.0.1:55432:5432"]
+    networks:
+      default:
+        aliases: [pg.havit.test]
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U havit -d havit"]
+      interval: 2s
+      retries: 30
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.26.0-p0
+    environment:
+      DATABASE_URL: postgresql://havit:havit-test-only@${PGB_TARGET_HOST:-pg.havit.test}:5432/havit
+      LISTEN_ADDR: '0.0.0.0'
+      LISTEN_PORT: '6432'
+      POOL_MODE: transaction
+      AUTH_TYPE: scram-sha-256
+      SERVER_TLS_SSLMODE: verify-full
+      SERVER_TLS_CA_FILE: /etc/pgbouncer/certs/azure-postgres-root-cas.pem
+    volumes:
+      - ${PGB_CA:-./certs/ca.pem}:/etc/pgbouncer/certs/azure-postgres-root-cas.pem:ro
+    ports: ["127.0.0.1:56432:6432"]
+    depends_on: { pg: { condition: service_healthy } }
+  backend:
+    command: npm run dev
+    build: "../../../../backend-b3"
+    environment:
+      DB_HOST: pg.havit.test
+      DB_PORT: '5432'
+      DB_USERNAME: havit
+      DB_PASSWORD: havit-test-only
+      DB_DATABASE: havit
+      DB_SSL_CA_PATH: /certs/ca.pem
+      DB_POOL_HOST: pgbouncer
+      DB_POOL_PORT: '6432'
+      JWT_SECRET: b3-local-test-only
+      TRUST_PROXY: loopback,uniquelocal
+      THROTTLE_LIMIT: '3'
+    volumes:
+      - ./certs/ca.pem:/certs/ca.pem:ro
+    ports: ["127.0.0.1:53000:3000"]
+    depends_on: { pg: { condition: service_healthy } }
+  caddy:
+    image: caddy:2.10.2-alpine
+    depends_on: [backend]
+    ports: ["58080:80","58443:443"]
+    environment:
+      API_DOMAIN: ${API_DOMAIN:-localhost}
+    volumes:
+      - "../../../../raiz/caddy/Caddyfile:/etc/caddy/Caddyfile:ro"

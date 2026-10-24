@@ -2,12 +2,14 @@ import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 
 /**
  * JWT payload shape attached to `request.user` by `JwtAuthGuard`.
- * Mirrors the claims signed in `AuthService.signToken`.
+ * Mirrors the claims signed in `AuthService.signAccessToken`.
  */
 export interface AuthenticatedUser {
   sub: string;
   email: string;
   username: string;
+  /** B4 session id; absent on 7-day tokens issued before B4. */
+  sid?: string;
 }
 
 /**

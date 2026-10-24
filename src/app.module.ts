@@ -27,6 +27,7 @@ import { SuspensionGuard } from './auth/guards/suspension.guard';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { validateEnv } from './config/env.validation';
+import { resolveAppDbSsl } from './config/db-ssl';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
@@ -100,27 +101,15 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
       autoLoadEntities: true,
       schema: 'havit',
       synchronize: false,
-      // Azure Postgres requires TLS (default). A local Postgres container does
-      // not speak SSL, so set DB_SSL=false to disable it for local dev only.
-      // Behind PgBouncer (DB_POOL_HOST set) the app talks to the pooler over
-      // the private Docker network and the pooler has no client-side TLS
-      // ("The server does not support SSL connections" otherwise — found
-      // when first enabling it on the VM). The pooler -> Azure hop stays
-      // TLS (SERVER_TLS_SSLMODE=require in raiz/docker-compose.yml). Set
-      // DB_POOL_SSL=true only if the pooler is given client certificates.
-      ssl:
-        process.env.DB_SSL === 'false' ||
-        (process.env.DB_POOL_HOST && process.env.DB_POOL_SSL !== 'true')
-          ? false
-          : {
-              // Cert verification stays off by default (matches current
-              // behavior) until the Azure CA cert is wired in as an infra
-              // follow-up — do NOT flip this to `true` without that cert, it
-              // will break every connection. Set
-              // DB_SSL_REJECT_UNAUTHORIZED=true only once that's in place.
-              rejectUnauthorized:
-                process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true',
-            },
+      // Azure Postgres requires TLS, and since B3 the certificate is verified
+      // (chain + host name) by default. DB_SSL=false is for a local Postgres
+      // container only. Behind PgBouncer (DB_POOL_HOST set) the app talks to
+      // the pooler over the private Docker network without TLS ("The server
+      // does not support SSL connections" otherwise — found when first
+      // enabling it on the VM); the pooler -> Azure hop is verify-full in
+      // raiz/docker-compose.yml. Set DB_POOL_SSL=true only if the pooler is
+      // given a server certificate. See src/config/db-ssl.ts.
+      ssl: resolveAppDbSsl(process.env),
       // PgBouncer (transaction pooling) now does the heavy multiplexing
       // across instances; this just bounds how many connections THIS
       // process's own `pg` pool opens against whatever it's pointed at.

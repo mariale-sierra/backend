@@ -1,0 +1,9 @@
+# Puerto del backend publicado solo en 127.0.0.1 (equivale a BACKEND_BIND_ADDR=127.0.0.1) — 2026-10-23T19:13:47Z
+3000/tcp -> 127.0.0.1:53000
+### desde el propio host (health check del deploy):
+127.0.0.1:53000 -> HTTP 200
+### desde la IP LAN del host (como lo veria otra maquina):
+LAN:53000 -> HTTP 000
+LAN:53000 -> sin conexion (esperado)
+### HTTPS por la IP LAN sigue disponible:
+{"status":"ok","service":"havit-api"}LAN:58443 -> HTTP 200

@@ -1,11 +1,10 @@
-import {
-  Equals,
-  IsBoolean,
-  IsEmail,
-  IsString,
-  MinLength,
-} from 'class-validator';
+import { Equals, IsBoolean, IsEmail, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import {
+  IsAcceptablePassword,
+  PASSWORD_MAX_BYTES,
+  PASSWORD_MIN_LENGTH,
+} from '../password-policy';
 
 export class RegisterDto {
   @ApiProperty({
@@ -16,12 +15,12 @@ export class RegisterDto {
   email!: string;
 
   @ApiProperty({
-    description: 'Contraseña del usuario (mínimo 8 caracteres)',
-    example: 'miContraseña123',
-    minLength: 8,
+    description: `Contraseña (B4): mínimo ${PASSWORD_MIN_LENGTH} caracteres, máximo ${PASSWORD_MAX_BYTES} bytes, que no sea una contraseña común ni contenga el username o el email. Cada regla incumplida devuelve su propio mensaje.`,
+    example: 'Montaña-Lenta-Azul',
+    minLength: PASSWORD_MIN_LENGTH,
   })
   @IsString()
-  @MinLength(8)
+  @IsAcceptablePassword()
   password!: string;
 
   @ApiProperty({

@@ -1,5 +1,6 @@
 import {
   Injectable,
+  OnModuleInit,
   UnauthorizedException,
   ConflictException,
 } from '@nestjs/common';
@@ -13,27 +14,58 @@ import { RegisterDto } from './dto/register.dto';
 import { User } from '../users/entities/user.entity';
 import { UserProfile } from '../users/entities/user-profile.entity';
 import { CURRENT_TERMS_VERSION } from './terms-version';
+import { getCommonPasswords } from './password-policy';
+import {
+  ACCESS_TOKEN_TTL_SECONDS,
+  RefreshTokensService,
+} from './refresh-tokens.service';
 
 export { CURRENT_TERMS_VERSION };
 
+export const INVALID_CREDENTIALS = 'Invalid email or password';
+/**
+ * B4 / AUDIT M3: one answer for a taken email AND a taken username, so the
+ * registration form can't be used to tell which one exists (product
+ * decision; the app sends the user back to the email step with both fields
+ * marked).
+ */
+export const ACCOUNT_TAKEN = 'Email or username already in use';
+
+/**
+ * A real bcrypt hash (cost 10, same as every account) of a random value
+ * nobody knows. Login compares against it when the email has no account, so
+ * that answer takes as long as a wrong password does (AUDIT M3: ~5 ms vs
+ * ~66 ms gave existing emails away). It never matches.
+ */
+const DUMMY_PASSWORD_HASH =
+  '$2b$10$nluyx3e.EXNDYzTKuYlJaeshkE4PhEKkt1HL8X3uP.HkJUSjAdwJG';
+
 @Injectable()
-export class AuthService {
+export class AuthService implements OnModuleInit {
   constructor(
     private jwtService: JwtService,
     private configService: ConfigService,
     private dataSource: DataSource,
     @InjectRepository(User)
     private userRepo: Repository<User>,
+    private refreshTokens: RefreshTokensService,
   ) {}
+
+  /** Fail the boot, not the first sign-up, if the password list is missing. */
+  onModuleInit() {
+    getCommonPasswords();
+  }
 
   async login(loginDto: LoginDto) {
     const { email, password } = loginDto;
 
     const user = await this.userRepo.findOne({ where: { email } });
-    if (!user) throw new UnauthorizedException('Invalid email or password');
-
-    const isMatch = await bcrypt.compare(password, user.password_hash);
-    if (!isMatch) throw new UnauthorizedException('Invalid email or password');
+    // Always exactly one bcrypt comparison, account or not (see DUMMY_PASSWORD_HASH).
+    const isMatch = await bcrypt.compare(
+      password,
+      user?.password_hash ?? DUMMY_PASSWORD_HASH,
+    );
+    if (!user || !isMatch) throw new UnauthorizedException(INVALID_CREDENTIALS);
 
     // Bloque 1 — a banned account (UsersService.banUser, admin-only) cannot log back
     // in. Real effect this gives the ban button: it was previously purely cosmetic —
@@ -41,23 +73,26 @@ export class AuthService {
     // visibility) but nothing checked it here, so a banned user could keep logging in
     // freely. An already-issued token from before the ban still works until it expires
     // — see UsersService.banUser's own doc comment for why that's an accepted gap here.
+    // B4: only reached with the right password, so this message never tells
+    // a stranger that an email has an account.
     if (!user.is_active) {
       throw new UnauthorizedException('This account has been deactivated');
     }
 
-    return {
-      accessToken: await this.signToken(user),
-      user: { id: user.id, email: user.email, username: user.username },
-    };
+    return this.startSession(user);
   }
 
   async register(registerDto: RegisterDto) {
     const { email, password, username } = registerDto;
 
-    const existing = await this.userRepo.findOne({ where: { email } });
-    if (existing) throw new ConflictException('Email already in use');
-
+    // Hashed first: a taken email/username must not answer faster than a
+    // free one just because it skipped bcrypt (M3).
     const password_hash = await bcrypt.hash(password, 10);
+
+    const existing = await this.userRepo.findOne({
+      where: [{ email }, { username }],
+    });
+    if (existing) throw new ConflictException(ACCOUNT_TAKEN);
 
     const user = await this.createUserTransaction(
       email,
@@ -67,7 +102,41 @@ export class AuthService {
 
     return {
       message: 'User registered successfully',
-      accessToken: await this.signToken(user),
+      ...(await this.startSession(user)),
+    };
+  }
+
+  /**
+   * POST /auth/refresh: rotates the refresh token and signs a new access
+   * token for the same session. Every failure is the same 401.
+   */
+  async refresh(refreshToken: string) {
+    const { userId, issued } = await this.refreshTokens.rotate(refreshToken);
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    // rotate() already checked the account; this only covers a row deleted in between.
+    if (!user) throw new UnauthorizedException('Invalid refresh token');
+    return {
+      accessToken: await this.signAccessToken(user, issued.familyId),
+      refreshToken: issued.refreshToken,
+      user: { id: user.id, email: user.email, username: user.username },
+    };
+  }
+
+  /**
+   * POST /auth/logout: revokes the session the refresh token belongs to.
+   * Same answer whether or not there was anything to revoke (a 7-day token
+   * from before B4 has no refresh token, and logging out twice is fine).
+   */
+  async logout(refreshToken: string | undefined): Promise<void> {
+    if (refreshToken) await this.refreshTokens.revokeByToken(refreshToken);
+  }
+
+  /** Login/registration response: a new session (refresh family) and its first tokens. */
+  private async startSession(user: User) {
+    const issued = await this.refreshTokens.issue(user.id);
+    return {
+      accessToken: await this.signAccessToken(user, issued.familyId),
+      refreshToken: issued.refreshToken,
       user: { id: user.id, email: user.email, username: user.username },
     };
   }
@@ -85,19 +154,12 @@ export class AuthService {
       return await this.runCreateUser(email, username, password_hash);
     } catch (err) {
       const driver = err as {
-        driverError?: { code?: string; detail?: string };
+        driverError?: { code?: string };
         code?: string;
-        detail?: string;
       };
       const code = driver.driverError?.code ?? driver.code;
-      const detail = driver.driverError?.detail ?? driver.detail ?? '';
-      if (code === '23505') {
-        throw new ConflictException(
-          /username/i.test(detail)
-            ? 'Username already in use'
-            : 'Email already in use',
-        );
-      }
+      // Same answer for either index (ACCOUNT_TAKEN).
+      if (code === '23505') throw new ConflictException(ACCOUNT_TAKEN);
       throw err;
     }
   }
@@ -154,12 +216,13 @@ export class AuthService {
     };
   }
 
-  private async signToken(user: User): Promise<string> {
+  /** 15-minute access token; `sid` ties it to its session (JwtAuthGuard). */
+  private async signAccessToken(user: User, sid: string): Promise<string> {
     return this.jwtService.signAsync(
-      { sub: user.id, email: user.email, username: user.username },
+      { sub: user.id, email: user.email, username: user.username, sid },
       {
         secret: this.configService.getOrThrow<string>('JWT_SECRET'),
-        expiresIn: '7d',
+        expiresIn: ACCESS_TOKEN_TTL_SECONDS,
       },
     );
   }
