@@ -20,18 +20,41 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { createHash, randomUUID } from 'crypto';
+import type { Server } from 'http';
 import request from 'supertest';
 import type { RefreshTokensService as RefreshTokensServiceType } from '../src/auth/refresh-tokens.service';
+import type { AppModule as AppModuleType } from '../src/app.module';
 
 const dbUrl = process.env.B2_TEST_DB_URL;
 const describeDb = dbUrl ? describe : describe.skip;
 
 const PASSWORD = 'Montaña-Lenta-Azul';
 
+interface Claims {
+  sub: string;
+  sid?: string;
+  iat: number;
+  exp: number;
+}
+interface SessionBody {
+  accessToken: string;
+  refreshToken: string;
+  user: { id: string; email: string; username: string };
+}
+interface ErrorBody {
+  message: unknown;
+  [key: string]: unknown;
+}
+
 const decodeJwt = (token: string) =>
-  JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+  JSON.parse(
+    Buffer.from(token.split('.')[1], 'base64url').toString('utf8'),
+  ) as Claims;
+
+/** supertest types every body as `any`: say what the API answered. */
+const bodyOf = <T = SessionBody>(res: request.Response): T => res.body as T;
 
 const sha256 = (value: string) =>
   createHash('sha256').update(value, 'utf8').digest('hex');
@@ -42,7 +65,7 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
   let refreshTokens: RefreshTokensServiceType;
   let registrations = 0;
 
-  const http = () => request(app.getHttpServer());
+  const http = () => request(app.getHttpServer() as Server);
 
   /** Registers a fresh account; the response already carries a session. */
   const signUp = async () => {
@@ -63,9 +86,9 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
     return {
       email,
       username,
-      userId: res.body.user.id as string,
-      accessToken: res.body.accessToken as string,
-      refreshToken: res.body.refreshToken as string,
+      userId: bodyOf(res).user.id,
+      accessToken: bodyOf(res).accessToken,
+      refreshToken: bodyOf(res).refreshToken,
     };
   };
 
@@ -90,9 +113,16 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
     process.env.THROTTLE_REGISTER_LIMIT = '100000';
     process.env.CLOUDFLARE_R2_PUBLIC_URL = '';
 
-    const { AppModule } = await import('../src/app.module');
+    // Imported only now, after the env above: AppModule reads it when loaded.
+    // (Typed by hand: the dynamic import can't be resolved by the type checker
+    // under `module: nodenext`, same as in api-integration.e2e-spec.ts.)
+    const { AppModule } = (await import('../src/app.module')) as {
+      AppModule: typeof AppModuleType;
+    };
     const { RefreshTokensService } =
-      await import('../src/auth/refresh-tokens.service');
+      (await import('../src/auth/refresh-tokens.service')) as {
+        RefreshTokensService: typeof RefreshTokensServiceType;
+      };
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -122,7 +152,7 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
         .send({ email: user.email, password: PASSWORD })
         .expect(200);
 
-      for (const body of [login.body, { ...user }]) {
+      for (const body of [bodyOf(login), { ...user }]) {
         const claims = decodeJwt(body.accessToken);
         expect(claims.exp - claims.iat).toBe(15 * 60);
         expect(claims.sub).toBe(user.userId);
@@ -130,28 +160,29 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
         expect(body.refreshToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
       }
       // Dos logins = dos sesiones distintas.
-      expect(decodeJwt(login.body.accessToken).sid).not.toBe(
+      expect(decodeJwt(bodyOf(login).accessToken).sid).not.toBe(
         decodeJwt(user.accessToken).sid,
       );
 
-      const rows = await ds.query(
-        `SELECT token_hash, family_id, expires_at, revoked_at, replaced_by
+      const rows: Array<{ token_hash: string; expires_at: Date }> =
+        await ds.query(
+          `SELECT token_hash, family_id, expires_at, revoked_at, replaced_by
          FROM havit.refresh_tokens WHERE user_id = $1`,
-        [user.userId],
-      );
+          [user.userId],
+        );
       expect(rows).toHaveLength(2);
       const stored = JSON.stringify(rows);
       expect(stored).not.toContain(user.refreshToken);
-      expect(stored).not.toContain(login.body.refreshToken);
+      expect(stored).not.toContain(bodyOf(login).refreshToken);
       expect(rows.map((r) => r.token_hash)).toContain(
-        sha256(login.body.refreshToken),
+        sha256(bodyOf(login).refreshToken),
       );
       const days =
         (new Date(rows[0].expires_at).getTime() - Date.now()) / 86_400_000;
       expect(days).toBeGreaterThan(29.9);
       expect(days).toBeLessThanOrEqual(30);
 
-      await me(login.body.accessToken).expect(200);
+      await me(bodyOf(login).accessToken).expect(200);
     });
   });
 
@@ -161,23 +192,24 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
       const sid = decodeJwt(user.accessToken).sid;
 
       const first = await refresh(user.refreshToken).expect(200);
-      expect(first.body.refreshToken).not.toBe(user.refreshToken);
-      expect(decodeJwt(first.body.accessToken).sid).toBe(sid);
-      expect(first.body.user).toEqual({
+      expect(bodyOf(first).refreshToken).not.toBe(user.refreshToken);
+      expect(decodeJwt(bodyOf(first).accessToken).sid).toBe(sid);
+      expect(bodyOf(first).user).toEqual({
         id: user.userId,
         email: user.email,
         username: user.username,
       });
-      await me(first.body.accessToken).expect(200);
+      await me(bodyOf(first).accessToken).expect(200);
 
-      const second = await refresh(first.body.refreshToken).expect(200);
-      await me(second.body.accessToken).expect(200);
+      const second = await refresh(bodyOf(first).refreshToken).expect(200);
+      await me(bodyOf(second).accessToken).expect(200);
 
-      const chain = await ds.query(
-        `SELECT id, replaced_by FROM havit.refresh_tokens
+      const chain: Array<{ id: string; replaced_by: string | null }> =
+        await ds.query(
+          `SELECT id, replaced_by FROM havit.refresh_tokens
          WHERE family_id = $1 ORDER BY created_at`,
-        [sid],
-      );
+          [sid],
+        );
       expect(chain).toHaveLength(3);
       expect(chain[0].replaced_by).toBe(chain[1].id);
       expect(chain[1].replaced_by).toBe(chain[2].id);
@@ -188,17 +220,17 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
       const user = await signUp();
       const sid = decodeJwt(user.accessToken).sid;
       const rotated = await refresh(user.refreshToken).expect(200);
-      await me(rotated.body.accessToken).expect(200);
+      await me(bodyOf(rotated).accessToken).expect(200);
 
       // Alguien presenta el token viejo (robado, o una respuesta perdida).
       const reuse = await refresh(user.refreshToken).expect(401);
-      expect(reuse.body.message).toBe('Invalid refresh token');
+      expect(bodyOf<ErrorBody>(reuse).message).toBe('Invalid refresh token');
 
-      await refresh(rotated.body.refreshToken).expect(401);
+      await refresh(bodyOf(rotated).refreshToken).expect(401);
       // El access token de la sesión cae al instante en esta instancia.
-      await me(rotated.body.accessToken).expect(401);
+      await me(bodyOf(rotated).accessToken).expect(401);
 
-      const reasons = await ds.query(
+      const reasons: unknown = await ds.query(
         `SELECT DISTINCT revoke_reason FROM havit.refresh_tokens WHERE family_id = $1`,
         [sid],
       );
@@ -214,12 +246,12 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
       expect([a.status, b.status].sort()).toEqual([200, 401]);
       const winner = a.status === 200 ? a : b;
       // Comportamiento estricto (documentado): la familia queda revocada.
-      await refresh(winner.body.refreshToken).expect(401);
+      await refresh(bodyOf(winner).refreshToken).expect(401);
     });
 
     it('rechaza refresh tokens desconocidos o mal formados con el mismo 401', async () => {
       const unknown = await refresh('x'.repeat(43)).expect(401);
-      expect(unknown.body.message).toBe('Invalid refresh token');
+      expect(bodyOf<ErrorBody>(unknown).message).toBe('Invalid refresh token');
       await http().post('/auth/refresh').send({}).expect(400);
       await http()
         .post('/auth/refresh')
@@ -241,7 +273,7 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
       await refresh(user.refreshToken).expect(401);
       await me(user.accessToken).expect(401);
 
-      const reasons = await ds.query(
+      const reasons: unknown = await ds.query(
         `SELECT revoke_reason FROM havit.refresh_tokens WHERE user_id = $1`,
         [user.userId],
       );
@@ -261,8 +293,8 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
         .expect(204);
 
       await me(user.accessToken).expect(401);
-      await me(other.body.accessToken).expect(200);
-      await refresh(other.body.refreshToken).expect(200);
+      await me(bodyOf(other).accessToken).expect(200);
+      await refresh(bodyOf(other).refreshToken).expect(200);
     });
 
     it('responde 204 aunque no haya nada que revocar (repetido, sin token o desconocido)', async () => {
@@ -308,7 +340,7 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
       // antes incluso de buscarlo (401). Lo que importa: nunca 200.
       const res = await refresh(await legacyToken(user));
       expect([400, 401]).toContain(res.status);
-      expect(res.body.accessToken).toBeUndefined();
+      expect(bodyOf<Partial<SessionBody>>(res).accessToken).toBeUndefined();
     });
 
     it('y caduca como siempre', async () => {
@@ -357,7 +389,7 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
         user.userId,
       ]);
       await refresh(user.refreshToken).expect(401);
-      const rows = await ds.query(
+      const rows: unknown = await ds.query(
         `SELECT revoke_reason FROM havit.refresh_tokens WHERE user_id = $1`,
         [user.userId],
       );
@@ -376,12 +408,91 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
       const deleted = await refreshTokens.deleteExpired();
 
       expect(deleted).toBeGreaterThanOrEqual(1);
-      const left = await ds.query(
+      const left: unknown = await ds.query(
         `SELECT token_hash FROM havit.refresh_tokens WHERE user_id = $1`,
         [user.userId],
       );
       expect(left).toEqual([{ token_hash: sha256(user.refreshToken) }]);
       await refresh(user.refreshToken).expect(200);
+    });
+  });
+
+  // Post-auditoría B4-02-F01, por HTTP (controlador + servicio + guard):
+  // la rotación se retiene justo después de insertar el sucesor, sin commit.
+  describe('S6 logout concurrente con un refresh en curso', () => {
+    it('el logout (204) alcanza también al token que la rotación concurrente estaba creando', async () => {
+      const user = await signUp();
+      const sid = decodeJwt(user.accessToken).sid;
+
+      let release: () => void = () => undefined;
+      let reached: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const inserted = new Promise<void>((resolve) => (reached = resolve));
+      const original = ds.transaction.bind(ds) as (
+        cb: (m: EntityManager) => Promise<unknown>,
+      ) => Promise<unknown>;
+      const spy = jest.spyOn(ds, 'transaction').mockImplementationOnce(((
+        cb: (m: EntityManager) => Promise<unknown>,
+      ) =>
+        original((manager) =>
+          cb(
+            new Proxy(manager, {
+              get(target, prop, receiver) {
+                if (prop === 'query') {
+                  return async (sql: string, params?: unknown[]) => {
+                    const result: unknown = await target.query(sql, params);
+                    if (/^\s*INSERT INTO havit\.refresh_tokens\b/.test(sql)) {
+                      reached();
+                      await gate;
+                    }
+                    return result;
+                  };
+                }
+                const value: unknown = Reflect.get(target, prop, receiver);
+                return typeof value === 'function'
+                  ? ((value as (...a: unknown[]) => unknown).bind(
+                      target,
+                    ) as unknown)
+                  : value;
+              },
+            }),
+          ),
+        )) as unknown as typeof ds.transaction);
+
+      try {
+        const pendingRefresh = refresh(user.refreshToken).then((r) => r);
+        await inserted;
+        const pendingLogout = http()
+          .post('/auth/logout')
+          .send({ refreshToken: user.refreshToken })
+          .then((r) => r);
+        // Hasta que Postgres muestre el logout esperando el bloqueo de la familia.
+        for (let i = 0; i < 200; i += 1) {
+          const [{ waiting }]: Array<{ waiting: number }> = await ds.query(
+            `SELECT count(*)::int AS waiting FROM pg_stat_activity
+             WHERE datname = current_database() AND wait_event_type = 'Lock'`,
+          );
+          if (waiting > 0) break;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        release();
+
+        const rotated = await pendingRefresh;
+        expect(rotated.status).toBe(200); // la rotación llegó a confirmar...
+        expect((await pendingLogout).status).toBe(204);
+
+        // ...pero nada de esa sesión sobrevive al logout.
+        await refresh(bodyOf(rotated).refreshToken).expect(401);
+        await me(bodyOf(rotated).accessToken).expect(401);
+        const families: unknown = await ds.query(
+          `SELECT revoke_reason FROM havit.refresh_token_families WHERE id = $1`,
+          [sid],
+        );
+        expect(families).toEqual([{ revoke_reason: 'logout' }]);
+      } finally {
+        release();
+        spy.mockRestore();
+      }
     });
   });
 
@@ -410,7 +521,7 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
       ['qwertyuiop', 'Password is too common'],
     ])('rechaza %s con un mensaje específico', async (password, message) => {
       const res = await tryRegister(password).expect(400);
-      expect(res.body.message).toEqual([message]);
+      expect(bodyOf<ErrorBody>(res).message).toEqual([message]);
     });
 
     it('rechaza una contraseña que contiene el username o el email', async () => {
@@ -418,7 +529,7 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
       const res = await tryRegister(`mi-${username}-seguro`, username).expect(
         400,
       );
-      expect(res.body.message).toEqual([
+      expect(bodyOf<ErrorBody>(res).message).toEqual([
         'Password must not contain your username or email',
       ]);
     });
@@ -441,7 +552,9 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
   describe('E1 enumeración de cuentas', () => {
     /** The answer without what legitimately differs per request. */
     const shape = (res: request.Response) => {
-      const { timestamp: _t, path: _p, ...rest } = res.body;
+      const rest = { ...bodyOf<ErrorBody>(res) };
+      delete rest.timestamp;
+      delete rest.path;
       return { status: res.status, body: rest };
     };
 
@@ -470,7 +583,9 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
 
       expect(takenEmail.status).toBe(409);
       expect(shape(takenEmail)).toEqual(shape(takenUsername));
-      expect(takenEmail.body.message).toBe('Email or username already in use');
+      expect(bodyOf<ErrorBody>(takenEmail).message).toBe(
+        'Email or username already in use',
+      );
     });
 
     it('login: email inexistente y contraseña incorrecta dan la misma respuesta en un tiempo parecido', async () => {
@@ -520,13 +635,17 @@ describeDb('B4 sessions, tokens and authentication (real Postgres)', () => {
         .post('/auth/login')
         .send({ email: user.email, password: 'Incorrecta-123' })
         .expect(401);
-      expect(wrong.body.message).toBe('Invalid email or password');
+      expect(bodyOf<ErrorBody>(wrong).message).toBe(
+        'Invalid email or password',
+      );
 
       const right = await http()
         .post('/auth/login')
         .send({ email: user.email, password: PASSWORD })
         .expect(401);
-      expect(right.body.message).toBe('This account has been deactivated');
+      expect(bodyOf<ErrorBody>(right).message).toBe(
+        'This account has been deactivated',
+      );
     });
   });
 

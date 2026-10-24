@@ -41,6 +41,26 @@ const validUntil = new Map<string, number>();
 const cacheKey = (userId: string, sid?: string) =>
   sid ? `s:${sid}` : `u:${userId}`;
 
+/**
+ * Sessions this process revoked (logout / reuse / account), until when to
+ * refuse them without asking the database. Closes a gap found in the
+ * post-audit (B4-02-F02): a check whose lookup started BEFORE the revocation
+ * committed would otherwise cache "usable" AFTER forgetSession() and keep the
+ * session working here for another SESSION_CHECK_TTL_MS. Kept longer than one
+ * cache window; after that every lookup sees the committed revocation anyway.
+ */
+const locallyRevokedUntil = new Map<string, number>();
+const LOCAL_REVOCATION_TTL_MS = 2 * SESSION_CHECK_TTL_MS;
+
+const isLocallyRevoked = (sid: string | undefined) => {
+  if (!sid) return false;
+  const until = locallyRevokedUntil.get(sid);
+  if (until === undefined) return false;
+  if (until > Date.now()) return true;
+  locallyRevokedUntil.delete(sid);
+  return false;
+};
+
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   private readonly logger = new Logger(JwtAuthGuard.name);
@@ -52,11 +72,16 @@ export class JwtAuthGuard implements CanActivate {
    */
   static forgetSession(sid: string): void {
     validUntil.delete(cacheKey('', sid));
+    if (locallyRevokedUntil.size >= MAX_CACHED_SESSIONS) {
+      locallyRevokedUntil.clear();
+    }
+    locallyRevokedUntil.set(sid, Date.now() + LOCAL_REVOCATION_TTL_MS);
   }
 
   /** Tests only. */
   static clearSessionCache(): void {
     validUntil.clear();
+    locallyRevokedUntil.clear();
   }
 
   constructor(
@@ -101,12 +126,13 @@ export class JwtAuthGuard implements CanActivate {
    * check every endpoint answered 404/500 one by one for such a token and the
    * app had no clear signal to sign out; now it's a 401 the app logs out on.
    *
-   * B4: a token with a `sid` also needs its session (refresh token family)
-   * alive — not logged out, not revoked for reuse, not expired. Checked in
-   * the SAME lookup and cached the same way, so a logout or a reuse
-   * revocation cuts the access token off within SESSION_CHECK_TTL_MS at most
-   * (immediately on the process that handled the logout, which evicts the
-   * entry), instead of letting it run its 15 minutes.
+   * B4: a token with a `sid` also needs its session (its row in
+   * havit.refresh_token_families, the single source of truth) alive — not
+   * logged out, not revoked for reuse, not expired. Checked in the SAME
+   * lookup and cached the same way, so a logout or a reuse revocation cuts
+   * the access token off within SESSION_CHECK_TTL_MS at most on any other
+   * instance, and on the process that handled it as soon as the revocation
+   * committed (forgetSession), instead of letting it run its 15 minutes.
    *
    * Cost: one primary-key lookup per session every SESSION_CHECK_TTL_MS (only
    * "usable" answers are cached), so a ban/purge takes effect within 30 s.
@@ -125,6 +151,10 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('Session is no longer valid');
     }
 
+    if (isLocallyRevoked(sid)) {
+      throw new UnauthorizedException('Session is no longer valid');
+    }
+
     const key = cacheKey(userId, sid);
     const cachedUntil = validUntil.get(key);
     if (cachedUntil && cachedUntil > Date.now()) return;
@@ -139,10 +169,9 @@ export class JwtAuthGuard implements CanActivate {
         ? await this.dataSource.query(
             `SELECT u.is_active, u.deleted_at,
                     EXISTS (
-                      SELECT 1 FROM havit.refresh_tokens t
-                      WHERE t.family_id = $2 AND t.user_id = u.id
-                        AND t.replaced_by IS NULL AND t.revoked_at IS NULL
-                        AND t.expires_at > now()
+                      SELECT 1 FROM havit.refresh_token_families f
+                      WHERE f.id = $2 AND f.user_id = u.id
+                        AND f.revoked_at IS NULL AND f.expires_at > now()
                     ) AS session_active
              FROM havit.users u WHERE u.id = $1`,
             [userId, sid],
@@ -163,7 +192,9 @@ export class JwtAuthGuard implements CanActivate {
       !user ||
       !user.is_active ||
       user.deleted_at ||
-      (sid && !user.session_active)
+      (sid && !user.session_active) ||
+      // Revoked here while the lookup was in flight: never cache it as usable.
+      isLocallyRevoked(sid)
     ) {
       validUntil.delete(key);
       throw new UnauthorizedException('Session is no longer valid');
