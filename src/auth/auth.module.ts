@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthService } from './auth.service';
+import { RefreshTokensService } from './refresh-tokens.service';
 import { AuthController } from './auth.controller';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { AdminGuard } from './guards/admin.guard';
@@ -15,7 +16,7 @@ import { UsersModule } from '../users/users.module';
     TypeOrmModule.forFeature([User, UserProfile]),
     JwtModule.register({}),
   ],
-  providers: [AuthService, JwtAuthGuard, AdminGuard],
+  providers: [AuthService, RefreshTokensService, JwtAuthGuard, AdminGuard],
   controllers: [AuthController],
   exports: [JwtAuthGuard, AdminGuard, JwtModule],
 })
