@@ -20,6 +20,8 @@ import { randomUUID } from 'crypto';
 import request from 'supertest';
 
 const dbUrl = process.env.B2_TEST_DB_URL;
+// Cumple la política de B4 (src/auth/password-policy.ts).
+const PASSWORD = 'Montaña-Lenta-Azul';
 const describeDb = dbUrl ? describe : describe.skip;
 
 describeDb('API integration & regression (real Postgres)', () => {
@@ -31,7 +33,7 @@ describeDb('API integration & regression (real Postgres)', () => {
   const registerAndLogin = async () => {
     const tag = randomUUID().slice(0, 8);
     const email = `it_${tag}@example.com`;
-    const password = 'password123';
+    const password = PASSWORD;
     await http()
       .post('/auth/register')
       .send({
@@ -64,7 +66,7 @@ describeDb('API integration & regression (real Postgres)', () => {
       .post('/auth/register')
       .send({
         email,
-        password: 'password123',
+        password: PASSWORD,
         username: `it_${tag}`,
         acceptTerms: true,
         confirmAge16: true,
@@ -104,6 +106,8 @@ describeDb('API integration & regression (real Postgres)', () => {
     process.env.JWT_SECRET ??= 'integration-test-secret';
     // El rate limit global no es lo que se prueba aquí.
     process.env.THROTTLE_LIMIT = '100000';
+    // Ni el límite propio de /auth/register (B4): la suite registra un usuario por prueba.
+    process.env.THROTTLE_REGISTER_LIMIT = '100000';
     // Definida (vacía) para que un .env local no la rellene: el filtro de imageUrl solo exige
     // 'su carpeta de R2' cuando hay URL pública configurada, y aquí se prueba con una explícita.
     process.env.CLOUDFLARE_R2_PUBLIC_URL = '';
@@ -158,7 +162,7 @@ describeDb('API integration & regression (real Postgres)', () => {
         .post('/auth/register')
         .send({
           email,
-          password: 'password123',
+          password: PASSWORD,
           username: `otro_${randomUUID().slice(0, 8)}`,
           acceptTerms: true,
           confirmAge16: true,
@@ -345,7 +349,7 @@ describeDb('API integration & regression (real Postgres)', () => {
         .post('/auth/register')
         .send({
           email: `r3_${tag}@example.com`,
-          password: 'password123',
+          password: PASSWORD,
           username: `r3_${tag}`,
           acceptTerms: true,
           confirmAge16: true,
@@ -1262,7 +1266,7 @@ describeDb('API integration & regression (real Postgres)', () => {
       const body = {
         email: `race_${tag}@example.com`,
         username: `race_${tag}`,
-        password: 'password123',
+        password: PASSWORD,
         acceptTerms: true,
         confirmAge16: true,
       };
