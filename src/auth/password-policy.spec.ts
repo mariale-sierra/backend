@@ -1,5 +1,6 @@
 import {
   getCommonPasswords,
+  isTrivialPattern,
   PASSWORD_POLICY_MESSAGES as M,
   passwordPolicyViolation,
 } from './password-policy';
@@ -39,9 +40,12 @@ describe('password policy (B4)', () => {
 
   it('rejects more than 72 bytes (bcrypt would ignore the rest)', () => {
     expect(passwordPolicyViolation('ñ'.repeat(37), identity)).toBe(M.tooLong);
-    expect(passwordPolicyViolation('Kx9!vQ2#mP'.repeat(7), identity)).toBe(
-      null,
-    );
+    // Exactly 72 bytes (a repeated block would now count as trivial).
+    const long =
+      'la-montaña-lenta-azul-come-pizza-en-xela-cuando-llueve-a-las-6-y-media!';
+    expect(Buffer.byteLength(long, 'utf8')).toBe(72);
+    expect(passwordPolicyViolation(long, identity)).toBeNull();
+    expect(passwordPolicyViolation(`${long}x`, identity)).toBe(M.tooLong);
   });
 
   it.each([
@@ -67,6 +71,43 @@ describe('password policy (B4)', () => {
       expect(passwordPolicyViolation(password, identity)).toBe(M.tooCommon);
     },
   );
+
+  // Post-audit B4-03-F01: all accepted before the fix.
+  it.each([
+    '12345678901',
+    '1234512345',
+    '11223344556',
+    '123456789a',
+    '987654321a',
+    'q1w2e3r4t5y6',
+    'abcdabcdab',
+    'asdfghjklñ',
+    'zxcvbnm123',
+    'a1b2c3d4e5f6',
+    'Kx9!Kx9!Kx9!',
+  ])('rejects the trivial sequence or repetition %s', (password) => {
+    expect(passwordPolicyViolation(password, identity)).toBe(M.tooCommon);
+  });
+
+  it.each([
+    'Montaña-Lenta-Azul',
+    'tortuga verde salta',
+    'Kx9!vQ2#mPz7',
+    'qwertyMangoPeludo',
+    'mi perro come pizza 2024',
+    'Lluvia_en_Xela_2026',
+  ])('does not flag a strong password as a pattern: %s', (password) => {
+    expect(isTrivialPattern(password)).toBe(false);
+  });
+
+  // Post-audit B4-03-F02: length in characters, not UTF-16 units.
+  it('counts characters, not UTF-16 code units', () => {
+    expect('🔥🍕🎉🚀🌙'.length).toBe(10);
+    expect(passwordPolicyViolation('🔥🍕🎉🚀🌙', identity)).toBe(M.tooShort);
+    expect(
+      passwordPolicyViolation('🔥🍕🎉🚀🌙 luna roja', identity),
+    ).toBeNull();
+  });
 
   it.each([
     ['the username', 'xxANITA_FITxx99'],

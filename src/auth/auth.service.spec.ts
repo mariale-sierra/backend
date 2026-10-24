@@ -294,7 +294,9 @@ describe('AuthService', () => {
         .catch(() => undefined);
 
       expect(bcrypt.compare).toHaveBeenCalledTimes(1);
-      const [, hash] = (bcrypt.compare as jest.Mock).mock.calls[0];
+      const [, hash] = (
+        bcrypt.compare as jest.Mock<Promise<boolean>, [string, string]>
+      ).mock.calls[0];
       expect(hash).toMatch(/^\$2b\$10\$.{53}$/);
     });
 

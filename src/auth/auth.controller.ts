@@ -26,8 +26,24 @@ import { Public } from './decorators/public.decorator';
  * THROTTLE_REGISTER_LIMIT exists only so the e2e suite (which registers a
  * user per test) can raise it; never set it in a real deployment.
  */
+export const REGISTER_THROTTLE_DEFAULT_LIMIT = 5;
+
+/**
+ * The register limit to apply. A value that isn't a positive integer (typo,
+ * empty) falls back to the default: parseInt would give NaN, and NaN as a
+ * limit means no limit at all.
+ */
+export function registerThrottleLimit(
+  value = process.env.THROTTLE_REGISTER_LIMIT,
+): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0
+    ? parsed
+    : REGISTER_THROTTLE_DEFAULT_LIMIT;
+}
+
 const REGISTER_THROTTLE = {
-  limit: () => parseInt(process.env.THROTTLE_REGISTER_LIMIT ?? '5', 10),
+  limit: () => registerThrottleLimit(),
   ttl: 10 * 60_000,
 };
 

@@ -25,7 +25,7 @@ export const PASSWORD_POLICY_MESSAGES = {
 
 /** Shorter names or email local parts would match too many unrelated passwords. */
 const MIN_IDENTITY_LENGTH = 3;
-/** "aaaaaaaaaa", "1212121212", "abcabcabca"... */
+/** "aaaaaaaaaa", "1212121212", "abcabcabca"... (see also isTrivialPattern). */
 const MIN_DISTINCT_CHARACTERS = 4;
 
 const LEET: Record<string, string> = {
@@ -82,6 +82,65 @@ export function getCommonPasswords(): Set<string> {
   return commonPasswords;
 }
 
+/**
+ * Post-audit B4-03-F01: sequences, keyboard walks and repetitions are as weak
+ * as a listed password, but the list can't hold them all and stripping the
+ * digits around a word (stripDecorations) leaves nothing to compare for an
+ * all-digit one. "Trivial" = at least SEQUENCE_STEP_RATIO of the adjacent
+ * pairs are a repeat or a ±1 step (alphabet, digits with 9↔0 wrap, or
+ * neighbours on a keyboard row) — also when the odd and even positions are
+ * each such a run ("q1w2e3r4t5y6") — or the whole password repeats one block
+ * ("1234512345", "abcdabcdab").
+ */
+const KEYBOARD_ROWS = ['1234567890', 'qwertyuiop', 'asdfghjklñ', 'zxcvbnm'];
+const SEQUENCE_STEP_RATIO = 0.8;
+const MIN_INTERLEAVED_RUN = 4;
+
+function isTrivialStep(a: string, b: string): boolean {
+  if (a === b) return true;
+  const letters = /^[a-z]$/.test(a) && /^[a-z]$/.test(b);
+  if (letters && Math.abs(a.charCodeAt(0) - b.charCodeAt(0)) === 1) return true;
+  if (/^\d$/.test(a) && /^\d$/.test(b)) {
+    const step = (Number(b) - Number(a) + 10) % 10;
+    if (step === 1 || step === 9) return true;
+  }
+  return KEYBOARD_ROWS.some((row) => {
+    const i = row.indexOf(a);
+    const j = row.indexOf(b);
+    return i >= 0 && j >= 0 && Math.abs(i - j) === 1;
+  });
+}
+
+function isMostlySteps(chars: string[]): boolean {
+  if (chars.length < 2) return true;
+  let steps = 0;
+  for (let i = 1; i < chars.length; i += 1) {
+    if (isTrivialStep(chars[i - 1], chars[i])) steps += 1;
+  }
+  return steps / (chars.length - 1) >= SEQUENCE_STEP_RATIO;
+}
+
+function isRepeatedBlock(chars: string[]): boolean {
+  for (let period = 1; period <= chars.length / 2; period += 1) {
+    if (chars.every((c, i) => i < period || c === chars[i - period])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function isTrivialPattern(password: string): boolean {
+  const chars = [...password.toLowerCase()];
+  if (isMostlySteps(chars) || isRepeatedBlock(chars)) return true;
+  const even = chars.filter((_, i) => i % 2 === 0);
+  const odd = chars.filter((_, i) => i % 2 === 1);
+  return (
+    odd.length >= MIN_INTERLEAVED_RUN &&
+    isMostlySteps(even) &&
+    isMostlySteps(odd)
+  );
+}
+
 const deleet = (value: string) =>
   value.replace(/[013457@$!]/g, (c) => LEET[c] ?? c);
 
@@ -131,7 +190,10 @@ export function passwordPolicyViolation(
   password: string,
   identity: { username?: unknown; email?: unknown } = {},
 ): string | null {
-  if (password.length < PASSWORD_MIN_LENGTH) {
+  // Characters (code points), not UTF-16 units: "🔥🍕🎉🚀🌙" is 5, not 10
+  // (post-audit B4-03-F02). The stored password is never normalized, so
+  // existing logins are unaffected.
+  if ([...password].length < PASSWORD_MIN_LENGTH) {
     return PASSWORD_POLICY_MESSAGES.tooShort;
   }
   if (Buffer.byteLength(password, 'utf8') > PASSWORD_MAX_BYTES) {
@@ -148,7 +210,10 @@ export function passwordPolicyViolation(
     return PASSWORD_POLICY_MESSAGES.containsIdentity;
   }
 
-  if (new Set(lower).size < MIN_DISTINCT_CHARACTERS) {
+  if (
+    new Set(lower).size < MIN_DISTINCT_CHARACTERS ||
+    isTrivialPattern(password)
+  ) {
     return PASSWORD_POLICY_MESSAGES.tooCommon;
   }
   const list = getCommonPasswords();
