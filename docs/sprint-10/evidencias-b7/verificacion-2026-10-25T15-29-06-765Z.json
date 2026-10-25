@@ -1,0 +1,221 @@
+{
+  "tool": "scripts/verify-azure-backups.js",
+  "verdict": "PASS",
+  "exitCode": 0,
+  "thresholds": {
+    "minRetentionDays": 7,
+    "maxBackupAgeHours": 26
+  },
+  "checks": [
+    {
+      "id": "C1",
+      "status": "PASS",
+      "label": "El servidor existe y está operativo",
+      "expected": "state = Ready",
+      "observed": "Ready"
+    },
+    {
+      "id": "C2",
+      "status": "PASS",
+      "label": "Backups automáticos activos",
+      "expected": "backup.backupRetentionDays >= 7",
+      "observed": "7 días",
+      "note": "Igual al mínimo exigido (7): no hay margen. Azure admite hasta 35 días."
+    },
+    {
+      "id": "C3",
+      "status": "PASS",
+      "label": "Ventana de recuperación (PITR) abierta",
+      "expected": "earliestRestoreDate dentro de la retención (<= 8 días)",
+      "observed": "2026-10-19T00:10:47.883591+00:00 (hace 159.3 h)"
+    },
+    {
+      "id": "C4",
+      "status": "PASS",
+      "label": "Hay puntos de recuperación recientes",
+      "expected": "backup más reciente <= 26 h",
+      "observed": "7 backups; el más reciente 2026-10-25T00:11:26.088981+00:00 (hace 15.3 h)",
+      "note": "La API no expone un campo de estado por backup: la completitud se infiere de que completedTime exista."
+    },
+    {
+      "id": "C5",
+      "status": "WARN",
+      "label": "Redundancia del backup",
+      "expected": "se registra el valor de backup.geoRedundantBackup",
+      "observed": "Disabled",
+      "note": "Informativo, no es una falla: la geo-redundancia solo se puede elegir al crear el servidor. Si está en Disabled, no hay copia fuera de la región."
+    }
+  ],
+  "capture": {
+    "source": "azure-cli",
+    "capturedAt": "2026-10-25T15:29:06.765Z",
+    "account": {
+      "id": "[redactado]",
+      "name": "[redactado]"
+    },
+    "server": {
+      "administratorLogin": "[redactado]",
+      "administratorLoginPassword": "[redactado]",
+      "authConfig": {
+        "activeDirectoryAuth": "Disabled",
+        "passwordAuth": "Enabled",
+        "tenantId": null
+      },
+      "availabilityZone": "1",
+      "backup": {
+        "backupRetentionDays": 7,
+        "earliestRestoreDate": "2026-10-19T00:10:47.883591+00:00",
+        "geoRedundantBackup": "Disabled"
+      },
+      "cluster": null,
+      "createMode": null,
+      "dataEncryption": {
+        "geoBackupEncryptionKeyStatus": null,
+        "geoBackupFederatedIdentityClientId": null,
+        "geoBackupKeyUri": null,
+        "geoBackupUserAssignedIdentityId": null,
+        "primaryEncryptionKeyStatus": null,
+        "primaryFederatedIdentityClientId": null,
+        "primaryKeyUri": null,
+        "primaryUserAssignedIdentityId": null,
+        "type": "SystemManaged"
+      },
+      "fullyQualifiedDomainName": "pg-havit-dev-01.postgres.database.azure.com",
+      "highAvailability": {
+        "mode": "Disabled",
+        "standbyAvailabilityZone": null,
+        "state": "NotEnabled"
+      },
+      "id": "/subscriptions/[redactado]/resourceGroups/rg-havit-dev/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-havit-dev-01",
+      "identity": null,
+      "location": "Mexico Central",
+      "maintenanceWindow": {
+        "customWindow": "Disabled",
+        "dayOfWeek": 0,
+        "startHour": 0,
+        "startMinute": 0
+      },
+      "minorVersion": "15",
+      "name": "pg-havit-dev-01",
+      "network": {
+        "delegatedSubnetResourceId": null,
+        "privateDnsZoneArmResourceId": null,
+        "publicNetworkAccess": "Enabled"
+      },
+      "pointInTimeUtc": null,
+      "privateEndpointConnections": [],
+      "replica": {
+        "capacity": 5,
+        "promoteMode": null,
+        "promoteOption": null,
+        "replicationState": null,
+        "role": "Primary"
+      },
+      "replicaCapacity": 5,
+      "replicationRole": "Primary",
+      "resourceGroup": "rg-havit-dev",
+      "sku": {
+        "name": "Standard_B1ms",
+        "tier": "Burstable"
+      },
+      "sourceServerResourceId": null,
+      "state": "Ready",
+      "storage": {
+        "autoGrow": "Disabled",
+        "iops": 120,
+        "storageSizeGb": 32,
+        "throughput": null,
+        "tier": "P4",
+        "type": "Premium_LRS"
+      },
+      "systemData": {
+        "createdAt": "2026-04-17T22:24:38.096742+00:00",
+        "createdBy": null,
+        "createdByType": null,
+        "lastModifiedAt": null,
+        "lastModifiedBy": null,
+        "lastModifiedByType": null
+      },
+      "tags": {},
+      "type": "Microsoft.DBforPostgreSQL/flexibleServers",
+      "version": "16"
+    },
+    "backups": [
+      {
+        "backupType": "Full",
+        "completedTime": "2026-10-19T00:10:47.883591+00:00",
+        "id": "/subscriptions/[redactado]/resourceGroups/rg-havit-dev/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-havit-dev-01/backups/backup_639279654468835910",
+        "name": "backup_639279654468835910",
+        "resourceGroup": "rg-havit-dev",
+        "source": "Automatic",
+        "systemData": null,
+        "type": "Microsoft.DBforPostgreSQL/flexibleServers/backups"
+      },
+      {
+        "backupType": "Full",
+        "completedTime": "2026-10-20T00:11:43.909897+00:00",
+        "id": "/subscriptions/[redactado]/resourceGroups/rg-havit-dev/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-havit-dev-01/backups/backup_639280519029098974",
+        "name": "backup_639280519029098974",
+        "resourceGroup": "rg-havit-dev",
+        "source": "Automatic",
+        "systemData": null,
+        "type": "Microsoft.DBforPostgreSQL/flexibleServers/backups"
+      },
+      {
+        "backupType": "Full",
+        "completedTime": "2026-10-21T00:11:54.371986+00:00",
+        "id": "/subscriptions/[redactado]/resourceGroups/rg-havit-dev/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-havit-dev-01/backups/backup_639281383133719860",
+        "name": "backup_639281383133719860",
+        "resourceGroup": "rg-havit-dev",
+        "source": "Automatic",
+        "systemData": null,
+        "type": "Microsoft.DBforPostgreSQL/flexibleServers/backups"
+      },
+      {
+        "backupType": "Full",
+        "completedTime": "2026-10-22T00:08:45.171707+00:00",
+        "id": "/subscriptions/[redactado]/resourceGroups/rg-havit-dev/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-havit-dev-01/backups/backup_639282245241717076",
+        "name": "backup_639282245241717076",
+        "resourceGroup": "rg-havit-dev",
+        "source": "Automatic",
+        "systemData": null,
+        "type": "Microsoft.DBforPostgreSQL/flexibleServers/backups"
+      },
+      {
+        "backupType": "Full",
+        "completedTime": "2026-10-23T00:09:40.327554+00:00",
+        "id": "/subscriptions/[redactado]/resourceGroups/rg-havit-dev/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-havit-dev-01/backups/backup_639283109793275549",
+        "name": "backup_639283109793275549",
+        "resourceGroup": "rg-havit-dev",
+        "source": "Automatic",
+        "systemData": null,
+        "type": "Microsoft.DBforPostgreSQL/flexibleServers/backups"
+      },
+      {
+        "backupType": "Full",
+        "completedTime": "2026-10-24T00:10:32.213965+00:00",
+        "id": "/subscriptions/[redactado]/resourceGroups/rg-havit-dev/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-havit-dev-01/backups/backup_639283974312139656",
+        "name": "backup_639283974312139656",
+        "resourceGroup": "rg-havit-dev",
+        "source": "Automatic",
+        "systemData": null,
+        "type": "Microsoft.DBforPostgreSQL/flexibleServers/backups"
+      },
+      {
+        "backupType": "Full",
+        "completedTime": "2026-10-25T00:11:26.088981+00:00",
+        "id": "/subscriptions/[redactado]/resourceGroups/rg-havit-dev/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-havit-dev-01/backups/backup_639284838850889819",
+        "name": "backup_639284838850889819",
+        "resourceGroup": "rg-havit-dev",
+        "source": "Automatic",
+        "systemData": null,
+        "type": "Microsoft.DBforPostgreSQL/flexibleServers/backups"
+      }
+    ],
+    "commands": [
+      "az account show -o json",
+      "az postgres flexible-server show --resource-group rg-havit-dev --name pg-havit-dev-01 -o json",
+      "az postgres flexible-server backup list --resource-group rg-havit-dev --server-name pg-havit-dev-01 -o json"
+    ]
+  }
+}

@@ -8,18 +8,21 @@ Responsable: Martin Villatoro · Fecha: 2026-10-25 · Repo: `backend/` (scripts 
 
 ## 1. Resumen y criterio de aceptación
 
-B7 deja un verificador reproducible de los backups automáticos de Azure (`scripts/verify-azure-backups.js`) con criterios PASS/FAIL explícitos y códigos de salida aptos para automatización, más el plan de recuperación escrito para que lo ejecute alguien que no participó. El script está probado end-to-end contra fixtures (9 pruebas, todos los caminos y códigos de salida), pero **todavía no se corrió contra Azure**: falta `az login`. Por eso la tabla de configuración real (§6.1) sigue vacía a propósito: llenarla con los valores que alguien vio en el portal el 2026-10-12 sería reciclar datos de hace 13 días sobre un servidor con 7 días de retención.
+B7 deja un verificador reproducible de los backups automáticos de Azure (`scripts/verify-azure-backups.js`) con criterios PASS/FAIL explícitos y códigos de salida aptos para automatización, más el plan de recuperación escrito para que lo ejecute alguien que no participó. **La verificación ya se ejecutó contra el servidor real** el 2026-10-25 a las 15:29:06 UTC: resultado **PASS** (4 PASS, 1 WARN, 0 FAIL, exit 0) sobre `pg-havit-dev-01` en el resource group `rg-havit-dev`, con retención de 7 días, 7 backups diarios y la ventana PITR abierta. La redundancia del backup resultó **`Disabled`**, que es el WARN y el riesgo principal que queda abierto (§7).
+
+Lo que B7 **no** entrega: ninguna restauración real de Azure, y por lo tanto **ningún RTO medido**. Eso quedó fuera del alcance autorizado y figura como tal en §6.2 y §10.
 
 Criterio original del bloque: *"respaldos automáticos verificados y restauración exitosa sin afectar la base de producción."*
 
 | Parte del criterio | Estado | Evidencia |
 |---|---|---|
-| Respaldos automáticos **verificados** | **PARCIAL** — la verificación está automatizada y probada, pero no ejecutada contra el servidor real | `scripts/verify-azure-backups.js`; `evidencias-b7/pruebas-locales.txt` (P1–P9). Falta la corrida de §5.2 |
+| Respaldos automáticos **verificados** | **CUMPLIDO** — verificación automatizada y ejecutada contra el servidor real, con resultado PASS | `evidencias-b7/verificacion-2026-10-25T15-29-06-765Z.txt` y `.json`; tabla en §6.1 |
 | Restauración **exitosa** desde Azure | **NO CUMPLIDO — fuera de alcance por decisión** | No se ejecutó ningún restore. El procedimiento queda en §9 |
 | Restauración verificable (evidencia de recuperabilidad) | **PARCIAL** — solo el drill local del Sprint 9, con datos sintéticos | `docs/confiabilidad/B11-CONFIABILIDAD-BACKUPS-INTEGRACIONES.md` §3: 60/60 tablas idénticas, `pg_amcheck` limpio |
-| **Sin afectar la base de producción** | **CUMPLIDO** | Nada se ejecutó contra `pg-havit-dev-01`. El script es de solo lectura y no tiene ninguna ruta de código que cree, modifique o elimine recursos |
+| **Sin afectar la base de producción** | **CUMPLIDO** | Las únicas operaciones contra `pg-havit-dev-01` fueron tres lecturas del plano de control de Azure (`account show`, `flexible-server show`, `backup list`). No se tocó la base de datos ni se modificó ningún recurso |
 | Procedimiento comprensible para alguien que no participó | **CUMPLIDO** | §9, con comandos, roles, autorizaciones, validaciones y reversión |
-| RTO medido | **NO CUMPLIDO** | No se midió. No hubo restore que cronometrar (§10) |
+| RTO medido | **NO CUMPLIDO** | No se midió. No hubo restore que cronometrar (§6.2, §10) |
+| RPO ≤ 15 min demostrado | **NO DEMOSTRADO** | La verificación confirma que el mecanismo PITR está disponible, pero **no mide** el RPO. Ver §10 |
 
 **En una línea:** la herramienta y el procedimiento están listos; la evidencia real de Azure queda a una corrida de distancia (`az login` + §5.2).
 
@@ -43,6 +46,8 @@ Criterio original del bloque: *"respaldos automáticos verificados y restauraci�
 | `scripts/verify-azure-backups.js` | **Nuevo.** Verificador de backups automáticos: 5 checks PASS/FAIL/WARN, salida legible y JSON, evidencia a disco, modos `--dry-run` y `--fixture`, códigos de salida 0/1/2. Solo lectura |
 | `package.json` | **Una línea:** script `backups:verify`. Sin dependencias nuevas |
 | `docs/sprint-10/B7-backups-recuperacion.md` | **Nuevo.** Este documento |
+| `docs/sprint-10/evidencias-b7/verificacion-2026-10-25T15-29-06-765Z.txt` | **Nuevo.** Informe legible de la corrida real contra Azure: PASS, 4 PASS + 1 WARN, exit 0 |
+| `docs/sprint-10/evidencias-b7/verificacion-2026-10-25T15-29-06-765Z.json` | **Nuevo.** La misma corrida en JSON, con la respuesta completa de `az` y `administratorLogin` redactado |
 | `docs/sprint-10/evidencias-b7/pruebas-locales.txt` | **Nuevo.** Transcripción de las 9 pruebas locales con sus códigos de salida |
 | `docs/sprint-10/evidencias-b7/fixture-fail-ejemplo.json` | **Nuevo.** Captura de ejemplo con un servidor mal configurado, para reproducir el camino FAIL sin Azure. Datos inventados a propósito y marcados como tales |
 
@@ -91,7 +96,7 @@ La alternativa sin OIDC es un cron en la VM del runner self-hosted de B6 usando 
 
 ### 5.1 Lo que sí se ejecutó (local, sin Azure)
 
-Entorno: macOS (Darwin 25.6.0), Node v22, Azure CLI 2.91.0 instalada pero **sin sesión iniciada**.
+Entorno: macOS (Darwin 25.6.0), Node v24.22.0, Azure CLI 2.91.0 instalada pero, **en ese momento, sin sesión iniciada**.
 
 | # | Prueba | Comando | Esperado | Resultado |
 |---|---|---|---|---|
@@ -109,53 +114,78 @@ P5 es la única prueba que invocó el binario `az`. La llamada fue `az account s
 
 Además: `node --check` sobre el script pasa sin errores. `npm run lint` **no cubre este archivo** — su glob es `{src,apps,libs,test}/**/*.ts`, así que `scripts/*.js` queda fuera, igual que `scripts/b11-integration-sample.js` y `scripts/test-summary.js`. No se agregó lint nuevo para no cambiar la configuración del repo dentro de B7.
 
-### 5.2 Lo que falta ejecutar (requiere `az login`)
+### 5.2 La corrida real contra Azure — EJECUTADA el 2026-10-25
 
 ```bash
 az login
-az account show -o table
-az postgres flexible-server list -o table    # resuelve resource group y nombre exacto
-
 cd backend
 npm run backups:verify -- \
   --server pg-havit-dev-01 \
-  --resource-group <rg> \
+  --resource-group rg-havit-dev \
   --out docs/sprint-10/evidencias-b7
-echo "exit=$?"
 ```
 
-Esa corrida produce `evidencias-b7/verificacion-<timestamp>.txt` y `.json`, y es lo que llena la tabla de §6.1. Hasta entonces, §6.1 queda pendiente.
+**Resultado: PASS, exit 0** (4 PASS, 1 WARN, 0 FAIL), a las 15:29:06 UTC. Produjo los dos archivos de evidencia de §6 y llenó la tabla de §6.1.
+
+Los tres comandos que ejecutó el script, todos de lectura, quedaron registrados en el propio informe:
+
+```
+az account show -o json
+az postgres flexible-server show --resource-group rg-havit-dev --name pg-havit-dev-01 -o json
+az postgres flexible-server backup list --resource-group rg-havit-dev --server-name pg-havit-dev-01 -o json
+```
+
+**Para repetirla** basta el mismo comando: el script no guarda estado y cada corrida escribe su propio par de archivos con la marca de tiempo.
 
 ## 6. Evidencia
 
 Todo en `docs/sprint-10/evidencias-b7/`:
 
-- `pruebas-locales.txt` — transcripción completa de P1–P9 con sus códigos de salida, el entorno y la aclaración de que ninguna prueba consultó datos de Azure. Todas las rutas son relativas a `backend/`, así que las pruebas se repiten tal cual con un `cd backend`.
-- `fixture-fail-ejemplo.json` — la captura de ejemplo que usa P3 para ejercitar el camino FAIL. Está en el repo justamente para que esa prueba sea reproducible sin Azure y sin archivos temporales.
+- **`verificacion-2026-10-25T15-29-06-765Z.txt`** — el informe legible de la corrida real: comandos ejecutados, configuración observada, los 5 checks con su esperado/observado y el veredicto PASS. **Esta es la evidencia principal de B7.**
+- **`verificacion-2026-10-25T15-29-06-765Z.json`** — la misma corrida en formato máquina, con la respuesta completa de `az` (servidor y los 7 backups), los umbrales aplicados y `exitCode: 0`. El campo `administratorLogin` viene como `[redactado]`: el script lo censura antes de escribir, porque esta evidencia se commitea.
+- `pruebas-locales.txt` — transcripción completa de P1–P9 con sus códigos de salida y la aclaración de que ninguna de esas pruebas consultó datos de Azure. Todas las rutas son relativas a `backend/`, así que se repiten tal cual con un `cd backend`.
+- `fixture-fail-ejemplo.json` — la captura de ejemplo que usa P3 para ejercitar el camino FAIL, sin Azure y sin archivos temporales.
 
-La evidencia de la corrida real todavía no existe. Cuando se genere, el script la nombra `verificacion-<timestamp>.txt/.json`. Los archivos producidos por `--dry-run` o `--fixture` se nombran `FIXTURE-NO-ES-EVIDENCIA-<timestamp>` y llevan el aviso en el encabezado del informe, en el cuerpo y en el campo `source` del JSON, para que nunca se confundan con una verificación real.
+Los archivos producidos por `--dry-run` o `--fixture` se nombran `FIXTURE-NO-ES-EVIDENCIA-<timestamp>` y llevan el aviso en el encabezado, en el cuerpo y en el campo `source` del JSON. Los de una corrida real se llaman `verificacion-<timestamp>`, como los dos de arriba. Los nombres no se solapan nunca.
 
-### 6.1 Tabla de configuración real de backups — PENDIENTE DE ESTA CORRIDA
+> **Censura aplicada a mano sobre la evidencia.** El identificador y el nombre de la suscripción de Azure se reemplazaron por `[redactado]` en los dos archivos, incluidos los que aparecían embebidos en los *resource id* de ARM (que quedan como `/subscriptions/[redactado]/resourceGroups/rg-havit-dev/...`). No son credenciales, pero son identificadores de la infraestructura y el historial de git es permanente. **Todo lo técnicamente relevante se conservó**: resource group, servidor, región, SKU, configuración de backups, los 7 backups con sus fechas, los checks y el veredicto. El `administratorLogin` ya venía redactado por el propio script.
+>
+> **Pendiente derivado:** el script todavía **no** censura la suscripción por su cuenta, así que una corrida futura la volverá a escribir. Hay que agregar esos campos a `REDACTED_FIELDS` en `scripts/verify-azure-backups.js`; no se hizo aquí para no mezclar un cambio de código en un commit de evidencia (§7).
 
-| Dato | Valor | Fuente |
+> Detalle menor de `pruebas-locales.txt`: en su encabezado el campo de versión de Azure CLI quedó **vacío** por un problema de comillas al generarlo. La versión correcta es **2.91.0**. El archivo se dejó tal cual en lugar de editarlo a mano, para no tocar una transcripción que por lo demás es auténtica; regenerarlo hoy tampoco serviría, porque la prueba P5 depende de que **no** haya sesión de Azure iniciada y ahora sí la hay.
+
+### 6.1 Tabla de configuración real de backups — VERIFICADA
+
+Verificado el **2026-10-25 a las 15:29:06 UTC** por Martin Villatoro, con `npm run backups:verify` (§5.2). Todos los valores salen de la salida de `az`, no de una captura de pantalla ni de una corrida anterior.
+
+| Dato | Valor observado | Fuente |
 |---|---|---|
-| Nombre exacto del servidor | _pendiente_ | `az ... show` → `name` |
-| Resource group | _pendiente_ | `az ... show` → `resourceGroup` |
-| Región | _pendiente_ | `location` |
-| Estado | _pendiente_ | `state` |
-| SKU / nivel | _pendiente_ | `sku.name` / `sku.tier` |
-| Versión de PostgreSQL | _pendiente_ | `version` |
-| Backups automáticos activos | _pendiente_ | se deduce de `backup.backupRetentionDays` |
-| Retención (días) | _pendiente_ | `backup.backupRetentionDays` |
-| Redundancia del backup | _pendiente_ | `backup.geoRedundantBackup` |
-| Earliest restore point | _pendiente_ | `backup.earliestRestoreDate` |
-| Backups disponibles y su fecha | _pendiente_ | `az ... backup list` → `completedTime` |
-| Resultado PASS/FAIL | _pendiente_ | salida del script |
-| Fecha de verificación / quién | _pendiente_ | — |
+| Nombre exacto del servidor | `pg-havit-dev-01` | `show` → `name` |
+| Resource group | `rg-havit-dev` | `show` → `resourceGroup` |
+| FQDN | `pg-havit-dev-01.postgres.database.azure.com` | `show` → `fullyQualifiedDomainName` |
+| Región | **Mexico Central** | `show` → `location` |
+| Estado | **Ready** | `show` → `state` |
+| SKU / nivel | `Standard_B1ms` / **Burstable** | `show` → `sku.name` / `sku.tier` |
+| Versión de PostgreSQL | 16 | `show` → `version` |
+| Alta disponibilidad | Disabled | `show` → `highAvailability.mode` |
+| Backups automáticos | **Activos** | retención configurada en 7 días + 7 backups listados |
+| Retención | **7 días** (el mínimo de Azure; admite hasta 35) | `show` → `backup.backupRetentionDays` |
+| Redundancia del backup | **`Disabled`** — sin geo-redundancia | `show` → `backup.geoRedundantBackup` |
+| Earliest restore point | **2026-10-19T00:10:47.883591+00:00** | `show` → `backup.earliestRestoreDate` |
+| Backups disponibles | **7**, diarios, uno por día del 2026-10-19 al 2026-10-25, todos `Full` / `Automatic` | `backup list` → `completedTime` |
+| Backup más reciente | 2026-10-25T00:11:26.088981+00:00 — **hace 15,3 h** al momento de la corrida | `backup list` |
+| Almacenamiento (GB) | *no expuesto por esta versión de az* | `show` → `storage.storageSizeGB` |
+| **Resultado** | **PASS** — 4 PASS, 1 WARN, 0 FAIL, `exit 0` | salida del script |
 
-**Por qué está vacía y no copiada del doc B11.** El 2026-10-12 Martin verificó en el portal: Flexible Server, backups activos, retención 7 días, 7 backups diarios, *earliest restore point* `2026-10-07 00:00:18.291 UTC`, nivel Burstable. Ese registro está en `docs/confiabilidad/B11-CONFIABILIDAD-BACKUPS-INTEGRACIONES.md` §2 y **sigue siendo válido como lo que se vio ese día**. Pero hoy es 2026-10-25: pasaron 13 días con una retención de 7, así que ese *earliest restore point* ya quedó fuera de la ventana y los 7 backups listados ya rotaron. Copiarlo aquí sería presentar un dato caducado como actual. La redundancia (`geoRedundantBackup`) nunca se registró, ni entonces ni ahora.
+El único WARN es la redundancia (C5): está en `Disabled`, y como la geo-redundancia **solo se puede elegir al crear el servidor**, no es algo que se pueda corregir sobre este servidor. Se reporta como riesgo en §7, no como falla.
 
-**Un dato de aquel registro que sí se mantiene** (es una propiedad del nivel de servicio, no una fecha): el servidor está en nivel **Burstable**, y Azure no admite backups a petición en ese nivel. El comando `az postgres flexible-server backup create` existe y es GA, pero sobre este servidor fallaría. Es decir: **no hay forma de forzar un backup antes de un simulacro**; hay que trabajar con el snapshot diario automático. El script no usa ese comando.
+**Qué demuestra esta corrida:** que el servidor real tiene backups automáticos diarios funcionando, con 7 días de retención y una ventana PITR abierta y continua desde el 2026-10-19.
+
+**Qué NO demuestra:** que un restore funcione, ni cuánto tarda, ni cuántos datos se perderían. Para eso hace falta ejecutar un PITR, que quedó fuera de alcance (§9, §10).
+
+**Sobre el dato del 2026-10-12.** El doc B11 §2 registra una verificación hecha en el portal ese día (retención 7 días, *earliest restore point* `2026-10-07`). Sigue siendo válida como lo que se vio entonces, pero **no se reutilizó aquí**: con 7 días de retención, aquellos backups ya rotaron. Los valores de esta tabla son todos de la corrida del 2026-10-25. Lo que ambas verificaciones coinciden en mostrar es que la retención lleva al menos dos semanas en 7 días y que el ritmo diario de backups se sostiene.
+
+**Nivel Burstable: no se pueden forzar backups.** Azure no admite backups a petición en este nivel. El comando `az postgres flexible-server backup create` existe y es GA, pero sobre este servidor fallaría. Antes de un eventual simulacro hay que trabajar con el snapshot diario automático de las ~00:10 UTC. El script no usa ese comando.
 
 ### 6.2 Tabla de tiempos medidos
 
@@ -167,7 +197,9 @@ La evidencia de la corrida real todavía no existe. Cuando se genere, el script 
 | Tiempo de validación del servidor restaurado | — | idem |
 | Tiempo hasta que la API responde | — | idem |
 
-**No hay tiempos medidos de Azure.** Los únicos tiempos reales que existen son los del drill local del Sprint 9 (`pg_dump -Fc` 0,14 s y `pg_restore` 0,54 s sobre 13 MB de datos sintéticos), que miden un restore lógico local y **no** el PITR de Azure.
+**No hay tiempos medidos de Azure.** La verificación del 2026-10-25 confirma que los backups existen, pero **no cronometra nada**: no hubo restore. Los únicos tiempos reales que existen son los del drill local del Sprint 9 (`pg_dump -Fc` 0,14 s y `pg_restore` 0,54 s sobre 13 MB de datos sintéticos), que miden un restore lógico local y **no** el PITR de Azure.
+
+> **Cuidado con leer el "hace 15,3 h" como pérdida de datos.** Esas 15,3 horas son la antigüedad del último **snapshot diario**, no el punto de recuperación. Azure complementa el snapshot con archivado continuo de WAL, así que un PITR puede restaurar a un momento mucho más cercano al presente que el último snapshot. Confundir las dos cosas daría un RPO aparente de 15 horas, que no es lo que ofrece el servicio. Lo que esta evidencia **no** incluye es una medición del retraso real de archivado de WAL en este servidor (§10).
 
 ## 7. Pendientes, riesgos y dependencias
 
@@ -175,20 +207,23 @@ La evidencia de la corrida real todavía no existe. Cuando se genere, el script 
 
 | # | Pendiente | Bloqueado por |
 |---|---|---|
-| 1 | Correr la verificación real (§5.2) y llenar §6.1 | `az login` con una cuenta con rol Reader |
-| 2 | Registrar el **resource group** y el nombre exacto del servidor | lo resuelve el comando `flexible-server list` de §5.2 |
-| 3 | Registrar la **redundancia del backup** — nunca se verificó | idem |
-| 4 | Decidir si la retención sube de 7 días (Azure admite hasta 35) | decisión del equipo + coordinación con B11 |
-| 5 | Confirmar **cuál es el entorno de producción** | Ale Pérez / Ale Sierra. El servidor se llama `pg-havit-dev-01` y el PDF del sprint ya marcaba esta duda |
-| 6 | Designar quién tiene **Contributor** para un restore real | Ale Pérez / Ale Sierra |
-| 7 | Activar la verificación programada (§4.3) | requiere OIDC y secrets, no autorizado aquí |
+| 1 | **Restore real (PITR) y medición del RTO** | Fuera del alcance autorizado: exige crear un servidor nuevo. Procedimiento listo en §9 |
+| 2 | Decidir si la retención sube de 7 días (Azure admite hasta 35) | decisión del equipo + coordinación con B11. Hoy está en el mínimo, sin margen |
+| 3 | Decidir qué hacer con la **falta de geo-redundancia** (`Disabled`) | decisión del equipo. No se puede cambiar sobre este servidor: exigiría crear uno nuevo y migrar |
+| 4 | Confirmar **cuál es el entorno de producción** | Ale Pérez / Ale Sierra. El servidor se llama `pg-havit-dev-01` y el PDF del sprint ya marcaba esta duda |
+| 5 | Designar quién tiene **Contributor** para un restore real | Ale Pérez / Ale Sierra |
+| 6 | Activar la verificación programada (§4.3) | requiere OIDC y secrets, no autorizado aquí |
+| 7 | Repetir la verificación periódicamente | hoy es manual. Mientras no exista (6), conviene correrla antes de cada entrega |
+| 8 | **Censurar la suscripción desde el script**: agregar su id y nombre a `REDACTED_FIELDS` en `scripts/verify-azure-backups.js` | nada. Es un cambio de una línea, separado del commit de evidencia a propósito. Hoy la censura de §6 se hizo a mano |
+
+Los pendientes 1 a 3 de la versión anterior de este documento (correr la verificación, registrar el resource group, registrar la redundancia) **quedaron resueltos** con la corrida del 2026-10-25.
 
 ### Riesgos y límites
 
 - **Objetos de Cloudflare R2 (fotos): NO están en el backup de PostgreSQL.** Es el límite más importante de todo este bloque. Un restore de la base devuelve las filas de `workout_posts`, `user_profiles` y `spaces` con su `image_url`, pero **no devuelve ni un solo archivo de imagen**. Si se pierden los objetos de R2, no hay nada aquí que los recupere.
 - **Qué pasa con las URLs de fotos tras restaurar la base.** La base guarda la URL pública en `image_url`; tras B5 la lectura de fotos no públicas pasa por `toSignedReadUrl`, que firma al leer a partir de esa URL. Entonces: si se restaura la base a un punto anterior, las filas vuelven a su `image_url` de ese momento y **las fotos siguen resolviendo mientras el objeto exista en R2**, porque R2 no se revierte. Los dos desfases posibles son (a) fotos subidas después del punto de restauración: el objeto existe en R2 pero ya no hay fila que lo referencie, y queda huérfano y sin dueño para `deleteUserObjects`; (b) fotos borradas después del punto de restauración: la fila vuelve, pero el objeto ya no está y la lectura falla. Ninguno de los dos casos está cubierto hoy.
-- **Geo-redundancia: solo se elige al crear el servidor.** Si está en `Disabled`, no se puede activar sobre el servidor existente: habría que crear uno nuevo y migrar. Mientras tanto, una caída de toda la región deja sin backup accesible, y no hay RPO/RTO garantizado para ese escenario.
-- **Límite de retención.** Con 7 días, una pérdida detectada al día 8 **no es recuperable**: no hay ningún mecanismo que la alcance. Azure permite subir hasta 35 días; es una decisión de costo del equipo.
+- **Sin geo-redundancia — confirmado, no supuesto.** La verificación del 2026-10-25 observó `geoRedundantBackup: Disabled`. Los backups viven **solo en Mexico Central**, la misma región del servidor. Una caída de toda la región deja la base sin backup accesible, y para ese escenario **no hay RPO ni RTO de ningún tipo**. Y no es corregible sobre este servidor: la geo-redundancia solo se puede elegir al crearlo, así que activarla exigiría crear un servidor nuevo y migrar.
+- **Retención en el mínimo — confirmado.** Los 7 días observados son el piso que permite Azure. Una pérdida detectada al día 8 **no es recuperable**: ningún mecanismo la alcanza. La ventana real verificada arranca el 2026-10-19. Azure permite subir hasta 35 días; es una decisión de costo del equipo.
 - **Borrar el servidor borra sus backups.** Microsoft lo documenta sin matices: eliminar el servidor elimina también todos sus backups, sin recuperación posible.
 - **Costo de un servidor restaurado.** Un PITR crea un servidor nuevo que **se factura desde que existe**. Si alguna vez se hace un simulacro, hay que borrarlo al terminar y dejar constancia del borrado.
 - **La base es compartida.** `pg-havit-dev-01` sirve al contenedor desplegado y al compose local. Nada destructivo sobre ella sin autorización explícita. El script de B7 es de solo lectura y ni siquiera se conecta a PostgreSQL.
@@ -278,13 +313,19 @@ Si alguna falla, **no** apuntar la API al servidor restaurado.
 
 ## 10. RPO / RTO — resultado honesto
 
-> Siguen siendo **objetivos propuestos**, no un SLA confirmado. Con el restore descartado, **el RTO no está medido**.
+> Siguen siendo **objetivos propuestos**, no un SLA confirmado. La verificación del 2026-10-25 confirma que el **mecanismo** de recuperación existe y está sano, pero **no mide ni el RPO ni el RTO**. Para eso hace falta un restore, que quedó fuera de alcance.
 
-| | OBSERVADO POR B7 | DOCUMENTACIÓN OFICIAL DE AZURE | OBJETIVO PROPUESTO |
-|---|---|---|---|
-| **RPO** | **Nada medido todavía.** La verificación que lo respaldaría (backups activos, retención, ventana PITR abierta) está automatizada pero no ejecutada (§6.1) | Hasta 5 min de retraso con PITR en la misma región; hasta 1 h con geo-restore, y solo si la geo-redundancia se activó al crear el servidor | **≤ 15 min** |
-| **RTO** | **No medido. No se ejecutó ningún restore de Azure.** El único tiempo real disponible es el del drill local del Sprint 9 (0,54 s de `pg_restore` sobre 13 MB sintéticos), que **no mide el PITR de Azure** | "The overall recovery time usually takes from few minutes up to a few hours", según el replay de WAL | **≤ 4 h** |
+| | OBSERVADO POR B7 (2026-10-25) | DOCUMENTACIÓN OFICIAL DE AZURE | OBJETIVO PROPUESTO | ¿Demostrado? |
+|---|---|---|---|---|
+| **RPO** | Backups automáticos activos, retención 7 días, ventana PITR abierta desde el 2026-10-19, 7 backups diarios consecutivos, el último hace 15,3 h. **Ninguna medición del retraso de archivado de WAL.** | Hasta 5 min de retraso con PITR en la misma región; hasta 1 h con geo-restore, que aquí **no aplica** porque la geo-redundancia está en `Disabled` | **≤ 15 min** | **NO DEMOSTRADO** |
+| **RTO** | **No medido. No se ejecutó ningún restore de Azure.** El único tiempo real disponible es el del drill local del Sprint 9 (0,54 s de `pg_restore` sobre 13 MB sintéticos), que **no mide el PITR de Azure** | "The overall recovery time usually takes from few minutes up to a few hours", según el replay de WAL | **≤ 4 h** | **NO MEDIDO** |
 
-**Qué se puede afirmar hoy:** que existe un mecanismo de backup automático administrado por Azure con capacidad de PITR, y que hay una herramienta lista para verificar su configuración real.
+**Qué se puede afirmar con esta evidencia:** que existe un mecanismo de backup automático administrado por Azure, verificado y sano, con capacidad de PITR y una ventana de recuperación abierta y continua de 7 días. Eso es una condición **necesaria** para cumplir el RPO de 15 minutos.
 
-**Qué no se puede afirmar:** que el objetivo de RTO ≤ 4 h se cumpla. Nadie lo ha medido sobre este servidor. Para medirlo hace falta exactamente un PITR cronometrado (§9.3, paso 4), que es lo que quedó fuera de alcance. Mientras eso no ocurra, el RTO de Havit es una estimación basada en la documentación de Microsoft, no un número propio — y así debería figurar en la matriz de B12.
+**Qué no se puede afirmar:**
+
+- **El RPO de ≤ 15 min no está demostrado.** La verificación comprueba que el mecanismo que lo haría posible está activo, pero no mide cuántos datos se perderían realmente. El número de 5 minutos es lo que Microsoft documenta para el servicio en general; nadie lo ha observado en `pg-havit-dev-01`. Medirlo exigiría un restore a un punto conocido y comparar qué transacciones sobrevivieron.
+- **El RTO de ≤ 4 h no está medido, ni estimado con datos propios.** Para medirlo hace falta exactamente un PITR cronometrado (§9.3, paso 4).
+- **Para una caída regional no hay ningún objetivo aplicable.** Sin geo-redundancia no hay copia fuera de Mexico Central, así que ni el RPO ni el RTO propuestos significan nada en ese escenario.
+
+**Para B12:** en la matriz de requisitos no funcionales, el RPO debe figurar como *no demostrado* y el RTO como *no medido*, con esta evidencia como respaldo de que el mecanismo existe — no de que los objetivos se cumplan. Presentarlos como cumplidos sería falso.
