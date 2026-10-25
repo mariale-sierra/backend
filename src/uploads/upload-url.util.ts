@@ -68,15 +68,24 @@ export function assertOwnUploadUrl(
  * — it can never point under a different user's folder, because that
  * segment comes from `userId`, never from parsing `url`.
  *
- * Also returns null when R2 isn't configured (local dev/tests — same
- * degraded condition assertOwnUploadUrl() itself has): there is no real
- * object in that mode, so callers should treat the input as unsignable /
+ * Also returns null when R2 isn't configured for a REAL network call — not
+ * just `CLOUDFLARE_R2_PUBLIC_URL` (which is all assertOwnUploadUrl() needs,
+ * since it only validates the URL's shape, no network involved), but also
+ * `CLOUDFLARE_R2_BUCKET_NAME`, which every real operation this key feeds
+ * into (HeadObject, GetObject, DeleteObject, signing a GET) requires as a
+ * request parameter. A deploy with only the public URL set (or a test that
+ * sets just that, to exercise assertOwnUploadUrl() in isolation — the exact
+ * gap an existing e2e fixture hit before this check existed) has no real
+ * bucket to call, so callers should treat the input as unsignable /
  * unverifiable and fall back to their own documented behavior (pass the URL
  * through unchanged for reads, skip the check entirely for CP2's write-path
- * verification).
+ * verification) — the same degraded condition as "R2 isn't configured at
+ * all", never a real HeadObject/GetObject/DeleteObject attempt against an
+ * incomplete configuration.
  */
 export function extractUploadKey(url: string, userId: string): string | null {
   const prefix = ownUploadPrefix(userId);
   if (!prefix || !url.startsWith(prefix)) return null;
+  if (!process.env['CLOUDFLARE_R2_BUCKET_NAME']?.trim()) return null;
   return `uploads/${userId}/${url.slice(prefix.length)}`;
 }

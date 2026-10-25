@@ -69,15 +69,24 @@ describe('assertOwnUploadUrl', () => {
 });
 
 describe('extractUploadKey', () => {
-  const ORIGINAL = process.env['CLOUDFLARE_R2_PUBLIC_URL'];
+  const ORIGINAL_PUBLIC_URL = process.env['CLOUDFLARE_R2_PUBLIC_URL'];
+  const ORIGINAL_BUCKET_NAME = process.env['CLOUDFLARE_R2_BUCKET_NAME'];
   afterEach(() => {
-    if (ORIGINAL === undefined) delete process.env['CLOUDFLARE_R2_PUBLIC_URL'];
-    else process.env['CLOUDFLARE_R2_PUBLIC_URL'] = ORIGINAL;
+    if (ORIGINAL_PUBLIC_URL === undefined)
+      delete process.env['CLOUDFLARE_R2_PUBLIC_URL'];
+    else process.env['CLOUDFLARE_R2_PUBLIC_URL'] = ORIGINAL_PUBLIC_URL;
+    if (ORIGINAL_BUCKET_NAME === undefined)
+      delete process.env['CLOUDFLARE_R2_BUCKET_NAME'];
+    else process.env['CLOUDFLARE_R2_BUCKET_NAME'] = ORIGINAL_BUCKET_NAME;
   });
 
   describe('with R2 configured', () => {
     beforeEach(() => {
       process.env['CLOUDFLARE_R2_PUBLIC_URL'] = 'https://pub-abc.r2.dev/';
+      // B5 — CP7 fix: a real network call (HeadObject/GetObject/DeleteObject,
+      // signing a GET) needs the bucket name too — "with R2 configured" here
+      // means fully enough to make one, same as production always has both.
+      process.env['CLOUDFLARE_R2_BUCKET_NAME'] = 'bucket';
     });
 
     it("recovers the exact key getPresignedUrl() built, called after assertOwnUploadUrl's own check", () => {
@@ -111,6 +120,22 @@ describe('extractUploadKey', () => {
 
     it('returns null when R2 is not configured, even for an otherwise valid-looking URL', () => {
       delete process.env['CLOUDFLARE_R2_PUBLIC_URL'];
+      expect(
+        extractUploadKey('https://pub-abc.r2.dev/uploads/u1/9f.jpeg', 'u1'),
+      ).toBeNull();
+    });
+
+    // B5 — CP7 regression: a pre-existing e2e fixture set only
+    // CLOUDFLARE_R2_PUBLIC_URL (to exercise assertOwnUploadUrl's string-shape
+    // check in isolation, which needs nothing else) and relied on this
+    // function also treating that as "R2 not configured" — true before this
+    // fix, but once verifyUploadedObject() started calling this on every
+    // POST /workout-logs/progress with an imageUrl, the same partial setup
+    // made it try a real HeadObject with no bucket to call, which is not the
+    // same failure as "the content was actually invalid". This pins the
+    // fix down: the public URL alone is not enough to call this "configured".
+    it('returns null when the public URL is set but the bucket name is not (nothing real to call)', () => {
+      delete process.env['CLOUDFLARE_R2_BUCKET_NAME'];
       expect(
         extractUploadKey('https://pub-abc.r2.dev/uploads/u1/9f.jpeg', 'u1'),
       ).toBeNull();
