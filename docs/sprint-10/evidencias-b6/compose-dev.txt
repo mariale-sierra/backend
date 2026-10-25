@@ -1,0 +1,18 @@
+Copia aislada de raiz/ (container_name renombrados a b6s-*, .env falso, Postgres local): no toca Azure.
+$ docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+
+## flujo dev:local (docker-compose.yml + docker-compose.local.yml -> target dev)
+NAME            IMAGE                          STATUS
+b6s-backend     b6stack-backend                Up 6 seconds
+b6s-caddy       caddy:2.10.2-alpine            Up 6 seconds
+b6s-db-local    postgres:16                    Up 12 seconds (healthy)
+b6s-pgbouncer   edoburu/pgbouncer:v1.26.0-p0   Up 12 seconds
+b6s-redis       redis:7-alpine                 Up 12 seconds (healthy)
+$ docker exec b6s-backend id
+uid=1000(node) gid=1000(node) groups=1000(node)
+$ proceso principal (PID 1)
+npm run dev                     
+$ curl http://localhost:3000/health/ready
+{"status":"ok","checks":{"database":"up","redis":"up"}}
+$ curl -k https://localhost:8448/health (via caddy)
+{"status":"ok","uptimeSeconds":1} HTTP 200

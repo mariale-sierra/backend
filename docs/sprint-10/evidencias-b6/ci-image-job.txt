@@ -1,0 +1,7 @@
+Job `image` del run https://github.com/mariale-sierra/backend/actions/runs/40173385418 (rama feature/sprint10-b6-cicd):
+
+HEALTHCHECK: healthy
+{"status":"ok","uptimeSeconds":6}
+{"status":"ok","checks":{"database":"up","redis":"disabled"}}
+uid=1000(node) gid=1000(node) groups=1000(node)
+havit-backend   ci        20ad41226f3f   10 seconds ago   407MB

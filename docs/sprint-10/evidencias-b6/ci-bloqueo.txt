@@ -1,0 +1,29 @@
+Prueba controlada en la rama desechable chore/b6-prueba-bloqueo (ya borrada). Su ci.yml era el de
+B6 con UN cambio: el job `deploy` (mismos `needs: [tests, image]`) se disparaba con push a esa rama
+y en lugar de tocar el servidor hacía `echo` en un runner de GitHub.
+
+1) Test roto a propósito (src/app.controller.spec.ts esperaba status 'roto-a-proposito')
+   https://github.com/mariale-sierra/backend/actions/runs/40173562364   sha 689e1bc   conclusion=failure
+   tests:  failure
+   image:  success
+   deploy: skipped        <- el deploy NO corre aunque la imagen sí haya pasado
+
+   Salida del paso "Pruebas unitarias":
+       Expected: "roto-a-proposito"
+       Received: "ok"
+
+2) Test arreglado (mismo workflow)
+   https://github.com/mariale-sierra/backend/actions/runs/40173705304   sha 06c4b1f   conclusion=success
+   tests:  success
+   image:  success
+   deploy: success
+   DEPLOY SIMULADO de 06c4b1f5eaba8da52e7e584c53b6c8fd4a7e1e7c (tests e image pasaron)
+
+(Hubo un run previo, 40173427475, que GitHub rechazó por un error de YAML en el `echo` del deploy
+simulado — un ": " sin comillas; solo existió en la rama de prueba. El ci.yml real pasa actionlint.)
+
+3) Rama real feature/sprint10-b6-cicd (no es main)
+   https://github.com/mariale-sierra/backend/actions/runs/40173385418   conclusion=success
+   tests:  success
+   image:  success
+   deploy: skipped        <- `if: push && ref == main`

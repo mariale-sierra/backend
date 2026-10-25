@@ -1,0 +1,11 @@
+$ docker stop b6-pg
+$ time curl /health/ready
+{"status":"error","checks":{"database":"down","redis":"up"}}
+HTTP 503
+real 0.16
+$ curl /health
+{"status":"ok","uptimeSeconds":13}
+HTTP 200
+$ docker stop b6-redis && curl /health/ready (Postgres vuelve)
+{"status":"ok","checks":{"database":"up","redis":"down"}}
+HTTP 200

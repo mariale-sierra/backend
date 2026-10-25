@@ -1,0 +1,25 @@
+Mismo equipo (macOS, Docker Desktop, containerd image store), mismo contexto de build.
+"Disco" = `docker image ls` (descomprimida); "comprimida" = `docker image inspect --format '{{.Size}}'`.
+
+| Imagen                                    | Base               | Disco   | Comprimida   | Usuario | HEALTHCHECK |
+|-------------------------------------------|--------------------|---------|--------------|---------|-------------|
+| havit-backend:b6-before (origin/development) | node:20 (1 etapa)  | 2.21 GB | 509 641 653 B | root ("") | ninguno     |
+| havit-backend:b6-prod (esta rama, target prod) | node:22-bookworm-slim | 635 MB | 115 162 971 B | node (uid 1000) | GET /health cada 30 s |
+
+En el runner ubuntu-latest de GitHub (job `image`, sin containerd store) la misma imagen mide 407 MB (ver ci-image-job.txt).
+
+$ docker image inspect havit-backend:b6-before --format '{{.Size}} bytes user="{{.Config.User}}" health={{json .Config.Healthcheck}}'
+509641653 bytes user="" health=null
+
+$ docker image inspect havit-backend:b6-prod --format '{{.Size}} bytes user={{.Config.User}} health={{json .Config.Healthcheck}}'
+115162971 bytes user=node health={"Test":["CMD","node","-e","fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"],"Interval":30000000000,"Timeout":5000000000,"StartPeriod":90000000000,"Retries":3}
+
+Contenido de /app en b6-prod (todo de root, solo lectura para `node`):
+certs/  database/{scripts,init,migrations,seeds}/  dist/  node_modules/ (237 MB, solo producción)  package.json  package-lock.json
+$ docker run --rm --entrypoint sh havit-backend:b6-prod -c 'touch /app/x'
+touch: cannot touch '/app/x': Permission denied
+
+Entrypoint de la imagen anterior (hallazgo que B3 dejó para B6):
+$ docker run --rm --entrypoint node havit-backend:b6-before dist/main.js
+node:internal/modules/cjs/loader:1210
+  throw err;   (Cannot find module '/app/dist/main.js': nest build emitía dist/src/main.js)

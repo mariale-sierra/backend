@@ -1,0 +1,29 @@
+Copia aislada de raiz/ con un override que solo fija target: prod (el mismo que usa la VM) sobre el Postgres local.
+Cada método: un redeploy con build --no-cache (como un deploy con código nuevo), midiendo /health cada 0.25 s.
+
+## Flujo de deploy con docker compose (target prod, Postgres local)
+docker compose 5.4.0 en macOS; la VM usa docker-compose v1, así que los tiempos absolutos cambian, pero la diferencia entre métodos se mantiene.
+$ docker compose ps
+NAME            STATUS
+b6s-backend     Up 6 seconds (healthy)
+b6s-caddy       Up 7 minutes
+b6s-db-local    Up 7 minutes (healthy)
+b6s-pgbouncer   Up 7 minutes
+b6s-redis       Up 7 minutes (healthy)
+$ docker exec b6s-backend id
+uid=1000(node) gid=1000(node) groups=1000(node)
+$ PID 1
+npm start                     
+usuarios antes: 1
+
+### Método anterior: down --remove-orphans && up -d --build (el build cae dentro del corte)
+35.3 s sin servicio (113 sondeos fallidos de 123, uno cada 0.25 s)
+
+### Método B6: build primero (el contenedor viejo sigue sirviendo), luego down && up -d
+8.8 s sin servicio (28 sondeos fallidos de 162, uno cada 0.25 s)
+
+usuarios después de 2 redeploys: 1; usuario b6compose: b6compose
+migraciones registradas: 66
+$ docker logs b6s-backend | grep "\[db\]"
+[db] nothing to apply, schema is up to date
+HEALTHCHECK tras el redeploy: healthy

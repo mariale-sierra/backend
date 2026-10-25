@@ -1,0 +1,19 @@
+Flujos reales contra la misma imagen de producción (ENABLE_SWAGGER=true):
+
+$ curl -s -o /dev/null -w "%{http_code} %{content_type}" http://localhost:3006/api-docs-yaml   (js-yaml 5.5.0)
+200 text/yaml; charset=utf-8
+openapi: 3.0.0
+paths:
+
+$ POST /auth/register (sin token)
+{"message":"User registered successfully","accessToken":"eyJhbGciO…(JWT recortado)
+HTTP 200
+$ POST /auth/register con contraseña común (lista common-passwords.txt dentro de dist/)
+{"statusCode":400,"error":"Bad Request","message":["Password is too common"],"code":"VALIDATION_ERROR","timestamp":"2026-10-25T07:20:17.569Z","path":"/auth/register"}
+HTTP 400
+$ POST /auth/login
+HTTP 200
+$ GET /users/me con token
+HTTP 200
+$ GET /users/me sin token
+HTTP 401

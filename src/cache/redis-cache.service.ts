@@ -118,6 +118,16 @@ export class RedisCacheService implements OnModuleDestroy {
     }
   }
 
+  /** Health probe (B6): 'disabled' without REDIS_URL, never throws. */
+  async ping(): Promise<'up' | 'down' | 'disabled'> {
+    if (!this.client) return 'disabled';
+    try {
+      return (await this.client.ping()) === 'PONG' ? 'up' : 'down';
+    } catch {
+      return 'down';
+    }
+  }
+
   /** Read-through helper: cache hit returns as-is; a miss calls `loader`, caches, and returns it. */
   async getOrSet<T>(
     key: string,
