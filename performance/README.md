@@ -110,7 +110,7 @@ now also starts a `redis` service by default (see `REDIS.md`).
 ### 5. Run the app and the benchmark
 
 ```bash
-npm run build && node dist/src/main.js &
+npm run build && node dist/main.js &   # B6: dist/src/main.js before Sprint 10 B6
 node performance/scripts/run-benchmark.js before   # or "after"
 node performance/scripts/measure-cache-cold-warm.js
 ```

@@ -1,0 +1,3 @@
+$ npm audit --omit=dev   (feature/sprint10-b6-cicd)
+
+found 0 vulnerabilities
