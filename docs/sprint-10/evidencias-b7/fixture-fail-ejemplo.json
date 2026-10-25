@@ -1,0 +1,18 @@
+{
+  "source": "fixture",
+  "note": "FIXTURE DE PRUEBA DEL CAMINO FAIL. No corresponde a ningún servidor real.",
+  "capturedAt": "2026-10-25T12:00:00.000Z",
+  "account": { "id": "00000000-0000-0000-0000-000000000000", "name": "EXAMPLE-subscription" },
+  "server": {
+    "name": "EXAMPLE-servidor-mal-configurado",
+    "resourceGroup": "EXAMPLE-resource-group",
+    "location": "eastus",
+    "state": "Updating",
+    "version": "16",
+    "sku": { "name": "Standard_B1ms", "tier": "Burstable" },
+    "backup": {
+      "backupRetentionDays": 3
+    }
+  },
+  "backups": []
+}

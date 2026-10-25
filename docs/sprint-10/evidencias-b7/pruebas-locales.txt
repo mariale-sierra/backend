@@ -1,0 +1,172 @@
+B7 — Pruebas locales de scripts/verify-azure-backups.js
+Fecha: 2026-10-25T15:08:04Z · Host: macOS (Darwin 25.6.0) · Node v24.22.0
+Azure CLI instalada:  · sesión iniciada: NO
+
+NINGUNA de estas pruebas consultó datos de Azure. No se ejecutó 'az login' y el script no
+creó, modificó ni eliminó ningún recurso. Los datos que aparecen abajo salen de fixtures de
+ejemplo, no de pg-havit-dev-01.
+
+Todas las rutas son relativas a backend/, así que estas pruebas se repiten tal cual.
+
+=== P1 · --help · esperado exit=0 ===
+B7 — Verificación de backups automáticos de Azure PostgreSQL Flexible Server.
+Solo lectura: no crea, no restaura, no modifica y no elimina nada.
+
+  node scripts/verify-azure-backups.js --server <nombre> [--resource-group <rg>] [opciones]
+
+Opciones
+  --server <nombre>            Servidor a verificar (requerido salvo en --dry-run/--fixture).
+  --resource-group, -g <rg>    Resource group. Si falta, se descubre y se aborta si hay varios.
+  --subscription <id>          Suscripción a usar.
+  --min-retention-days <n>     Retención mínima aceptable. Por defecto 7.
+  --max-backup-age-hours <n>   Antigüedad máxima del backup más reciente. Por defecto 26.
+  --out <dir>                  Escribe la evidencia (.txt y .json) en ese directorio.
+  --json                       Imprime el informe como JSON en vez de texto.
+  --fixture <archivo>          Reevalúa una captura guardada, sin llamar a Azure.
+  --dry-run                    Ejercita la lógica con datos de ejemplo. NO es evidencia real.
+  --help, -h                   Esta ayuda.
+
+Salida
+  0  PASS     todos los checks pasaron
+  1  FAIL     al menos un check falló
+  2  ERROR    no se pudo verificar (sin az, sin sesión, sin permisos, servidor inexistente)
+exit=0
+
+=== P2 · --dry-run, camino PASS · esperado exit=0 ===
+================================================================================
+ B7 — Verificación de backups automáticos (Azure PostgreSQL Flexible Server)
+================================================================================
+ Corrida (UTC)   : 2026-10-25T15:08:04.690Z
+ Origen de datos : FIXTURE — DATOS DE EJEMPLO, NO ES EVIDENCIA REAL
+ Aviso           : DATOS DE EJEMPLO GENERADOS POR --dry-run. NO SON EVIDENCIA DE NINGÚN SERVIDOR REAL.
+ Suscripción     : EXAMPLE-subscription (00000000-0000-0000-0000-000000000000)
+ Umbrales        : retención >= 7 días; backup más reciente <= 26 h
+
+--------------------------------------------------------------------------------
+ CONFIGURACIÓN OBSERVADA
+--------------------------------------------------------------------------------
+ Servidor                    : EXAMPLE-dry-run-server
+ Resource group              : EXAMPLE-resource-group
+ FQDN                        : EXAMPLE-dry-run-server.postgres.database.azure.com
+ Región                      : eastus
+ Estado                      : Ready
+ Versión de PostgreSQL       : 16
+ SKU / nivel                 : Standard_B1ms / Burstable
+ Almacenamiento (GB)         : 32
+ Alta disponibilidad         : Disabled
+ Retención de backups (días) : 7
+ Redundancia del backup      : Disabled
+ Earliest restore point      : 2026-10-18T15:08:04.690Z
+
+--------------------------------------------------------------------------------
+ CHECKS
+--------------------------------------------------------------------------------
+ [PASS] C1  El servidor existe y está operativo
+          esperado : state = Ready
+          observado: Ready
+ [PASS] C2  Backups automáticos activos
+          esperado : backup.backupRetentionDays >= 7
+          observado: 7 días
+          nota     : Igual al mínimo exigido (7): no hay margen. Azure admite hasta 35 días.
+ [PASS] C3  Ventana de recuperación (PITR) abierta
+          esperado : earliestRestoreDate dentro de la retención (<= 8 días)
+          observado: 2026-10-18T15:08:04.690Z (hace 168.0 h)
+ [PASS] C4  Hay puntos de recuperación recientes
+          esperado : backup más reciente <= 26 h
+          observado: 3 backups; el más reciente 2026-10-25T13:08:04.690Z (hace 2.0 h)
+          nota     : La API no expone un campo de estado por backup: la completitud se infiere de que completedTime exista.
+ [WARN] C5  Redundancia del backup
+          esperado : se registra el valor de backup.geoRedundantBackup
+          observado: Disabled
+          nota     : Informativo, no es una falla: la geo-redundancia solo se puede elegir al crear el servidor. Si está en Disabled, no hay copia fuera de la región.
+
+--------------------------------------------------------------------------------
+ RESULTADO: PASS   (5 checks: 4 PASS, 1 WARN, 0 FAIL)   exit=0
+ ESTE INFORME NO ES EVIDENCIA: proviene de un fixture, no de Azure.
+================================================================================
+exit=0
+
+=== P3 · fixture con todo mal, camino FAIL · esperado exit=1 ===
+================================================================================
+ B7 — Verificación de backups automáticos (Azure PostgreSQL Flexible Server)
+================================================================================
+ Corrida (UTC)   : 2026-10-25T12:00:00.000Z
+ Origen de datos : FIXTURE — DATOS DE EJEMPLO, NO ES EVIDENCIA REAL
+ Aviso           : FIXTURE DE PRUEBA DEL CAMINO FAIL. No corresponde a ningún servidor real.
+ Suscripción     : EXAMPLE-subscription (00000000-0000-0000-0000-000000000000)
+ Umbrales        : retención >= 7 días; backup más reciente <= 26 h
+
+--------------------------------------------------------------------------------
+ CONFIGURACIÓN OBSERVADA
+--------------------------------------------------------------------------------
+ Servidor                    : EXAMPLE-servidor-mal-configurado
+ Resource group              : EXAMPLE-resource-group
+ FQDN                        : no expuesto por esta versión de az
+ Región                      : eastus
+ Estado                      : Updating
+ Versión de PostgreSQL       : 16
+ SKU / nivel                 : Standard_B1ms / Burstable
+ Almacenamiento (GB)         : no expuesto por esta versión de az
+ Alta disponibilidad         : no expuesto por esta versión de az
+ Retención de backups (días) : 3
+ Redundancia del backup      : no expuesto por esta versión de az
+ Earliest restore point      : no expuesto por esta versión de az
+
+--------------------------------------------------------------------------------
+ CHECKS
+--------------------------------------------------------------------------------
+ [FAIL] C1  El servidor existe y está operativo
+          esperado : state = Ready
+          observado: Updating
+ [FAIL] C2  Backups automáticos activos
+          esperado : backup.backupRetentionDays >= 7
+          observado: 3 días
+ [FAIL] C3  Ventana de recuperación (PITR) abierta
+          esperado : backup.earliestRestoreDate presente
+          observado: no expuesto por esta versión de az
+ [FAIL] C4  Hay puntos de recuperación recientes
+          esperado : al menos 1 backup con completedTime <= 26 h
+          observado: la lista de backups vino vacía
+ [WARN] C5  Redundancia del backup
+          esperado : se registra el valor de backup.geoRedundantBackup
+          observado: no expuesto por esta versión de az
+          nota     : Informativo, no es una falla: la geo-redundancia solo se puede elegir al crear el servidor. Si está en Disabled, no hay copia fuera de la región.
+
+--------------------------------------------------------------------------------
+ RESULTADO: FAIL   (5 checks: 0 PASS, 1 WARN, 4 FAIL)   exit=1
+ ESTE INFORME NO ES EVIDENCIA: proviene de un fixture, no de Azure.
+================================================================================
+exit=1
+
+=== P4 · sin --server · esperado exit=2 ===
+ERROR: no se pudo verificar — Falta --server.
+  Usá --server <nombre>, o --dry-run para probar la lógica sin Azure.
+exit=2
+
+=== P5 · contra Azure sin sesión iniciada · esperado exit=2 ===
+ERROR: Please run 'az login' to setup account.
+ERROR: no se pudo verificar — No hay sesión de Azure iniciada.
+  Ejecutá `az login` y volvé a correr el script.
+exit=2
+
+=== P6 · opción desconocida · esperado exit=2 ===
+ERROR: Opción desconocida: --borrar-todo
+  Usá --help para ver las opciones.
+exit=2
+
+=== P7 · --dry-run junto a --fixture · esperado exit=2 ===
+ERROR: no se pudo verificar — --dry-run y --fixture son excluyentes.
+exit=2
+
+=== P8 · fixture inexistente · esperado exit=2 ===
+ERROR: no se pudo verificar — No se pudo leer el fixture docs/sprint-10/evidencias-b7/no-existe.json: ENOENT: no such file or directory, open 'docs/sprint-10/evidencias-b7/no-existe.json'
+exit=2
+
+=== P9 · umbral configurable: --min-retention-days 14 sobre el mismo dry-run · esperado exit=1 ===
+ [PASS] C1  El servidor existe y está operativo
+ [FAIL] C2  Backups automáticos activos
+ [PASS] C3  Ventana de recuperación (PITR) abierta
+ [PASS] C4  Hay puntos de recuperación recientes
+ [WARN] C5  Redundancia del backup
+ RESULTADO: FAIL   (5 checks: 3 PASS, 1 WARN, 1 FAIL)   exit=1
+exit=1
