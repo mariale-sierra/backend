@@ -22,6 +22,7 @@ import { OpenAiModule } from './openai/openai.module';
 import { ChatsModule } from './chats/chats.module';
 import { SpacesModule } from './spaces/spaces.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { HealthModule } from './health/health.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { SuspensionGuard } from './auth/guards/suspension.guard';
 import { AppController } from './app.controller';
@@ -132,6 +133,7 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
     ChatsModule,
     SpacesModule,
     NotificationsModule,
+    HealthModule,
   ],
   controllers: [AppController],
   providers: [

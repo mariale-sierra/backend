@@ -72,6 +72,7 @@ async function bootstrap() {
       .addTag('Workout Post Comments', 'Comentarios sobre publicaciones')
       .addTag('Badges', 'Badges de actividad calculados al vuelo')
       .addTag('Notifications', 'Bandeja, preferencias y tokens push (B3)')
+      .addTag('Health', 'Sondas de salud para Docker, deploy y monitoreo (B6)')
       .addBearerAuth()
       .build();
 

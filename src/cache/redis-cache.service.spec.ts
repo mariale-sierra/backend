@@ -6,6 +6,7 @@ const mockRedisInstance = {
   set: jest.fn(),
   del: jest.fn(),
   incr: jest.fn(),
+  ping: jest.fn(),
   quit: jest.fn().mockResolvedValue(undefined),
   on: jest.fn(),
 };
@@ -59,6 +60,12 @@ describe('RedisCacheService', () => {
       await expect(cache.del('k')).resolves.toBeUndefined();
       await expect(cache.bumpVersion('ns')).resolves.toBeUndefined();
       await expect(cache.getVersion('ns')).resolves.toBe(0);
+    });
+
+    it("ping() reports 'disabled' without touching the client", async () => {
+      const cache = new RedisCacheService();
+      await expect(cache.ping()).resolves.toBe('disabled');
+      expect(mockRedisInstance.ping).not.toHaveBeenCalled();
     });
   });
 
@@ -154,6 +161,15 @@ describe('RedisCacheService', () => {
       const cache = new RedisCacheService();
       mockRedisInstance.get.mockResolvedValueOnce(null);
       await expect(cache.getVersion('exercises')).resolves.toBe(0);
+    });
+
+    it("ping() is 'up' on PONG and 'down' (never a throw) when Redis is unreachable", async () => {
+      const cache = new RedisCacheService();
+      mockRedisInstance.ping.mockResolvedValueOnce('PONG');
+      await expect(cache.ping()).resolves.toBe('up');
+
+      mockRedisInstance.ping.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+      await expect(cache.ping()).resolves.toBe('down');
     });
   });
 });
