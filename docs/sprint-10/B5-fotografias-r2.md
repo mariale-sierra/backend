@@ -56,7 +56,7 @@ Todo corrido en `backend/`, 2026-10-24.
 | Comando | Resultado |
 |---|---|
 | `npm run build` | OK |
-| `npx jest --silent` | **66/69 suites, 1212 pass, 0 fallos, 14 omitidas** (3 suites omitidas ya existentes + 1 prueba nueva de integración que requiere `B2_TEST_DB_URL`) |
+| `npx jest --silent` | **66/69 suites, 1214 pass, 0 fallos, 14 omitidas** (3 suites omitidas ya existentes + 1 prueba nueva de integración que requiere `B2_TEST_DB_URL`) |
 | `npx eslint <archivos tocados>` (sin `--fix`) | Único hallazgo nuevo: 2 errores de Prettier en archivos de prueba nuevos — corregidos con `npx prettier --write` sobre esos 2 archivos exactos. El resto son avisos/errores `@typescript-eslint/no-unsafe-*` **preexistentes**, confirmados línea por línea contra el diff como no introducidos por B5 (deuda ya presente en specs/servicios no relacionados con fotos) |
 | `npx prettier --check <archivos tocados>` | Limpio tras la corrección anterior |
 | **Integración real contra Postgres local descartable** (`B2_TEST_DB_URL=postgres://postgres:x@localhost:5433/havit_b5_test npx jest --ci integration`) | **3/3 suites, 14/14 pass** — incluye la prueba nueva de autorización de CP7 (§12) y la ya existente del mosaico (B2), ambas corriendo contra SQL real, no mocks |
@@ -73,10 +73,12 @@ En `docs/sprint-10/evidencias-b5/`:
 | `migracion-local.txt` | Salida completa de `npm run db:migrate` contra una base Postgres local recién creada: 66 archivos aplicados, 0 errores |
 | `integracion-pg-local-cp7.txt` | Salida de `npx jest --ci integration` (los 3 suites de integración, incluida la nueva prueba de autorización de CP7) contra el mismo Postgres local |
 | `build.txt` | Salida de `npm run build` |
-| `unit-tests-backend.txt` | Salida completa de `npx jest --silent`, regenerada tras la corrección de moderación (66/69 suites, 1213 pass) |
+| `unit-tests-backend.txt` | Salida completa de `npx jest --silent`, regenerada tras la corrección del hallazgo de CI (66/69 suites, 1214 pass) |
 | `moderacion-correccion-cp7.txt` | Salida de `npx jest src/workout-posts/workout-posts.service.spec.ts --silent` (74/74), evidencia específica de la corrección de §14 |
 
 Las pruebas unitarias mismas (`uploads.service.spec.ts`, `shared-content.service.spec.ts`, `workout-posts.service.spec.ts`, etc.) son la evidencia del comportamiento punto por punto; no hay capturas de pantalla (cambios de API y de lógica interna, no de UI en este repositorio).
+
+**Hallazgo y corrección tras abrir el PR (2026-10-24):** el primer push disparó un fallo real en el workflow de CI (`tests.yml`) en la prueba e2e preexistente `imageUrl: solo https y, con R2 configurado, solo archivos del propio usuario` (`test/api-integration.e2e-spec.ts`). Causa: esa prueba solo configura `CLOUDFLARE_R2_PUBLIC_URL` (para probar la validación de forma de `assertOwnUploadUrl`, que no necesita nada más), y `extractUploadKey` (CP2/CP4a) trataba eso como "R2 configurado" y, por tanto, llegaba a intentar una llamada real a R2 sin bucket configurado. Corregido exigiendo también `CLOUDFLARE_R2_BUCKET_NAME` antes de construir una key verificable; reproducido localmente antes y después del fix (falla → pasa) contra un Postgres local descartable, con la suite completa (unitarias 1214/1214, integración 14/14, e2e 55/55, build limpio) re-verificada. Commit `61202a3`, pusheado al mismo PR.
 
 ## 7. Riesgos y dependencias
 
