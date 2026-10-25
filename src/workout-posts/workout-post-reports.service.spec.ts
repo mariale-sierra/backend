@@ -307,6 +307,16 @@ function buildHarness() {
     notify: jest.fn().mockResolvedValue(null),
     notifyMany: jest.fn().mockResolvedValue(undefined),
   };
+  // B5 — CP4a: identity pass-through — signing itself is covered in
+  // uploads.service.spec.ts, not here.
+  const uploadsService = {
+    toSignedReadUrl: jest
+      .fn()
+      .mockImplementation((url: string | null | undefined) =>
+        Promise.resolve(url ?? null),
+      ),
+    invalidateCachedReadUrl: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new WorkoutPostReportsService(
     reportRepo as any,
     penaltyRepo as any,
@@ -314,12 +324,14 @@ function buildHarness() {
     commentRepo as any,
     dataSource as any,
     notificationsService as any,
+    uploadsService as any,
   );
 
   return {
     service,
     postRepo,
     notificationsService,
+    uploadsService,
     get store() {
       return store;
     },
@@ -364,6 +376,35 @@ describe('WorkoutPostReportsService', () => {
         expect(h.store.penalties[0]).toMatchObject({ suspension_hours: hours });
       },
     );
+
+    // B5 — CP4a: hiding a post is the other place (besides the author's own
+    // delete) that must invalidate its cached signed URL right away.
+    it('invalidates the cached signed URL for a hidden post', async () => {
+      await h.service.create(REPORTER, {
+        targetType: 'post',
+        targetId: POST_ID,
+        reason: 'spam',
+      });
+
+      await h.service.resolve(1, ADMIN, { action: 'hide' });
+
+      expect(h.uploadsService.invalidateCachedReadUrl).toHaveBeenCalledWith(
+        'https://img/1.jpg',
+        AUTHOR,
+      );
+    });
+
+    it('does not invalidate anything when hiding a COMMENT (no post image involved)', async () => {
+      await h.service.create(REPORTER, {
+        targetType: 'comment',
+        targetId: '7',
+        reason: 'harassment',
+      });
+
+      await h.service.resolve(1, ADMIN, { action: 'hide' });
+
+      expect(h.uploadsService.invalidateCachedReadUrl).not.toHaveBeenCalled();
+    });
 
     it('hiding without a strike suspends nobody', async () => {
       await h.service.create(REPORTER, {
@@ -475,6 +516,7 @@ describe('WorkoutPostReportsService', () => {
         {} as any, // ModerationService (B3) — unused by list()
         {} as any, // NotificationsService — unused by list()
         {} as never, // User repo (B4 moderator lookup) — unused by list()
+        {} as any, // UploadsService (B5 — CP4a) — unused by list(), which throws before any signing
       );
       await expect(commentsService.list(POST_ID, REPORTER, {})).rejects.toThrow(
         NotFoundException,

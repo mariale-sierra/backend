@@ -15,6 +15,7 @@ import { AuthModule } from '../auth/auth.module';
 import { WorkoutPost } from 'src/workout-posts/entities/workout-post.entity';
 import { WorkoutPostsModule } from '../workout-posts/workout-posts.module';
 import { OpenAiModule } from '../openai/openai.module';
+import { UploadsModule } from '../uploads/uploads.module';
 import { Challenge } from '../challenges/entities/challenge.entity';
 import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
 import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.entity';
@@ -39,6 +40,7 @@ import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.enti
     ExercisesModule,
     WorkoutPostsModule,
     OpenAiModule,
+    UploadsModule,
   ],
   controllers: [WorkoutLogController],
   providers: [WorkoutLogService],

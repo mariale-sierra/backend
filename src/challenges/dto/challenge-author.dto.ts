@@ -19,13 +19,22 @@ export class ChallengeAuthorDto {
   @ApiPropertyOptional({ nullable: true })
   profileImageUrl!: string | null;
 
-  /** `user` must have its `profile` relation loaded (a user with no profile row is fine). */
-  static fromUser(user: User): ChallengeAuthorDto {
+  /**
+   * `user` must have its `profile` relation loaded (a user with no profile row is fine).
+   * @param profileImageUrl B5 — CP4a: already-resolved (signed) URL — the caller
+   * must resolve it (async R2/Redis access this static method doesn't have);
+   * defaults to the raw stored column so a forgetful caller degrades instead
+   * of breaking. See ProfileResponseDto.build's identical parameter.
+   */
+  static fromUser(
+    user: User,
+    profileImageUrl: string | null = user.profile?.profile_image_url ?? null,
+  ): ChallengeAuthorDto {
     const dto = new ChallengeAuthorDto();
     dto.id = user.id;
     dto.username = user.username;
     dto.displayName = user.profile?.display_name ?? null;
-    dto.profileImageUrl = user.profile?.profile_image_url ?? null;
+    dto.profileImageUrl = profileImageUrl;
     return dto;
   }
 }

@@ -11,6 +11,10 @@ import { assertPostVisibleToUser } from './workout-post-visibility.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { DecodedCursor, encodeCursor } from '../common/pagination.util';
 import { CommentAuthorDto } from './dto/comment-author.dto';
+import {
+  SIGNED_READ_TTL_SECONDS,
+  UploadsService,
+} from '../uploads/uploads.service';
 
 export interface ReactionSummary {
   count: number;
@@ -38,6 +42,7 @@ export class WorkoutPostReactionsService {
     @InjectRepository(WorkoutPost)
     private postRepo: Repository<WorkoutPost>,
     private notificationsService: NotificationsService,
+    private readonly uploadsService: UploadsService,
   ) {}
 
   /** Only one reaction type exists ('like'), enforced one-per-user-per-post
@@ -155,8 +160,9 @@ export class WorkoutPostReactionsService {
     const hasNextPage = rows.length > options.limit;
     const page = hasNextPage ? rows.slice(0, options.limit) : rows;
     const last = page[page.length - 1];
+    const signedPhotos = await this.signReactorPhotos(page);
     return {
-      reactors: page.map((r) => this.toReactorDto(r)),
+      reactors: page.map((r, i) => this.toReactorDto(r, signedPhotos[i])),
       nextCursor:
         hasNextPage && last
           ? encodeCursor(last.created_at, last.user_id)
@@ -202,21 +208,39 @@ export class WorkoutPostReactionsService {
       [postIds, viewerId ?? null, perPost],
     );
 
-    for (const row of rows) {
+    const signedPhotos = await this.signReactorPhotos(rows);
+    rows.forEach((row, i) => {
       const list = result.get(row.workout_post_id) ?? [];
-      list.push(this.toReactorDto(row));
+      list.push(this.toReactorDto(row, signedPhotos[i]));
       result.set(row.workout_post_id, list);
-    }
+    });
     return result;
   }
 
-  private toReactorDto(row: ReactorRow): ReactorDto {
+  private toReactorDto(
+    row: ReactorRow,
+    profileImageUrl: string | null,
+  ): ReactorDto {
     const dto = new ReactorDto();
     dto.id = row.user_id;
     dto.username = row.username;
     dto.displayName = row.display_name;
-    dto.profileImageUrl = row.profile_image_url;
+    dto.profileImageUrl = profileImageUrl;
     return dto;
+  }
+
+  /** B5 — CP4a: one signed, cached profile photo per row — each row's own
+   * `user_id` is the photo's owner. */
+  private signReactorPhotos(rows: ReactorRow[]): Promise<Array<string | null>> {
+    return Promise.all(
+      rows.map((r) =>
+        this.uploadsService.toCachedSignedReadUrl(
+          r.profile_image_url,
+          r.user_id,
+          SIGNED_READ_TTL_SECONDS.profile,
+        ),
+      ),
+    );
   }
 
   /** Reaction counts for many posts at once (Feed), one grouped query instead

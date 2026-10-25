@@ -15,11 +15,22 @@ import {
   getLoggedTodayUserIds,
 } from '../workout-log/workout-log-streak.util';
 import { NotificationsService } from '../notifications/notifications.service';
+import { UploadsService } from '../uploads/uploads.service';
 
 // B3: emitters call notify()/notifyMany() fire-and-forget; never throws.
 const notificationsService = {
   notify: jest.fn().mockResolvedValue(null),
   notifyMany: jest.fn().mockResolvedValue(undefined),
+};
+
+// B5 — CP4a: identity pass-through by default — signing itself is covered in
+// uploads.service.spec.ts, not here.
+const uploadsService = {
+  toCachedSignedReadUrl: jest
+    .fn()
+    .mockImplementation((url: string | null | undefined) =>
+      Promise.resolve(url ?? null),
+    ),
 };
 
 // getFriendStreaks' own batching (one grouped query per data source, not one
@@ -82,6 +93,7 @@ describe('FollowsService', () => {
         { provide: getRepositoryToken(User), useValue: userRepo },
         { provide: getRepositoryToken(UserProfile), useValue: profileRepo },
         { provide: getRepositoryToken(WorkoutLog), useValue: workoutRepo },
+        { provide: UploadsService, useValue: uploadsService },
       ],
     }).compile();
 

@@ -28,6 +28,7 @@ import { filterTargetsForSubstitute } from '../exercises/lib/exercise-substituti
 import { Exercise } from '../exercises/entities/exercise.entity';
 import { getCycleDayInfo } from '../common/cycle-day.util';
 import { assertOwnUploadUrl } from '../uploads/upload-url.util';
+import { UploadsService } from '../uploads/uploads.service';
 import { RedisCacheService } from '../cache/redis-cache.service';
 import {
   DecodedCursor,
@@ -81,6 +82,8 @@ export class WorkoutLogService {
     private readonly cache: RedisCacheService,
 
     private readonly substitutionService: ExerciseSubstitutionService,
+
+    private readonly uploadsService: UploadsService,
   ) {}
 
   async createWorkout(dto: {
@@ -113,6 +116,11 @@ export class WorkoutLogService {
     }
     // Only the caller's own uploaded objects (https, under their R2 folder): never arbitrary URLs.
     if (dto.imageUrl) assertOwnUploadUrl(dto.imageUrl, dto.userId);
+    // B5 — CP2: real-content check (size + magic bytes) before this URL is
+    // ever persisted as the post's image.
+    if (dto.imageUrl) {
+      await this.uploadsService.verifyUploadedObject(dto.imageUrl, dto.userId);
+    }
 
     // Fetched once up front (when there's a challenge at all) and reused below for the
     // auto-complete check after the workout is saved — one query serves both, rather than

@@ -9,11 +9,22 @@ import { WorkoutPostReactionsService } from './workout-post-reactions.service';
 import { WorkoutPostLike } from './entities/workout-post-like.entity';
 import { WorkoutPost } from './entities/workout-post.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import { UploadsService } from '../uploads/uploads.service';
 
 // B3: emitters call notify()/notifyMany() fire-and-forget; never throws.
 const notificationsService = {
   notify: jest.fn().mockResolvedValue(null),
   notifyMany: jest.fn().mockResolvedValue(undefined),
+};
+
+// B5 — CP4a: identity pass-through by default — signing itself is covered in
+// uploads.service.spec.ts, not here.
+const uploadsService = {
+  toCachedSignedReadUrl: jest
+    .fn()
+    .mockImplementation((url: string | null | undefined) =>
+      Promise.resolve(url ?? null),
+    ),
 };
 
 const createMockLikeRepo = () => ({
@@ -53,6 +64,7 @@ describe('WorkoutPostReactionsService', () => {
         { provide: NotificationsService, useValue: notificationsService },
         { provide: getRepositoryToken(WorkoutPostLike), useValue: likeRepo },
         { provide: getRepositoryToken(WorkoutPost), useValue: postRepo },
+        { provide: UploadsService, useValue: uploadsService },
       ],
     }).compile();
 

@@ -1,0 +1,12 @@
+[31m[Nest] 84472  - [39m10/24/2026, 6:11:31 PM [31m  ERROR[39m [38;5;3m[WorkoutPostsService] [39m[31mModeration failed for post post-1, will retry next batch: Error: Could not generate a signed read URL for post post-1 — image is unreachable for moderation[39m
+[31m[Nest] 84472  - [39m10/24/2026, 6:11:31 PM [31m  ERROR[39m [38;5;3m[WorkoutPostsService] [39m[31mModeration failed for post stale-1, will retry next batch: Error: 429 Too Many Requests[39m
+[31m[Nest] 84472  - [39m10/24/2026, 6:11:31 PM [31m  ERROR[39m [38;5;3m[WorkoutPostsService] [39m[31mModeration failed for post fresh-1, will retry next batch: Error: 429 Too Many Requests[39m
+[31m[Nest] 84472  - [39m10/24/2026, 6:11:31 PM [31m  ERROR[39m [38;5;3m[WorkoutPostsService] [39m[31mModeration failed for post stale-sign-1, will retry next batch: Error: Could not generate a signed read URL for post stale-sign-1 — image is unreachable for moderation[39m
+[31m[Nest] 84472  - [39m10/24/2026, 6:11:31 PM [31m  ERROR[39m [38;5;3m[WorkoutPostsService] [39m[31mModeration failed for post fresh-sign-1, will retry next batch: Error: Could not generate a signed read URL for post fresh-sign-1 — image is unreachable for moderation[39m
+[31m[Nest] 84472  - [39m10/24/2026, 6:11:31 PM [31m  ERROR[39m [38;5;3m[WorkoutPostsService] [39m[31mModeration failed for post batch-stale-sign-1, will retry next batch: Error: Could not generate a signed read URL for post batch-stale-sign-1 — image is unreachable for moderation[39m
+PASS src/workout-posts/workout-posts.service.spec.ts
+
+Test Suites: 1 passed, 1 total
+Tests:       74 passed, 74 total
+Snapshots:   0 total
+Time:        1.294 s

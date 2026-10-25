@@ -26,6 +26,10 @@ import {
 } from './dto/space-messages-query.dto';
 import { assertOwnership } from '../auth/utils/assert-ownership';
 import { NotificationsService } from '../notifications/notifications.service';
+import {
+  SIGNED_READ_TTL_SECONDS,
+  UploadsService,
+} from '../uploads/uploads.service';
 
 export interface ListSpaceMessagesResult {
   messages: SpaceMessageDto[];
@@ -54,6 +58,7 @@ export class SpacesService {
     private categoryRepo: Repository<ExerciseCategory>,
     private dataSource: DataSource,
     private notificationsService: NotificationsService,
+    private readonly uploadsService: UploadsService,
   ) {}
 
   /**
@@ -144,27 +149,81 @@ export class SpacesService {
       countRows.map((r) => [r.spaceId, Number(r.count)]),
     );
 
-    return spaces.map((space) =>
-      SpaceResponseDto.fromEntity(space, {
-        membersCount: countBySpaceId.get(space.id) ?? 0,
-        viewerRole: roleBySpaceId.get(space.id) ?? null,
-        hasPendingRequest: pendingSpaceIds.has(space.id),
-      }),
+    // B5 — CP4a: both the cover and the creator's photo belong to the
+    // space's creator (`space.created_by_user_id`) — that's the owner id for
+    // both, never the viewer. Space images stay unsigned (pass through
+    // unchanged) when they were never one of our own R2 uploads — spaces
+    // only validates `@IsUrl({})`, never assertOwnUploadUrl.
+    const [signedCovers, signedCreatorPhotos] = await Promise.all([
+      Promise.all(
+        spaces.map((space) =>
+          this.uploadsService.toCachedSignedReadUrl(
+            space.image_url,
+            space.created_by_user_id,
+            SIGNED_READ_TTL_SECONDS.space,
+          ),
+        ),
+      ),
+      Promise.all(
+        spaces.map((space) =>
+          this.uploadsService.toCachedSignedReadUrl(
+            space.createdBy?.profile?.profile_image_url,
+            space.created_by_user_id,
+            SIGNED_READ_TTL_SECONDS.profile,
+          ),
+        ),
+      ),
+    ]);
+
+    return spaces.map((space, i) =>
+      SpaceResponseDto.fromEntity(
+        space,
+        {
+          membersCount: countBySpaceId.get(space.id) ?? 0,
+          viewerRole: roleBySpaceId.get(space.id) ?? null,
+          hasPendingRequest: pendingSpaceIds.has(space.id),
+        },
+        signedCovers[i],
+        signedCreatorPhotos[i],
+      ),
     );
   }
 
   async findOne(userId: string, spaceId: string): Promise<SpaceResponseDto> {
     const space = await this.getActiveSpaceOrThrow(spaceId);
-    const [membersCount, viewerRole, hasPendingRequest] = await Promise.all([
-      this.memberRepo.count({ where: { space_id: spaceId, is_active: true } }),
-      this.getViewerRole(spaceId, userId),
-      this.hasPendingRequest(spaceId, userId),
-    ]);
-    return SpaceResponseDto.fromEntity(space, {
+    const [
       membersCount,
       viewerRole,
       hasPendingRequest,
-    });
+      signedCover,
+      signedCreatorPhoto,
+    ] = await Promise.all([
+      this.memberRepo.count({
+        where: { space_id: spaceId, is_active: true },
+      }),
+      this.getViewerRole(spaceId, userId),
+      this.hasPendingRequest(spaceId, userId),
+      this.uploadsService.toCachedSignedReadUrl(
+        space.image_url,
+        space.created_by_user_id,
+        SIGNED_READ_TTL_SECONDS.space,
+      ),
+      this.uploadsService.toCachedSignedReadUrl(
+        space.createdBy?.profile?.profile_image_url,
+        space.created_by_user_id,
+        SIGNED_READ_TTL_SECONDS.profile,
+      ),
+    ]);
+    return SpaceResponseDto.fromEntity(
+      space,
+      {
+        membersCount,
+        viewerRole,
+        hasPendingRequest,
+      },
+      signedCover,
+      signedCreatorPhoto,
+    );
   }
 
   async update(
@@ -324,7 +383,17 @@ export class SpacesService {
       relations: { user: { profile: true } },
       order: { joined_at: 'ASC' },
     });
-    return SpaceMemberResponseDto.fromEntities(members);
+    // B5 — CP4a: each member's own photo, signed for its own owner.
+    const signedPhotos = await Promise.all(
+      members.map((m) =>
+        this.uploadsService.toCachedSignedReadUrl(
+          m.user?.profile?.profile_image_url,
+          m.user_id,
+          SIGNED_READ_TTL_SECONDS.profile,
+        ),
+      ),
+    );
+    return SpaceMemberResponseDto.fromEntities(members, signedPhotos);
   }
 
   /**
@@ -368,7 +437,9 @@ export class SpacesService {
     const nextBefore = hasMore ? page[page.length - 1].id : null;
 
     // Reversed to oldest-first — the natural order for rendering a thread.
-    const messages = page.reverse().map((m) => this.toSpaceMessageDto(m));
+    const messages = await Promise.all(
+      page.reverse().map((m) => this.toSpaceMessageDto(m)),
+    );
 
     return { messages, nextBefore };
   }
@@ -401,7 +472,7 @@ export class SpacesService {
       where: { id: saved.id },
       relations: { sender: { profile: true } },
     });
-    return this.toSpaceMessageDto(withSender!);
+    return await this.toSpaceMessageDto(withSender!);
   }
 
   async listJoinRequests(
@@ -420,7 +491,17 @@ export class SpacesService {
       relations: { user: { profile: true } },
       order: { requested_at: 'ASC' },
     });
-    return SpaceJoinRequestResponseDto.fromEntities(requests);
+    // B5 — CP4a: each requester's own photo, signed for its own owner.
+    const signedPhotos = await Promise.all(
+      requests.map((r) =>
+        this.uploadsService.toCachedSignedReadUrl(
+          r.user?.profile?.profile_image_url,
+          r.user_id,
+          SIGNED_READ_TTL_SECONDS.profile,
+        ),
+      ),
+    );
+    return SpaceJoinRequestResponseDto.fromEntities(requests, signedPhotos);
   }
 
   /**
@@ -488,7 +569,13 @@ export class SpacesService {
         where: { id: request.id },
         relations: { user: { profile: true } },
       });
-      return SpaceJoinRequestResponseDto.fromEntity(withUser!);
+      // B5 — CP4a: signed for the requester, its own photo's owner.
+      const signedPhoto = await this.uploadsService.toCachedSignedReadUrl(
+        withUser?.user?.profile?.profile_image_url,
+        withUser!.user_id,
+        SIGNED_READ_TTL_SECONDS.profile,
+      );
+      return SpaceJoinRequestResponseDto.fromEntity(withUser!, signedPhoto);
     });
 
     // After commit: a rolled-back response must never notify.
@@ -587,7 +674,9 @@ export class SpacesService {
     }
   }
 
-  private toSpaceMessageDto(message: SpaceMessage): SpaceMessageDto {
+  private async toSpaceMessageDto(
+    message: SpaceMessage,
+  ): Promise<SpaceMessageDto> {
     const dto = new SpaceMessageDto();
     dto.id = message.id;
     dto.spaceId = message.space_id;
@@ -595,7 +684,12 @@ export class SpacesService {
       id: message.sender?.id ?? message.user_id,
       username: message.sender?.username ?? '',
       displayName: message.sender?.profile?.display_name ?? null,
-      profileImageUrl: message.sender?.profile?.profile_image_url ?? null,
+      // B5 — CP4a: the sender's own photo, signed for its own owner.
+      profileImageUrl: await this.uploadsService.toCachedSignedReadUrl(
+        message.sender?.profile?.profile_image_url,
+        message.user_id,
+        SIGNED_READ_TTL_SECONDS.profile,
+      ),
     };
     dto.content = message.message_text;
     dto.sentAt = message.sent_at;

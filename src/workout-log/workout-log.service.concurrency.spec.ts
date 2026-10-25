@@ -12,6 +12,7 @@ import { ChallengeUserMap } from '../challenges/entities/challenge-user-map.enti
 import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
 import { ExerciseSubstitutionService } from '../exercises/exercise-substitution.service';
 import { RedisCacheService } from '../cache/redis-cache.service';
+import { UploadsService } from '../uploads/uploads.service';
 
 /**
  * B5 — Concurrency and integrity of Workout Progress.
@@ -303,6 +304,12 @@ describe('WorkoutLogService — B5 concurrency', () => {
         {
           provide: RedisCacheService,
           useValue: { bumpVersion: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: UploadsService,
+          useValue: {
+            verifyUploadedObject: jest.fn().mockResolvedValue(undefined),
+          },
         },
       ],
     }).compile();

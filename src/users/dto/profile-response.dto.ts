@@ -51,6 +51,15 @@ export class ProfileResponseDto {
   })
   practice_preferences!: string[];
 
+  /**
+   * @param profileImageUrl B5 — CP4a: the already-resolved URL to show (a signed
+   * GET, or the raw stored value in dev/test without R2 configured — see
+   * UploadsService.toCachedSignedReadUrl). Callers must resolve this
+   * themselves (it needs async R2/Redis access this static method doesn't
+   * have) and pass it in; defaults to the raw stored column so a call site
+   * that forgets this parameter degrades to the pre-CP4a behavior instead of
+   * breaking.
+   */
   static build(
     user: User,
     profile: UserProfile | null,
@@ -59,6 +68,7 @@ export class ProfileResponseDto {
       followingCount: 0,
     },
     streakDays = 0,
+    profileImageUrl: string | null = profile?.profile_image_url ?? null,
   ): ProfileResponseDto {
     const dto = new ProfileResponseDto();
     dto.id = user.id;
@@ -67,7 +77,7 @@ export class ProfileResponseDto {
     dto.display_name = profile?.display_name ?? user.username;
     dto.bio = profile?.bio ?? null;
     dto.preferred_language = profile?.preferred_language ?? 'en';
-    dto.profile_image_url = profile?.profile_image_url ?? null;
+    dto.profile_image_url = profileImageUrl;
     dto.is_private = profile?.is_private ?? false;
     dto.followers_count = counts.followersCount;
     dto.following_count = counts.followingCount;
@@ -140,6 +150,10 @@ export class PublicProfileResponseDto {
    * `canSeeFullProfile`).
    * @param streakDays The user's current streak, when the caller looked it up; only
    * exposed to a viewer who can see the full profile.
+   * @param profileImageUrl B5 — CP4a: the already-resolved URL to show — see
+   * ProfileResponseDto.build's identical parameter for why this has to be
+   * resolved by the caller and passed in rather than read from `profile`
+   * here. Defaults to the raw stored column.
    */
   static build(
     user: User,
@@ -153,6 +167,7 @@ export class PublicProfileResponseDto {
       followingCount: 0,
     },
     streakDays?: number,
+    profileImageUrl: string | null = profile?.profile_image_url ?? null,
   ): PublicProfileResponseDto {
     const dto = new PublicProfileResponseDto();
     const isPrivate = profile?.is_private ?? false;
@@ -163,7 +178,7 @@ export class PublicProfileResponseDto {
     dto.username = user.username;
     dto.display_name = profile?.display_name ?? user.username;
     dto.bio = canSeeFullProfile ? (profile?.bio ?? null) : null;
-    dto.profile_image_url = profile?.profile_image_url ?? null;
+    dto.profile_image_url = profileImageUrl;
     dto.is_private = isPrivate;
     dto.followers_count = counts.followersCount;
     dto.following_count = counts.followingCount;

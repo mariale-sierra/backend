@@ -77,6 +77,7 @@ describe('NotificationsService', () => {
   let userRepo: Record<string, jest.Mock>;
   let pushTokens: Record<string, jest.Mock>;
   let expoPush: Record<string, jest.Mock>;
+  let uploadsService: Record<string, jest.Mock>;
   let qb: Record<string, jest.Mock>;
 
   beforeEach(() => {
@@ -114,6 +115,15 @@ describe('NotificationsService', () => {
         .mockResolvedValue([{ token: 'ExponentPushToken[abc]' }]),
     };
     expoPush = { send: jest.fn().mockResolvedValue(undefined) };
+    // B5 — CP4a: identity pass-through — signing itself is covered in
+    // uploads.service.spec.ts, not here.
+    uploadsService = {
+      toCachedSignedReadUrl: jest
+        .fn()
+        .mockImplementation((url: string | null | undefined) =>
+          Promise.resolve(url ?? null),
+        ),
+    };
 
     service = new NotificationsService(
       notificationRepo as never,
@@ -122,6 +132,7 @@ describe('NotificationsService', () => {
       userRepo as never,
       pushTokens as never,
       expoPush as never,
+      uploadsService as never,
     );
   });
 

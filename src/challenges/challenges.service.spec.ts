@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { Between, DataSource } from 'typeorm';
 import { ModerationService } from '../openai/moderation.service';
+import { UploadsService } from '../uploads/uploads.service';
 import { ChallengesService } from './challenges.service';
 import { Challenge } from './entities/challenge.entity';
 import { User } from '../users/entities/user.entity';
@@ -95,6 +96,7 @@ describe('ChallengesService', () => {
   let challengeJoinRequestRepo: MockRepo;
   let dataSource: { transaction: jest.Mock };
   let moderationService: { assertTextAllowed: jest.Mock };
+  let uploadsService: { toCachedSignedReadUrl: jest.Mock };
   let cache: ReturnType<typeof createMockCache>;
 
   const OWNER_ID = 'owner-1';
@@ -130,6 +132,15 @@ describe('ChallengesService', () => {
     // B3: text passes moderation unless a test says otherwise.
     moderationService = {
       assertTextAllowed: jest.fn().mockResolvedValue(undefined),
+    };
+    // B5 — CP4a: identity pass-through by default — signing itself is
+    // covered in uploads.service.spec.ts, not here.
+    uploadsService = {
+      toCachedSignedReadUrl: jest
+        .fn()
+        .mockImplementation((url: string | null | undefined) =>
+          Promise.resolve(url ?? null),
+        ),
     };
     cache = createMockCache();
 
@@ -172,6 +183,7 @@ describe('ChallengesService', () => {
         },
         { provide: DataSource, useValue: dataSource },
         { provide: ModerationService, useValue: moderationService },
+        { provide: UploadsService, useValue: uploadsService },
       ],
     }).compile();
 
