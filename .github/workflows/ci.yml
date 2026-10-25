@@ -1,8 +1,14 @@
-name: Tests
+name: CI
 
-# Pruebas unitarias, de integración y de regresión. Corren en el runner de
-# GitHub con su propio Postgres desechable: nunca tocan la base de Azure ni el
-# servidor de producción (el deploy.yml es otro workflow, solo para main).
+# B6: one pipeline, three jobs. `deploy` only runs on a push to main and only
+# after BOTH `tests` and `image` passed for that exact commit — a red test or
+# an image that doesn't boot never reaches the server.
+#
+#   push / PR ──► tests ──┐
+#             └─► image ──┴──► deploy (push to main only, self-hosted VM)
+#
+# `tests` and `image` run on GitHub's runners with their own throwaway
+# Postgres: they never touch the Azure database or the production server.
 on:
   push:
     branches: ['**']
@@ -10,8 +16,10 @@ on:
     branches: [development, main]
 
 concurrency:
-  group: tests-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.ref }}
+  # Superseded runs on a branch are cancelled, but never on main: cancelling
+  # there could kill a deploy halfway through.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   tests:
@@ -83,3 +91,121 @@ jobs:
             reports/
             coverage/lcov-report/
           retention-days: 30
+
+  # Builds the production image and boots it for real against a throwaway
+  # Postgres: catches a Dockerfile/build-layout regression (e.g. `npm start`
+  # not finding dist/main.js) that unit tests can't see.
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: havit
+          POSTGRES_PASSWORD: havit
+          POSTGRES_DB: havit_image
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U havit -d havit_image"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construir la imagen de producción
+        run: docker build --target prod -t havit-backend:ci .
+
+      - name: Arrancar el contenedor (migraciones + API)
+        run: >-
+          docker run -d --name havit-ci --network host
+          -e DB_HOST=localhost -e DB_PORT=5432 -e DB_USERNAME=havit
+          -e DB_PASSWORD=havit -e DB_DATABASE=havit_image -e DB_SSL=false
+          -e JWT_SECRET=ci-image-secret
+          havit-backend:ci
+
+      - name: Esperar el HEALTHCHECK y comprobar que no corre como root
+        run: |
+          for _ in $(seq 1 40); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' havit-ci)
+            [ "$status" = healthy ] && break
+            if [ "$(docker inspect -f '{{.State.Running}}' havit-ci)" != true ]; then
+              echo "el contenedor se detuvo"; docker logs havit-ci; exit 1
+            fi
+            sleep 3
+          done
+          echo "HEALTHCHECK: $status"
+          [ "$status" = healthy ] || { docker logs havit-ci; exit 1; }
+          curl -sf http://localhost:3000/health
+          echo
+          curl -sf http://localhost:3000/health/ready
+          echo
+          uid=$(docker exec havit-ci id -u)
+          docker exec havit-ci id
+          [ "$uid" != 0 ] || { echo "el contenedor corre como root"; exit 1; }
+          docker image ls havit-backend:ci
+
+      - name: Logs del contenedor
+        if: failure()
+        run: docker logs havit-ci || true
+
+  deploy:
+    needs: [tests, image]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, havit-backend]
+    timeout-minutes: 15
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - name: Actualizar backend y raiz y reconstruir el contenedor
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
+        run: |
+          set -e
+          flock /tmp/havit-deploy.lock -c '
+            set -e
+            cd /home/azureuser/backend
+            git fetch origin main
+            git checkout main
+            # Exactly the commit that passed `tests` and `image`, not whatever
+            # main points at by now (a newer push gets its own run).
+            git merge --ff-only "$DEPLOY_SHA"
+            # raiz holds the compose file that picks the Dockerfile target; it
+            # must move with the backend (prod image + old `npm run dev`
+            # override would not boot). ff-only: a diverged checkout aborts
+            # here, before anything is stopped.
+            cd /home/azureuser/raiz
+            git fetch origin main
+            git checkout main
+            git merge --ff-only origin/main
+            # Build while the old container keeps serving: the outage below is
+            # only the restart, not npm ci + nest build.
+            docker-compose build backend
+            # docker-compose v1 (lo unico instalado en el servidor) revienta con
+            # KeyError ContainerConfig al intentar recrear un contenedor existente
+            # in-place; bajar y volver a levantar evita ese codepath
+            docker-compose down --remove-orphans
+            # si otro proceso recrea contenedores con nombres fijos durante el build,
+            # docker-compose falla con "name is already in use"; forzar limpieza evita
+            # el conflicto antes de volver a levantar
+            docker rm -f havit-backend havit-pgbouncer havit-redis havit-caddy >/dev/null 2>&1 || true
+            docker-compose up -d
+          '
+
+      - name: Verificar que el backend responde
+        run: |
+          # Migrations run before the API listens, so allow up to ~2.5 min.
+          for _ in $(seq 1 30); do
+            if curl -sf http://localhost:3000/health > /dev/null; then
+              echo "backend respondiendo en /health"
+              docker exec havit-backend id
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "el backend no respondio a tiempo tras el deploy"
+          docker logs --tail 100 havit-backend || true
+          exit 1
