@@ -25,7 +25,7 @@ jobs:
             # si otro proceso recrea contenedores con nombres fijos durante el build,
             # docker-compose falla con "name is already in use"; forzar limpieza evita
             # el conflicto antes de volver a levantar
-            docker rm -f havit-backend havit-pgbouncer havit-redis >/dev/null 2>&1 || true
+            docker rm -f havit-backend havit-pgbouncer havit-redis havit-caddy >/dev/null 2>&1 || true
             docker-compose up -d --build
           '
 
