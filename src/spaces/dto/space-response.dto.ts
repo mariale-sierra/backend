@@ -86,15 +86,25 @@ export class SpaceResponseDto {
   @ApiProperty()
   createdAt!: Date;
 
+  /**
+   * @param spaceImageUrl B5 — CP4a: the space cover's already-resolved URL —
+   * the caller must resolve it (async R2/Redis access this static method
+   * doesn't have); defaults to the raw stored column. See
+   * ProfileResponseDto.build's identical parameter.
+   * @param creatorProfileImageUrl same, for the creator's own profile photo.
+   */
   static fromEntity(
     space: Space,
     context: SpaceResponseContext,
+    spaceImageUrl: string | null = space.image_url ?? null,
+    creatorProfileImageUrl: string | null = space.createdBy?.profile
+      ?.profile_image_url ?? null,
   ): SpaceResponseDto {
     const dto = new SpaceResponseDto();
     dto.id = space.id;
     dto.name = space.name;
     dto.description = space.description ?? null;
-    dto.imageUrl = space.image_url ?? null;
+    dto.imageUrl = spaceImageUrl;
     dto.visibility = space.visibility;
     dto.activityCategory = space.activityCategory
       ? {
@@ -108,7 +118,7 @@ export class SpaceResponseDto {
           id: space.createdBy.id,
           username: space.createdBy.username,
           displayName: space.createdBy.profile?.display_name ?? null,
-          profileImageUrl: space.createdBy.profile?.profile_image_url ?? null,
+          profileImageUrl: creatorProfileImageUrl,
         }
       : {
           id: space.created_by_user_id,

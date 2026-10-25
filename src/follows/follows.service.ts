@@ -14,6 +14,10 @@ import { FollowUserSummaryDto } from './dto/follow-user-summary.dto';
 import { FriendStreakDto } from './dto/friend-streak.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
+  SIGNED_READ_TTL_SECONDS,
+  UploadsService,
+} from '../uploads/uploads.service';
+import {
   getCurrentStreakDaysForUsers,
   getLoggedTodayUserIds,
 } from '../workout-log/workout-log-streak.util';
@@ -30,6 +34,7 @@ export class FollowsService {
     @InjectRepository(WorkoutLog)
     private workoutRepo: Repository<WorkoutLog>,
     private notificationsService: NotificationsService,
+    private readonly uploadsService: UploadsService,
   ) {}
 
   /**
@@ -178,12 +183,24 @@ export class FollowsService {
 
     const profileByUserId = new Map(profiles.map((p) => [p.user_id, p]));
 
-    return followedUsers.map((user) =>
+    // B5 — CP4a: each followed user's own photo, signed for its own owner.
+    const signedPhotos = await Promise.all(
+      followedUsers.map((user) =>
+        this.uploadsService.toCachedSignedReadUrl(
+          profileByUserId.get(user.id)?.profile_image_url,
+          user.id,
+          SIGNED_READ_TTL_SECONDS.profile,
+        ),
+      ),
+    );
+
+    return followedUsers.map((user, i) =>
       FriendStreakDto.build(
         user,
         profileByUserId.get(user.id) ?? null,
         streakDaysByUser.get(user.id) ?? 0,
         loggedTodayIds.has(user.id),
+        signedPhotos[i],
       ),
     );
   }

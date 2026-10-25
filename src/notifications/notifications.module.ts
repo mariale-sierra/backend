@@ -10,6 +10,7 @@ import { NotificationsController } from './notifications.controller';
 import { PushTokensService } from './push-tokens.service';
 import { ExpoPushService } from './expo-push.service';
 import { AuthModule } from '../auth/auth.module';
+import { UploadsModule } from '../uploads/uploads.module';
 
 /**
  * Depends only on its own tables + users (plus AuthModule for the
@@ -27,6 +28,7 @@ import { AuthModule } from '../auth/auth.module';
       User,
     ]),
     forwardRef(() => AuthModule),
+    UploadsModule,
   ],
   controllers: [NotificationsController],
   providers: [NotificationsService, PushTokensService, ExpoPushService],

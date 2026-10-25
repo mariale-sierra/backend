@@ -28,6 +28,7 @@ import { RoutineExercise } from '../routine/entities/routine-exercise.entity';
 import { RoutineExerciseSet } from '../routine/entities/routine-exercise-set.entity';
 import { RoutineExerciseTarget } from '../routine/entities/routine-exercise-target.entity';
 import { RoutineExerciseSetTarget } from '../routine/entities/routine-exercise-set-target.entity';
+import { UploadsModule } from '../uploads/uploads.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { RoutineExerciseSetTarget } from '../routine/entities/routine-exercise-s
     WorkoutLogModule,
     OpenAiModule,
     NotificationsModule,
+    UploadsModule,
   ],
   controllers: [ChallengesController],
   providers: [ChallengesService],

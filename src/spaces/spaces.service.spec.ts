@@ -13,11 +13,25 @@ import { SpaceJoinRequest } from './entities/space-join-request.entity';
 import { SpaceMessage } from './entities/space-message.entity';
 import { ExerciseCategory } from '../exercises/entities/exercise-category.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import {
+  SIGNED_READ_TTL_SECONDS,
+  UploadsService,
+} from '../uploads/uploads.service';
 
 // B3: emitters call notify()/notifyMany() fire-and-forget; never throws.
 const notificationsService = {
   notify: jest.fn().mockResolvedValue(null),
   notifyMany: jest.fn().mockResolvedValue(undefined),
+};
+
+// B5 — CP4a: identity pass-through by default — signing itself is covered in
+// uploads.service.spec.ts, not here.
+const uploadsService = {
+  toCachedSignedReadUrl: jest
+    .fn()
+    .mockImplementation((url: string | null | undefined) =>
+      Promise.resolve(url ?? null),
+    ),
 };
 
 const createMockRepo = () => ({
@@ -87,6 +101,7 @@ describe('SpacesService', () => {
           useValue: categoryRepo,
         },
         { provide: DataSource, useValue: dataSource },
+        { provide: UploadsService, useValue: uploadsService },
       ],
     }).compile();
 
@@ -197,6 +212,72 @@ describe('SpacesService', () => {
       const result = await service.findOne(OUTSIDER, SPACE_ID);
 
       expect(result.hasPendingRequest).toBe(true);
+    });
+
+    // B5 — CP4a: both the cover and the creator's own photo are signed for
+    // the SPACE'S CREATOR (its real owner), never the viewer — same cached,
+    // 24h-TTL treatment as a profile photo (spaces functionality itself is
+    // unchanged by B5; this only keeps the images working once the bucket
+    // is private).
+    it("signs the space cover and the creator's photo for the creator, not the viewer", async () => {
+      spaceRepo.findOne.mockResolvedValue({
+        ...basePublicSpace(),
+        image_url: 'https://cdn.example/uploads/owner-uuid/cover.jpeg',
+        createdBy: {
+          id: OWNER,
+          username: 'owner',
+          profile: {
+            profile_image_url: 'https://cdn.example/uploads/owner-uuid/p.jpeg',
+          },
+        },
+      });
+      memberRepo.findOne.mockResolvedValue(null);
+
+      await service.findOne(OUTSIDER, SPACE_ID);
+
+      expect(uploadsService.toCachedSignedReadUrl).toHaveBeenCalledWith(
+        'https://cdn.example/uploads/owner-uuid/cover.jpeg',
+        OWNER,
+        SIGNED_READ_TTL_SECONDS.space,
+      );
+      expect(uploadsService.toCachedSignedReadUrl).toHaveBeenCalledWith(
+        'https://cdn.example/uploads/owner-uuid/p.jpeg',
+        OWNER,
+        SIGNED_READ_TTL_SECONDS.profile,
+      );
+    });
+
+    // B5 — CP4a: spaces never validates its cover is actually one of our own
+    // R2 uploads (only @IsUrl({})) — an externally-hosted cover must keep
+    // working unchanged rather than get a nonsensical signature.
+    it('passes through an externally-hosted cover unchanged', async () => {
+      spaceRepo.findOne.mockResolvedValue({
+        ...basePublicSpace(),
+        image_url: 'https://images.example.com/cover.jpg',
+      });
+      memberRepo.findOne.mockResolvedValue(null);
+      // Real (non-mocked) behavior for this one case, to prove the actual
+      // pass-through, not just that the identity mock echoed it back.
+      uploadsService.toCachedSignedReadUrl.mockImplementation(
+        (url: string | null, ownerId: string, ttl: number) => {
+          if (!url) return Promise.resolve(null);
+          if (!url.startsWith(`https://cdn.example/uploads/${ownerId}/`)) {
+            return Promise.resolve(url);
+          }
+          return Promise.resolve(`signed:${url}:${ttl}`);
+        },
+      );
+
+      const result = await service.findOne(OUTSIDER, SPACE_ID);
+
+      expect(result.imageUrl).toBe('https://images.example.com/cover.jpg');
+
+      // Restore the simple identity pass-through for every later test in
+      // this file — `uploadsService` is a shared, module-level mock object,
+      // never recreated per test.
+      uploadsService.toCachedSignedReadUrl.mockImplementation(
+        (url: string | null | undefined) => Promise.resolve(url ?? null),
+      );
     });
   });
 

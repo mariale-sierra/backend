@@ -26,18 +26,30 @@ export class SpaceMemberResponseDto {
   @ApiProperty()
   joinedAt!: Date;
 
-  static fromEntity(member: SpaceMember): SpaceMemberResponseDto {
+  /** @param profileImageUrl B5 — CP4a: already-resolved (signed) URL — see
+   * ProfileResponseDto.build's identical parameter. */
+  static fromEntity(
+    member: SpaceMember,
+    profileImageUrl: string | null = member.user?.profile?.profile_image_url ??
+      null,
+  ): SpaceMemberResponseDto {
     const dto = new SpaceMemberResponseDto();
     dto.id = member.user?.id ?? member.user_id;
     dto.username = member.user?.username ?? '';
     dto.displayName = member.user?.profile?.display_name ?? null;
-    dto.profileImageUrl = member.user?.profile?.profile_image_url ?? null;
+    dto.profileImageUrl = profileImageUrl;
     dto.role = member.role;
     dto.joinedAt = member.joined_at;
     return dto;
   }
 
-  static fromEntities(members: SpaceMember[]): SpaceMemberResponseDto[] {
-    return members.map((member) => SpaceMemberResponseDto.fromEntity(member));
+  /** @param profileImageUrls B5 — CP4a: already-resolved URLs, same order as `members`. */
+  static fromEntities(
+    members: SpaceMember[],
+    profileImageUrls?: Array<string | null>,
+  ): SpaceMemberResponseDto[] {
+    return members.map((member, i) =>
+      SpaceMemberResponseDto.fromEntity(member, profileImageUrls?.[i]),
+    );
   }
 }

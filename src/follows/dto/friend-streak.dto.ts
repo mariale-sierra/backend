@@ -32,16 +32,19 @@ export class FriendStreakDto {
   })
   loggedToday!: boolean;
 
+  /** @param avatarUrl B5 — CP4a: already-resolved (signed) URL — see
+   * ProfileResponseDto.build's identical parameter. */
   static build(
     user: User,
     profile: UserProfile | null,
     streakDays: number,
     loggedToday: boolean,
+    avatarUrl: string | null = profile?.profile_image_url ?? null,
   ): FriendStreakDto {
     const dto = new FriendStreakDto();
     dto.userId = user.id;
     dto.username = user.username;
-    dto.avatarUrl = profile?.profile_image_url ?? null;
+    dto.avatarUrl = avatarUrl;
     dto.streakDays = streakDays;
     dto.loggedToday = loggedToday;
     return dto;

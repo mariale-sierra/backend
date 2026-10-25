@@ -23,6 +23,10 @@ import {
 } from './dto/report.dto';
 import { assertPostVisibleToUser } from './workout-post-visibility.util';
 import { NotificationsService } from '../notifications/notifications.service';
+import {
+  SIGNED_READ_TTL_SECONDS,
+  UploadsService,
+} from '../uploads/uploads.service';
 
 export const DEFAULT_REPORTS_LIMIT = 20;
 export const MAX_REPORTS_LIMIT = 50;
@@ -57,6 +61,7 @@ export class WorkoutPostReportsService {
     @InjectDataSource()
     private dataSource: DataSource,
     private notificationsService: NotificationsService,
+    private readonly uploadsService: UploadsService,
   ) {}
 
   /**
@@ -227,30 +232,52 @@ export class WorkoutPostReportsService {
 
     if (postIds.length > 0) {
       const posts = await this.postRepo.find({ where: { id: In(postIds) } });
-      for (const p of posts) {
+      // B5 — CP4a: admin-only queue (AdminGuard) — signed so it keeps
+      // working once the bucket is private, short TTL and never cached
+      // (low-traffic, role-gated view, not worth a Redis round trip).
+      const signedUrls = await Promise.all(
+        posts.map((p) =>
+          this.uploadsService.toSignedReadUrl(
+            p.image_url,
+            p.user_id,
+            SIGNED_READ_TTL_SECONDS.postPrivate,
+          ),
+        ),
+      );
+      posts.forEach((p, i) => {
         previews.set(`post:${p.id}`, {
           exists: true,
           isHidden: p.is_hidden,
           text: p.caption ?? null,
-          imageUrl: p.image_url,
+          imageUrl: signedUrls[i],
           postId: p.id,
         });
-      }
+      });
     }
     if (commentIds.length > 0) {
       const comments = await this.commentRepo.find({
         where: { id: In(commentIds) },
         relations: { post: true },
       });
-      for (const c of comments) {
+      // B5 — CP4a: same treatment, for the parent post's photo.
+      const signedUrls = await Promise.all(
+        comments.map((c) =>
+          this.uploadsService.toSignedReadUrl(
+            c.post?.image_url,
+            c.post?.user_id ?? c.user_id,
+            SIGNED_READ_TTL_SECONDS.postPrivate,
+          ),
+        ),
+      );
+      comments.forEach((c, i) => {
         previews.set(`comment:${c.id}`, {
           exists: c.is_active,
           isHidden: c.is_hidden,
           text: c.comment_text,
-          imageUrl: c.post?.image_url ?? null,
+          imageUrl: signedUrls[i],
           postId: c.workout_post_id,
         });
-      }
+      });
     }
     return previews;
   }
@@ -319,11 +346,23 @@ export class WorkoutPostReportsService {
             hidden_reason: `report:${report.id}`,
           };
           if (report.target_type === 'post') {
+            // B5 — CP4a: fetched BEFORE the update only to invalidate the
+            // cached signed URL right alongside is_hidden flipping — same
+            // accepted revocation mitigation as WorkoutPostsService.remove().
+            const hiddenPost = await manager.findOne(WorkoutPost, {
+              where: { id: report.target_id },
+            });
             await manager.update(
               WorkoutPost,
               { id: report.target_id, is_hidden: false },
               hiddenFields,
             );
+            if (hiddenPost) {
+              await this.uploadsService.invalidateCachedReadUrl(
+                hiddenPost.image_url,
+                hiddenPost.user_id,
+              );
+            }
           } else {
             await manager.update(
               WorkoutPostComment,

@@ -33,7 +33,13 @@ export class SpaceJoinRequestResponseDto {
   @ApiPropertyOptional({ nullable: true })
   respondedAt!: Date | null;
 
-  static fromEntity(request: SpaceJoinRequest): SpaceJoinRequestResponseDto {
+  /** @param profileImageUrl B5 — CP4a: already-resolved (signed) URL — see
+   * ProfileResponseDto.build's identical parameter. */
+  static fromEntity(
+    request: SpaceJoinRequest,
+    profileImageUrl: string | null = request.user?.profile?.profile_image_url ??
+      null,
+  ): SpaceJoinRequestResponseDto {
     const dto = new SpaceJoinRequestResponseDto();
     dto.id = String(request.id);
     dto.status = request.status;
@@ -41,18 +47,20 @@ export class SpaceJoinRequestResponseDto {
       id: request.user?.id ?? request.user_id,
       username: request.user?.username ?? '',
       displayName: request.user?.profile?.display_name ?? null,
-      profileImageUrl: request.user?.profile?.profile_image_url ?? null,
+      profileImageUrl,
     };
     dto.requestedAt = request.requested_at;
     dto.respondedAt = request.responded_at ?? null;
     return dto;
   }
 
+  /** @param profileImageUrls B5 — CP4a: already-resolved URLs, same order as `requests`. */
   static fromEntities(
     requests: SpaceJoinRequest[],
+    profileImageUrls?: Array<string | null>,
   ): SpaceJoinRequestResponseDto[] {
-    return requests.map((request) =>
-      SpaceJoinRequestResponseDto.fromEntity(request),
+    return requests.map((request, i) =>
+      SpaceJoinRequestResponseDto.fromEntity(request, profileImageUrls?.[i]),
     );
   }
 }

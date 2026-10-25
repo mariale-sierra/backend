@@ -50,6 +50,10 @@ import { assertOwnership } from '../auth/utils/assert-ownership';
 import { ModerationService } from '../openai/moderation.service';
 import { RedisCacheService } from '../cache/redis-cache.service';
 import {
+  SIGNED_READ_TTL_SECONDS,
+  UploadsService,
+} from '../uploads/uploads.service';
+import {
   DecodedCursor,
   encodeCursor,
   DEFAULT_PAGE_LIMIT,
@@ -92,6 +96,7 @@ export class ChallengesService {
     private moderationService: ModerationService,
     private readonly cache: RedisCacheService,
     private notificationsService: NotificationsService,
+    private readonly uploadsService: UploadsService,
   ) {}
 
   private async cacheKey(suffix: string): Promise<string> {
@@ -871,7 +876,22 @@ export class ChallengesService {
       where: { id: In(unique) },
       relations: { profile: true },
     });
-    return new Map(users.map((u) => [u.id, ChallengeAuthorDto.fromUser(u)]));
+    // B5 — CP4a: each author's own photo, signed for its own owner.
+    const signedPhotos = await Promise.all(
+      users.map((u) =>
+        this.uploadsService.toCachedSignedReadUrl(
+          u.profile?.profile_image_url,
+          u.id,
+          SIGNED_READ_TTL_SECONDS.profile,
+        ),
+      ),
+    );
+    return new Map(
+      users.map((u, i) => [
+        u.id,
+        ChallengeAuthorDto.fromUser(u, signedPhotos[i]),
+      ]),
+    );
   }
 
   async update(
@@ -1048,7 +1068,17 @@ export class ChallengesService {
       relations: { user: { profile: true } },
       order: { requested_at: 'ASC' },
     });
-    return ChallengeJoinRequestResponseDto.fromEntities(requests);
+    // B5 — CP4a: each requester's own photo, signed for its own owner.
+    const signedPhotos = await Promise.all(
+      requests.map((r) =>
+        this.uploadsService.toCachedSignedReadUrl(
+          r.user?.profile?.profile_image_url,
+          r.user_id,
+          SIGNED_READ_TTL_SECONDS.profile,
+        ),
+      ),
+    );
+    return ChallengeJoinRequestResponseDto.fromEntities(requests, signedPhotos);
   }
 
   /**
@@ -1145,7 +1175,13 @@ export class ChallengesService {
         where: { id: request.id },
         relations: { user: { profile: true } },
       });
-      return ChallengeJoinRequestResponseDto.fromEntity(withUser!);
+      // B5 — CP4a: signed for the requester, its own photo's owner.
+      const signedPhoto = await this.uploadsService.toCachedSignedReadUrl(
+        withUser?.user?.profile?.profile_image_url,
+        withUser!.user_id,
+        SIGNED_READ_TTL_SECONDS.profile,
+      );
+      return ChallengeJoinRequestResponseDto.fromEntity(withUser!, signedPhoto);
     });
 
     if (approve) {

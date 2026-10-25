@@ -6,6 +6,10 @@ import {
   SharedPostPreviewDto,
 } from './dto/shared-content.dto';
 import { getDominantActivityCategories } from '../challenges/dominant-activity-category.util';
+import {
+  SIGNED_READ_TTL_SECONDS,
+  UploadsService,
+} from '../uploads/uploads.service';
 
 interface PostPreviewRow {
   id: string;
@@ -15,6 +19,7 @@ interface PostPreviewRow {
   username: string;
   display_name: string | null;
   profile_image_url: string | null;
+  visibility: string;
   visible: boolean;
 }
 
@@ -40,7 +45,42 @@ interface ChallengePreviewRow {
  */
 @Injectable()
 export class SharedContentService {
-  constructor(@InjectDataSource() private dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private dataSource: DataSource,
+    private readonly uploadsService: UploadsService,
+  ) {}
+
+  /**
+   * B5 — CP4a: same per-visibility TTL/caching dispatch as
+   * WorkoutPostsService.signPostImageUrl() (duplicated rather than shared
+   * across modules — small enough, and keeps SharedContentService free of a
+   * WorkoutPostsModule dependency it otherwise wouldn't need).
+   */
+  private signSharedPostImageUrl(
+    imageUrl: string | null,
+    ownerId: string,
+    visibility: string,
+  ): Promise<string | null> {
+    if (visibility === 'public') {
+      return this.uploadsService.toCachedSignedReadUrl(
+        imageUrl,
+        ownerId,
+        SIGNED_READ_TTL_SECONDS.postPublic,
+      );
+    }
+    if (visibility === 'followers') {
+      return this.uploadsService.toSignedReadUrl(
+        imageUrl,
+        ownerId,
+        SIGNED_READ_TTL_SECONDS.postFollowers,
+      );
+    }
+    return this.uploadsService.toSignedReadUrl(
+      imageUrl,
+      ownerId,
+      SIGNED_READ_TTL_SECONDS.postPrivate,
+    );
+  }
 
   /** The sender must be able to see what they share; otherwise it's the
    * same 404 as a post that doesn't exist (doesn't confirm it exists). */
@@ -69,7 +109,7 @@ export class SharedContentService {
     if (ids.length === 0) return result;
 
     const rows: PostPreviewRow[] = await this.dataSource.query(
-      `SELECT p.id, p.image_url, p.caption, p.user_id,
+      `SELECT p.id, p.image_url, p.caption, p.user_id, p.visibility,
               u.username, up.display_name, up.profile_image_url,
               (
                 p.user_id = $2
@@ -102,24 +142,47 @@ export class SharedContentService {
     );
     const rowsById = new Map(rows.map((r) => [r.id, r]));
 
-    for (const id of ids) {
-      const row = rowsById.get(id);
-      const dto = new SharedPostPreviewDto();
-      dto.id = id;
-      dto.available = !!row?.visible;
-      dto.imageUrl = dto.available ? (row?.image_url ?? null) : null;
-      dto.caption = dto.available ? (row?.caption ?? null) : null;
-      dto.author =
-        dto.available && row
-          ? {
-              id: row.user_id,
-              username: row.username,
-              displayName: row.display_name,
-              profileImageUrl: row.profile_image_url,
-            }
-          : null;
-      result.set(id, dto);
-    }
+    await Promise.all(
+      ids.map(async (id) => {
+        const row = rowsById.get(id);
+        const dto = new SharedPostPreviewDto();
+        dto.id = id;
+        dto.available = !!row?.visible;
+        // B5 — CP4a: signing MUST stay inside this same `available` check —
+        // never sign (or even read) row.image_url/profile_image_url ahead of
+        // it. A post the viewer isn't allowed to see is already excluded by
+        // SQL (not in `rows`) or has `visible = false`; `available` is the
+        // one gate this whole DTO already depends on, so the photo must
+        // never become reachable through a path that skips it.
+        if (dto.available && row) {
+          const [imageUrl, authorPhoto] = await Promise.all([
+            this.signSharedPostImageUrl(
+              row.image_url,
+              row.user_id,
+              row.visibility,
+            ),
+            this.uploadsService.toCachedSignedReadUrl(
+              row.profile_image_url,
+              row.user_id,
+              SIGNED_READ_TTL_SECONDS.profile,
+            ),
+          ]);
+          dto.imageUrl = imageUrl;
+          dto.caption = row.caption ?? null;
+          dto.author = {
+            id: row.user_id,
+            username: row.username,
+            displayName: row.display_name,
+            profileImageUrl: authorPhoto,
+          };
+        } else {
+          dto.imageUrl = null;
+          dto.caption = null;
+          dto.author = null;
+        }
+        result.set(id, dto);
+      }),
+    );
     return result;
   }
 

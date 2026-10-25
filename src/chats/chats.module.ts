@@ -10,6 +10,7 @@ import { DirectConversationHiddenBy } from './entities/direct-conversation-hidde
 import { User } from '../users/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { UploadsModule } from '../uploads/uploads.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     ]),
     forwardRef(() => AuthModule),
     NotificationsModule,
+    UploadsModule,
   ],
   controllers: [ChatsController],
   providers: [ChatsService, SharedContentService],

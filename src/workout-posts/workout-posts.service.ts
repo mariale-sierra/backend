@@ -17,6 +17,10 @@ import { assertOwnership } from '../auth/utils/assert-ownership';
 import { WorkoutPostReactionsService } from './workout-post-reactions.service';
 import { WorkoutPostCommentsService } from './workout-post-comments.service';
 import { HashtagsService } from './hashtags/hashtags.service';
+import {
+  SIGNED_READ_TTL_SECONDS,
+  UploadsService,
+} from '../uploads/uploads.service';
 
 const MODERATION_STATUSES = new Set<string>(
   Object.values(WorkoutPostModerationStatus),
@@ -130,7 +134,26 @@ interface FeedRow {
   user_name: string;
   user_avatar_url: string | null;
   joined_at: Date | null;
+  /** B5 — CP4a: the Feed only ever returns 'public' or 'followers' rows
+   * (see getFeed's own visibilityFilter — 'private' is never selectable),
+   * but signPostImageUrl() still needs to tell those two apart for TTL/
+   * caching, so this is selected explicitly rather than assumed. */
+  visibility: string;
 }
+
+/**
+ * B5 — CP7 follow-up correction: lets moderatePostViaAi's single catch block
+ * tell "the signed read URL could not be generated" apart from "OpenAI
+ * itself failed". Only a real OpenAI-side failure may still trigger the
+ * stale-pending safety valve (STALE_PENDING_FALLBACK_MS) — a signing failure
+ * says nothing about whether the photo's content is safe, since OpenAI never
+ * got the chance to look at it. Signing is a local, network-free operation
+ * (see toSignedReadUrl's own doc comment — just the SDK's own crypto against
+ * credentials already in memory), so a failure sustained long enough to go
+ * stale points at a misconfiguration on our own side, not a transient
+ * third-party outage, and must never resolve into "approved".
+ */
+class ModerationSigningFailedError extends Error {}
 
 @Injectable()
 export class WorkoutPostsService {
@@ -161,6 +184,7 @@ export class WorkoutPostsService {
     private reactionsService: WorkoutPostReactionsService,
     private commentsService: WorkoutPostCommentsService,
     private hashtagsService: HashtagsService,
+    private readonly uploadsService: UploadsService,
   ) {}
 
   private async supportsModerationColumns() {
@@ -276,6 +300,16 @@ export class WorkoutPostsService {
 
     post.is_active = false;
     await this.repo.save(post);
+
+    // B5 — CP4a: stop Redis from handing out this post's cached signed URL
+    // to anyone else after this point (accepted revocation mitigation — see
+    // invalidateCachedReadUrl's own doc comment for what this does and
+    // doesn't guarantee). Never cached for private/followers posts in the
+    // first place, but this is a no-op in that case (nothing to delete).
+    await this.uploadsService.invalidateCachedReadUrl(
+      post.image_url,
+      post.user_id,
+    );
 
     return { message: 'Workout post deleted' };
   }
@@ -394,8 +428,38 @@ export class WorkoutPostsService {
    */
   private async moderatePostViaAi(post: WorkoutPost): Promise<void> {
     try {
-      const result = await this.moderationService.validateWorkoutImage(
+      // B5 — CP4a/CP7: once the bucket is private (CP4b, not done yet),
+      // OpenAI's own fetcher can no longer read the raw stored URL directly —
+      // this must always be a signed GET, generous enough for one moderation
+      // call (SIGNED_READ_TTL_SECONDS.moderation) but never cached (a one-off
+      // read, not worth a Redis round trip) and never exposed in any API
+      // response — moderation's own approve/reject logic below is
+      // unchanged, only the URL it reads the image from.
+      //
+      // CP7 correction: a signing failure must NOT fall back to
+      // `post.image_url` — once the bucket is private that public URL simply
+      // won't resolve, so "fall back to it" would either (a) make OpenAI
+      // fail to fetch the image and get treated as "no flagged content" by
+      // ModerationService's own error handling, silently waving through an
+      // unmoderated photo, or (b) once CP4b lands, make every moderation
+      // attempt dead-on-arrival. Treating a signing failure as a moderation
+      // failure instead routes it through the exact same retry/stale-pending
+      // safety-valve as any other moderation-service outage (catch block
+      // below) — the photo stays `pending` and gets retried next batch
+      // rather than ever being treated as "moderated".
+      const moderationImageUrl = await this.uploadsService.toSignedReadUrl(
         post.image_url,
+        post.user_id,
+        SIGNED_READ_TTL_SECONDS.moderation,
+      );
+      if (!moderationImageUrl) {
+        throw new ModerationSigningFailedError(
+          `Could not generate a signed read URL for post ${post.id} — image is unreachable for moderation`,
+        );
+      }
+
+      const result = await this.moderationService.validateWorkoutImage(
+        moderationImageUrl,
         post.caption,
       );
 
@@ -420,6 +484,16 @@ export class WorkoutPostsService {
       this.logger.error(
         `Moderation failed for post ${post.id}, will retry next batch: ${String(error)}`,
       );
+
+      // B5 — CP7 follow-up correction: a signing failure never reaches the
+      // stale-pending safety valve below, no matter how old the post is —
+      // OpenAI never got to evaluate it, so there is no "service outage"
+      // signal to justify treating it as moderated. It stays `pending` and
+      // is retried on the next batch, same as today, just never approved
+      // on this path.
+      if (error instanceof ModerationSigningFailedError) {
+        return;
+      }
 
       const ageMs = Date.now() - post.created_at.getTime();
       if (ageMs >= WorkoutPostsService.STALE_PENDING_FALLBACK_MS) {
@@ -483,13 +557,20 @@ export class WorkoutPostsService {
       params,
     );
 
+    // B5 — CP4a: one signed URL per row, matching THAT row's own visibility.
+    const signedImageUrls = await Promise.all(
+      rows.map((row) =>
+        this.signPostImageUrl(row.image_url, row.user_id, row.visibility),
+      ),
+    );
+
     return {
       message: 'Workout posts retrieved successfully',
-      data: rows.map((row) => ({
+      data: rows.map((row, i) => ({
         id: row.id,
         workout_log_id: row.workout_log_id,
         user_id: row.user_id,
-        image_url: row.image_url,
+        image_url: signedImageUrls[i],
         caption: row.caption,
         visibility: row.visibility,
         created_at: row.created_at,
@@ -514,6 +595,42 @@ export class WorkoutPostsService {
    * surface pending ones (moderation runs async, so freshly uploaded photos sit
    * as 'pending' until OpenAI approves them).
    */
+  /**
+   * B5 — CP4a: signs a post's image_url with the TTL/caching that matches
+   * ITS OWN visibility — never a single uniform treatment, since a mosaic or
+   * feed response can mix public/followers/private rows for the same
+   * viewer. `ownerId` is the post's author (`row.user_id`), never the
+   * viewer. Authorization itself is NOT decided here — every call site
+   * already filtered rows by postVisibilityFilter()/an explicit viewer
+   * check before this ever runs; this only decides how long/whether to
+   * cache a row the caller has ALREADY decided to include.
+   */
+  private signPostImageUrl(
+    imageUrl: string | null,
+    ownerId: string,
+    visibility: string,
+  ): Promise<string | null> {
+    if (visibility === 'public') {
+      return this.uploadsService.toCachedSignedReadUrl(
+        imageUrl,
+        ownerId,
+        SIGNED_READ_TTL_SECONDS.postPublic,
+      );
+    }
+    if (visibility === 'followers') {
+      return this.uploadsService.toSignedReadUrl(
+        imageUrl,
+        ownerId,
+        SIGNED_READ_TTL_SECONDS.postFollowers,
+      );
+    }
+    return this.uploadsService.toSignedReadUrl(
+      imageUrl,
+      ownerId,
+      SIGNED_READ_TTL_SECONDS.postPrivate,
+    );
+  }
+
   private visibleModerationStatuses(): WorkoutPostModerationStatus[] {
     const includePending = process.env.PHOTOS_INCLUDE_PENDING === 'true';
     return includePending
@@ -699,6 +816,8 @@ export class WorkoutPostsService {
       reactedPostIds,
       recentReactorsByPost,
       hashtagsByPost,
+      signedImageUrls,
+      signedAvatarUrls,
     ] = await Promise.all([
       this.metricsByWorkoutLog(rows.map((r) => r.workout_log_id)),
       this.reactionsService.getCountsForPosts(postIds),
@@ -706,15 +825,32 @@ export class WorkoutPostsService {
       this.reactionsService.getReactedPostIds(postIds, viewerId),
       this.reactionsService.getRecentReactorsForPosts(postIds, viewerId),
       this.hashtagsService.getTagsForPosts(postIds),
+      // B5 — CP4a: one signed URL per row, matching THAT row's own
+      // visibility — never a single uniform TTL/caching choice.
+      Promise.all(
+        rows.map((r) =>
+          this.signPostImageUrl(r.image_url, r.user_id, r.visibility),
+        ),
+      ),
+      // B5 — CP4a: each author's own profile photo, cached, 24h TTL.
+      Promise.all(
+        rows.map((r) =>
+          this.uploadsService.toCachedSignedReadUrl(
+            r.user_avatar_url,
+            r.user_id,
+            SIGNED_READ_TTL_SECONDS.profile,
+          ),
+        ),
+      ),
     ]);
 
-    return rows.map((r) => {
+    return rows.map((r, i) => {
       const id = String(r.id);
       return {
         id,
         challengeId: r.challenge_id,
         userName: r.user_name,
-        imageUrl: r.image_url,
+        imageUrl: signedImageUrls[i],
         day: this.dayFromJoinedAt(r.joined_at, r.created_at, timezone),
         // Post visibility is 'private' | 'followers' | 'public'; the gallery
         // model only distinguishes 'private' | 'public' (followers-visible
@@ -723,7 +859,7 @@ export class WorkoutPostsService {
         metrics: metricsByLog.get(String(r.workout_log_id)) ?? [],
         description: r.caption ?? '',
         userId: r.user_id,
-        userAvatarUrl: r.user_avatar_url ?? null,
+        userAvatarUrl: signedAvatarUrls[i],
         challengeName: r.challenge_name ?? null,
         postedAt: new Date(r.created_at).toISOString(),
         likesCount: likesCountByPost.get(id) ?? 0,
@@ -953,6 +1089,7 @@ export class WorkoutPostsService {
 
     const rows: FeedRow[] = await this.repo.manager.query(
       `SELECT p.id, p.user_id, p.image_url, p.caption, p.created_at, p.workout_log_id,
+              p.visibility,
               wl.challenge_id, c.name AS challenge_name,
               COALESCE(up.display_name, u.username) AS user_name,
               up.profile_image_url AS user_avatar_url,
@@ -1006,6 +1143,8 @@ export class WorkoutPostsService {
       reactedPostIds,
       recentReactorsByPost,
       hashtagsByPost,
+      signedImageUrls,
+      signedAvatarUrls,
     ] = await Promise.all([
       this.reactionsService.getCountsForPosts(postIds),
       this.commentsService.getCountsForPosts(postIds),
@@ -1017,18 +1156,35 @@ export class WorkoutPostsService {
         options.viewerId,
       ),
       this.hashtagsService.getTagsForPosts(postIds),
+      // B5 — CP4a: one signed URL per row, matching THAT row's own
+      // visibility ('public' or 'followers' — see FeedRow's doc comment).
+      Promise.all(
+        pageRows.map((r) =>
+          this.signPostImageUrl(r.image_url, r.user_id, r.visibility),
+        ),
+      ),
+      // B5 — CP4a: each author's own profile photo, cached, 24h TTL.
+      Promise.all(
+        pageRows.map((r) =>
+          this.uploadsService.toCachedSignedReadUrl(
+            r.user_avatar_url,
+            r.user_id,
+            SIGNED_READ_TTL_SECONDS.profile,
+          ),
+        ),
+      ),
     ]);
     const metricsByLog = await this.metricsByWorkoutLog(
       pageRows.map((r) => r.workout_log_id),
     );
 
-    const posts: FeedPostContract[] = pageRows.map((r) => {
+    const posts: FeedPostContract[] = pageRows.map((r, i) => {
       const id = String(r.id);
       return {
         id,
         user_id: r.user_id,
         user_name: r.user_name,
-        user_avatar_url: r.user_avatar_url ?? undefined,
+        user_avatar_url: signedAvatarUrls[i] ?? undefined,
         challenge_id: r.challenge_id,
         challenge_name: r.challenge_name,
         // Deliberately still UTC, not the requesting viewer's timezone: the
@@ -1039,7 +1195,7 @@ export class WorkoutPostsService {
         // challenge-gallery day label (a "Day N" caption here, not something
         // driving a completion/rest-day state decision) — left as-is.
         challenge_day: this.dayFromJoinedAt(r.joined_at, r.created_at, 'UTC'),
-        image_url: r.image_url ?? undefined,
+        image_url: signedImageUrls[i] ?? undefined,
         caption: r.caption ?? undefined,
         posted_at: new Date(r.created_at).toISOString(),
         likes_count: likesCountByPost.get(id) ?? 0,

@@ -35,8 +35,16 @@ export class ChallengeJoinRequestResponseDto {
   @ApiPropertyOptional({ nullable: true })
   respondedAt!: Date | null;
 
+  /**
+   * @param profileImageUrl B5 — CP4a: already-resolved (signed) URL — the
+   * caller must resolve it (async R2/Redis access this static method
+   * doesn't have); defaults to the raw stored column. See
+   * ProfileResponseDto.build's identical parameter.
+   */
   static fromEntity(
     request: ChallengeJoinRequest,
+    profileImageUrl: string | null = request.user?.profile?.profile_image_url ??
+      null,
   ): ChallengeJoinRequestResponseDto {
     const dto = new ChallengeJoinRequestResponseDto();
     dto.id = String(request.id);
@@ -45,18 +53,26 @@ export class ChallengeJoinRequestResponseDto {
       id: request.user?.id ?? request.user_id,
       username: request.user?.username ?? '',
       displayName: request.user?.profile?.display_name ?? null,
-      profileImageUrl: request.user?.profile?.profile_image_url ?? null,
+      profileImageUrl,
     };
     dto.requestedAt = request.requested_at;
     dto.respondedAt = request.responded_at ?? null;
     return dto;
   }
 
+  /**
+   * @param profileImageUrls B5 — CP4a: already-resolved (signed) URLs, same
+   * order as `requests` — see fromEntity's identical parameter.
+   */
   static fromEntities(
     requests: ChallengeJoinRequest[],
+    profileImageUrls?: Array<string | null>,
   ): ChallengeJoinRequestResponseDto[] {
-    return requests.map((request) =>
-      ChallengeJoinRequestResponseDto.fromEntity(request),
+    return requests.map((request, i) =>
+      ChallengeJoinRequestResponseDto.fromEntity(
+        request,
+        profileImageUrls?.[i],
+      ),
     );
   }
 }
