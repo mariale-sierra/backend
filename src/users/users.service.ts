@@ -10,6 +10,11 @@ import { ChallengeCategoryMap } from '../challenges/entities/challenge-category-
 import { ChallengeLocationMap } from '../challenges/entities/challenge-location-map.entity';
 import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
 import { getDominantActivityCategories } from '../challenges/dominant-activity-category.util';
+import { Challenge } from '../challenges/entities/challenge.entity';
+import {
+  loadChallengeImages,
+  NO_CHALLENGE_IMAGE,
+} from '../challenges/challenge-image.util';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UpdateUserProfileDto } from './dto/update-user-profile.dto';
 import {
@@ -47,6 +52,8 @@ export class UsersService {
     private challengeLocationMapRepo: Repository<ChallengeLocationMap>,
     @InjectRepository(ChallengeCycleDay)
     private challengeCycleDayRepo: Repository<ChallengeCycleDay>,
+    @InjectRepository(Challenge)
+    private challengeRepo: Repository<Challenge>,
     private followsService: FollowsService,
     private moderationService: ModerationService,
     private uploadsService: UploadsService,
@@ -743,10 +750,16 @@ export class UsersService {
       .getMany();
 
     const progressByChallenge = await this.attachProgress(challenges, timezone);
-    const { categoriesByChallenge, locationsByChallenge } =
-      await this.attachCategoriesAndLocations(
-        challenges.map((c) => c.challenge_id),
-      );
+    const challengeIds = challenges.map((c) => c.challenge_id);
+    const [{ categoriesByChallenge, locationsByChallenge }, imagesById] =
+      await Promise.all([
+        this.attachCategoriesAndLocations(challengeIds),
+        loadChallengeImages(
+          this.challengeRepo,
+          this.uploadsService,
+          challengeIds,
+        ),
+      ]);
 
     const grouped: {
       active: any[];
@@ -773,6 +786,7 @@ export class UsersService {
         joinedAt: c.joined_at,
         categories: categoriesByChallenge.get(c.challenge_id) ?? [],
         locations: locationsByChallenge.get(c.challenge_id) ?? [],
+        ...(imagesById.get(c.challenge_id) ?? NO_CHALLENGE_IMAGE),
         ...(progress ?? {}),
       };
 

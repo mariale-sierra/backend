@@ -14,6 +14,7 @@ import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengeCategoryMap } from '../challenges/entities/challenge-category-map.entity';
 import { ChallengeLocationMap } from '../challenges/entities/challenge-location-map.entity';
 import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
+import { Challenge } from '../challenges/entities/challenge.entity';
 import { FollowsService } from '../follows/follows.service';
 import { ModerationService } from '../openai/moderation.service';
 import {
@@ -121,6 +122,7 @@ describe('UsersService', () => {
   let challengeCategoryMapRepo: ReturnType<typeof createMockRepo>;
   let challengeLocationMapRepo: ReturnType<typeof createMockRepo>;
   let challengeCycleDayRepo: ReturnType<typeof createMockRepo>;
+  let challengeRepo: ReturnType<typeof createMockRepo>;
   let followsService: {
     isActiveFollower: jest.Mock;
     getCounts: jest.Mock;
@@ -155,6 +157,9 @@ describe('UsersService', () => {
     challengeCategoryMapRepo.find.mockResolvedValue([]);
     challengeLocationMapRepo.find.mockResolvedValue([]);
     challengeCycleDayRepo.find.mockResolvedValue([]);
+    // Sprint 10: challenge photos (loadChallengeImages) — none unless a test adds one.
+    challengeRepo = createMockRepo();
+    challengeRepo.find.mockResolvedValue([]);
     mockGetDominantActivityCategories.mockReset().mockResolvedValue(new Map());
     mockGetCurrentStreakDays.mockReset().mockResolvedValue(0);
     mockGetCurrentStreakDaysForUsers.mockReset().mockResolvedValue(new Map());
@@ -213,6 +218,7 @@ describe('UsersService', () => {
           provide: getRepositoryToken(ChallengeCycleDay),
           useValue: challengeCycleDayRepo,
         },
+        { provide: getRepositoryToken(Challenge), useValue: challengeRepo },
         { provide: FollowsService, useValue: followsService },
         { provide: ModerationService, useValue: moderationService },
         { provide: UploadsService, useValue: uploadsService },

@@ -93,6 +93,8 @@ function declaredSizeCacheKey(key: string): string {
 export const SIGNED_READ_TTL_SECONDS = {
   profile: 24 * 60 * 60, // 86400
   space: 24 * 60 * 60, // 86400 — same treatment as profile, see D4/D5
+  /** Sprint 10 — approved challenge photo: a public cover, like a space's. */
+  challenge: 24 * 60 * 60, // 86400
   postPublic: 60 * 60, // 3600
   postFollowers: 15 * 60, // 900
   postPrivate: 10 * 60, // 600
