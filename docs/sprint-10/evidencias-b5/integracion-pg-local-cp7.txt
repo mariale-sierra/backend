@@ -1,0 +1,17 @@
+[31m[Nest] 81201  - [39m10/24/2026, 5:39:07 PM [31m  ERROR[39m [38;5;3m[AccountDeletionService] [39m[31mAccount purge failed for aafd6810-d7d2-4737-ad65-44e0180908c3: r2 down[39m
+PASS src/users/account-deletion.integration.spec.ts
+[33m[Nest] 81199  - [39m10/24/2026, 5:39:07 PM [33m   WARN[39m [38;5;3m[RefreshTokensService] [39m[33mrefresh token reuse: family 9879bae3-e77d-43da-be3b-8f7305aed31b revoked[39m
+[33m[Nest] 81199  - [39m10/24/2026, 5:39:07 PM [33m   WARN[39m [38;5;3m[RefreshTokensService] [39m[33mrefresh token reuse: family 75291b8c-5d6c-4d66-b4cc-226e3e30b139 revoked[39m
+[33m[Nest] 81199  - [39m10/24/2026, 5:39:07 PM [33m   WARN[39m [38;5;3m[RefreshTokensService] [39m[33mrefresh token reuse: family 01ef6725-0b0a-454e-80b5-d74e30f6ea1f revoked[39m
+PASS src/workout-posts/workout-posts-mosaic.integration.spec.ts
+PASS src/auth/refresh-tokens.integration.spec.ts
+
+Test Suites: 3 passed, 3 total
+Tests:       14 passed, 14 total
+Snapshots:   0 total
+Time:        2.248 s, estimated 3 s
+Ran all test suites matching /integration|src\/workout-posts\/workout-posts-mosaic.integration.spec.ts|src\/auth\/refresh-tokens.integration.spec.ts|src\/users\/account-deletion.integration.spec.ts/i.
+[33m[Nest] 81199  - [39m10/24/2026, 5:39:07 PM [33m   WARN[39m [38;5;3m[RefreshTokensService] [39m[33mrefresh token reuse: family 5e8498a8-2497-4853-b484-088ef96b633e revoked[39m
+[33m[Nest] 81199  - [39m10/24/2026, 5:39:07 PM [33m   WARN[39m [38;5;3m[RefreshTokensService] [39m[33mrefresh token reuse: family cf759db0-1fe1-4dbf-b27a-c79710e61921 revoked[39m
+[33m[Nest] 81199  - [39m10/24/2026, 5:39:07 PM [33m   WARN[39m [38;5;3m[RefreshTokensService] [39m[33mrefresh token reuse: family f0aa1610-1a2e-4060-ab96-c4f418cf085b revoked[39m
+[33m[Nest] 81199  - [39m10/24/2026, 5:39:07 PM [33m   WARN[39m [38;5;3m[RefreshTokensService] [39m[33mrefresh token reuse: family 0ce75fb5-c225-4b15-b009-26721ef266ce revoked[39m

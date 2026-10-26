@@ -10,6 +10,7 @@ import { ExerciseCategory } from '../exercises/entities/exercise-category.entity
 import { User } from '../users/entities/user.entity';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { UploadsModule } from '../uploads/uploads.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     ]),
     forwardRef(() => AuthModule),
     NotificationsModule,
+    UploadsModule,
   ],
   controllers: [SpacesController],
   providers: [SpacesService],

@@ -1,7 +1,16 @@
 node_modules
 dist
 .git
+.github
 coverage
+reports
 uploads
 .env
+.env.*
+!.env.example
 npm-debug.log
+# A stale incremental-build file would make `nest build` skip emitting dist/.
+*.tsbuildinfo
+# Docs and benchmarks are not part of any image.
+docs
+performance

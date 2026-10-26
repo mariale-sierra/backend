@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { Between, DataSource } from 'typeorm';
 import { ModerationService } from '../openai/moderation.service';
+import { UploadsService } from '../uploads/uploads.service';
 import { ChallengesService } from './challenges.service';
 import { Challenge } from './entities/challenge.entity';
 import { User } from '../users/entities/user.entity';
@@ -54,6 +55,7 @@ type MockRepo = {
   create: jest.Mock;
   createQueryBuilder: jest.Mock;
   count: jest.Mock;
+  update: jest.Mock;
   manager: unknown;
 };
 
@@ -65,6 +67,7 @@ const createMockRepo = (): MockRepo => ({
   create: jest.fn(),
   createQueryBuilder: jest.fn(),
   count: jest.fn(),
+  update: jest.fn(),
   manager: {},
 });
 
@@ -94,7 +97,15 @@ describe('ChallengesService', () => {
   let workoutRepo: MockRepo;
   let challengeJoinRequestRepo: MockRepo;
   let dataSource: { transaction: jest.Mock };
-  let moderationService: { assertTextAllowed: jest.Mock };
+  let moderationService: {
+    assertTextAllowed: jest.Mock;
+    validateWorkoutImage: jest.Mock;
+  };
+  let uploadsService: {
+    toCachedSignedReadUrl: jest.Mock;
+    toSignedReadUrl: jest.Mock;
+    verifyUploadedObject: jest.Mock;
+  };
   let cache: ReturnType<typeof createMockCache>;
 
   const OWNER_ID = 'owner-1';
@@ -125,11 +136,32 @@ describe('ChallengesService', () => {
     // default to none unless a test cares about them.
     challengeCategoryMapRepo.find.mockResolvedValue([]);
     challengeLocationMapRepo.find.mockResolvedValue([]);
+    // Sprint 10: loadChallengeImages() also runs on findAll()/findOne() —
+    // no photos unless a test adds one.
+    challengeRepo.find.mockResolvedValue([]);
     mockGetDominantActivityCategories.mockReset().mockResolvedValue(new Map());
     dataSource = { transaction: jest.fn() };
     // B3: text passes moderation unless a test says otherwise.
     moderationService = {
       assertTextAllowed: jest.fn().mockResolvedValue(undefined),
+      validateWorkoutImage: jest
+        .fn()
+        .mockResolvedValue({ flagged: false, flaggedCategories: [] }),
+    };
+    // B5 — CP4a: identity pass-through by default — signing itself is
+    // covered in uploads.service.spec.ts, not here.
+    uploadsService = {
+      toCachedSignedReadUrl: jest
+        .fn()
+        .mockImplementation((url: string | null | undefined) =>
+          Promise.resolve(url ?? null),
+        ),
+      toSignedReadUrl: jest
+        .fn()
+        .mockImplementation((url: string | null | undefined) =>
+          Promise.resolve(url ? `${url}?signed` : null),
+        ),
+      verifyUploadedObject: jest.fn().mockResolvedValue(undefined),
     };
     cache = createMockCache();
 
@@ -172,6 +204,7 @@ describe('ChallengesService', () => {
         },
         { provide: DataSource, useValue: dataSource },
         { provide: ModerationService, useValue: moderationService },
+        { provide: UploadsService, useValue: uploadsService },
       ],
     }).compile();
 
@@ -2024,6 +2057,205 @@ describe('ChallengesService', () => {
       const exerciseRows = savedRows.filter((r) => r.__entity === 'Exercise');
       expect(exerciseRows).toHaveLength(0);
     });
+  });
+
+  describe('challenge photo (Sprint 10)', () => {
+    const PHOTO_URL = `https://cdn.test/uploads/${OWNER_ID}/photo.jpeg`;
+    const originalPublicUrl = process.env['CLOUDFLARE_R2_PUBLIC_URL'];
+
+    /** Just enough of the transaction manager for create() without categories/days. */
+    function useFakeTransaction() {
+      const created: Array<Record<string, unknown>> = [];
+      const manager = {
+        create: jest.fn((_entity: unknown, data: Record<string, unknown>) => {
+          created.push(data);
+          return { ...data };
+        }),
+        save: jest.fn((entity: Record<string, unknown>) =>
+          Promise.resolve({ id: CHALLENGE_ID, ...entity }),
+        ),
+      };
+      dataSource.transaction.mockImplementation((cb: (m: unknown) => unknown) =>
+        cb(manager),
+      );
+      return created;
+    }
+
+    const dto = (imageUrl?: string) =>
+      ({
+        name: 'Photo challenge',
+        visibility: ChallengeVisibility.PUBLIC,
+        duration_days: 30,
+        cycle_length_days: 7,
+        ...(imageUrl ? { imageUrl } : {}),
+      }) as CreateChallengeDto;
+
+    /** Lets the fire-and-forget moderation started by create() finish. */
+    const flushPromises = () => new Promise((resolve) => setImmediate(resolve));
+
+    beforeEach(() => {
+      process.env['CLOUDFLARE_R2_PUBLIC_URL'] = 'https://cdn.test';
+      userRepo.findOne.mockResolvedValue({ id: OWNER_ID });
+      challengeRepo.update.mockResolvedValue({ affected: 1 });
+    });
+
+    afterAll(() => {
+      if (originalPublicUrl === undefined) {
+        delete process.env['CLOUDFLARE_R2_PUBLIC_URL'];
+      } else {
+        process.env['CLOUDFLARE_R2_PUBLIC_URL'] = originalPublicUrl;
+      }
+    });
+
+    it('stores an own upload as pending and never returns its URL', async () => {
+      const created = useFakeTransaction();
+
+      const res = await service.create(dto(PHOTO_URL), OWNER_ID);
+
+      expect(uploadsService.verifyUploadedObject).toHaveBeenCalledWith(
+        PHOTO_URL,
+        OWNER_ID,
+      );
+      expect(created[0]).toMatchObject({
+        image_url: PHOTO_URL,
+        image_moderation_status: 'pending',
+      });
+      expect(res.challenge).toMatchObject({
+        imageUrl: null,
+        imageStatus: 'pending',
+      });
+      expect(res.challenge).not.toHaveProperty('image_url');
+    });
+
+    it('creates without a photo as before', async () => {
+      const created = useFakeTransaction();
+
+      const res = await service.create(dto(), OWNER_ID);
+
+      expect(uploadsService.verifyUploadedObject).not.toHaveBeenCalled();
+      expect(created[0]).toMatchObject({
+        image_url: null,
+        image_moderation_status: null,
+      });
+      expect(res.challenge).toMatchObject({
+        imageUrl: null,
+        imageStatus: 'none',
+      });
+      await flushPromises();
+      expect(moderationService.validateWorkoutImage).not.toHaveBeenCalled();
+    });
+
+    it("rejects someone else's upload before opening the transaction", async () => {
+      useFakeTransaction();
+
+      await expect(
+        service.create(
+          dto(`https://cdn.test/uploads/${OTHER_USER_ID}/photo.jpeg`),
+          OWNER_ID,
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('moderates the photo right after creating: approved', async () => {
+      useFakeTransaction();
+
+      await service.create(dto(PHOTO_URL), OWNER_ID);
+      await flushPromises();
+
+      expect(moderationService.validateWorkoutImage).toHaveBeenCalledWith(
+        `${PHOTO_URL}?signed`,
+      );
+      expect(challengeRepo.update).toHaveBeenCalledWith(
+        { id: CHALLENGE_ID, image_moderation_status: 'pending' },
+        { image_moderation_status: 'approved' },
+      );
+    });
+
+    it('moderates the photo right after creating: flagged → rejected', async () => {
+      useFakeTransaction();
+      moderationService.validateWorkoutImage.mockResolvedValue({
+        flagged: true,
+        flaggedCategories: ['violence'],
+      });
+
+      await service.create(dto(PHOTO_URL), OWNER_ID);
+      await flushPromises();
+
+      expect(challengeRepo.update).toHaveBeenCalledWith(
+        { id: CHALLENGE_ID, image_moderation_status: 'pending' },
+        { image_moderation_status: 'rejected' },
+      );
+    });
+
+    it('fails closed: if OpenAI fails the photo stays pending', async () => {
+      useFakeTransaction();
+      moderationService.validateWorkoutImage.mockRejectedValue(
+        new ServiceUnavailableException(),
+      );
+
+      const res = await service.create(dto(PHOTO_URL), OWNER_ID);
+      await flushPromises();
+
+      expect(res.challenge).toMatchObject({ imageStatus: 'pending' });
+      expect(challengeRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('the cron retries pending photos', async () => {
+      challengeRepo.find.mockResolvedValue([
+        {
+          id: CHALLENGE_ID,
+          created_by_user_id: OWNER_ID,
+          image_url: PHOTO_URL,
+        },
+      ]);
+
+      await service.processPendingChallengeImages();
+
+      expect(challengeRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { image_moderation_status: 'pending', is_active: true },
+        }),
+      );
+      expect(challengeRepo.update).toHaveBeenCalledWith(
+        { id: CHALLENGE_ID, image_moderation_status: 'pending' },
+        { image_moderation_status: 'approved' },
+      );
+    });
+
+    it.each([
+      ['approved', PHOTO_URL],
+      ['pending', null],
+      ['rejected', null],
+    ])(
+      'findOne returns a %s photo as imageUrl=%s',
+      async (status, expectedUrl) => {
+        challengeRepo.findOne.mockResolvedValue(baseChallenge());
+        challengeCycleDaysRepo.createQueryBuilder.mockReturnValue({
+          leftJoinAndSelect: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          addOrderBy: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([]),
+        });
+        challengeUserMapRepo.count.mockResolvedValue(1);
+        challengeRepo.find.mockResolvedValue([
+          {
+            id: CHALLENGE_ID,
+            created_by_user_id: OWNER_ID,
+            image_url: PHOTO_URL,
+            image_moderation_status: status,
+          },
+        ]);
+
+        const res = await service.findOne(CHALLENGE_ID);
+
+        expect(res).toMatchObject({
+          imageUrl: expectedUrl,
+          imageStatus: status,
+        });
+      },
+    );
   });
 
   describe('getCycleDaySummaries', () => {

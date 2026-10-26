@@ -10,6 +10,11 @@ import { ChallengeCategoryMap } from '../challenges/entities/challenge-category-
 import { ChallengeLocationMap } from '../challenges/entities/challenge-location-map.entity';
 import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
 import { getDominantActivityCategories } from '../challenges/dominant-activity-category.util';
+import { Challenge } from '../challenges/entities/challenge.entity';
+import {
+  loadChallengeImages,
+  NO_CHALLENGE_IMAGE,
+} from '../challenges/challenge-image.util';
 import { UserResponseDto } from './dto/user-response.dto';
 import { UpdateUserProfileDto } from './dto/update-user-profile.dto';
 import {
@@ -20,6 +25,10 @@ import { FollowsService } from '../follows/follows.service';
 import { ModerationService } from '../openai/moderation.service';
 import { getLocalDayBoundsUtc } from '../common/timezone.util';
 import { assertOwnUploadUrl } from '../uploads/upload-url.util';
+import {
+  SIGNED_READ_TTL_SECONDS,
+  UploadsService,
+} from '../uploads/uploads.service';
 import { getCycleDayInfo } from '../common/cycle-day.util';
 import {
   getCurrentStreakDays,
@@ -43,8 +52,11 @@ export class UsersService {
     private challengeLocationMapRepo: Repository<ChallengeLocationMap>,
     @InjectRepository(ChallengeCycleDay)
     private challengeCycleDayRepo: Repository<ChallengeCycleDay>,
+    @InjectRepository(Challenge)
+    private challengeRepo: Repository<Challenge>,
     private followsService: FollowsService,
     private moderationService: ModerationService,
+    private uploadsService: UploadsService,
   ) {}
 
   async findById(id: string): Promise<UserResponseDto> {
@@ -116,11 +128,22 @@ export class UsersService {
       where: { user_id: In(users.map((u) => u.id)) },
     });
     const profileByUser = new Map(profiles.map((p) => [p.user_id, p]));
-    return users.map((u) => ({
+    // B5 — CP4a: admin-only listing, same signing treatment as every other
+    // profile photo read — `u.id` is each photo's own owner.
+    const signedPhotos = await Promise.all(
+      users.map((u) =>
+        this.uploadsService.toCachedSignedReadUrl(
+          profileByUser.get(u.id)?.profile_image_url,
+          u.id,
+          SIGNED_READ_TTL_SECONDS.profile,
+        ),
+      ),
+    );
+    return users.map((u, i) => ({
       id: u.id,
       username: u.username,
       display_name: profileByUser.get(u.id)?.display_name ?? null,
-      profile_image_url: profileByUser.get(u.id)?.profile_image_url ?? null,
+      profile_image_url: signedPhotos[i],
     }));
   }
 
@@ -147,6 +170,12 @@ export class UsersService {
       this.followsService.getCounts(userId),
       getCurrentStreakDays(this.workoutRepo, userId),
     ]);
+    // B5 — CP4a: own profile photo — cached signed GET, 24h TTL.
+    const profileImageUrl = await this.uploadsService.toCachedSignedReadUrl(
+      profile?.profile_image_url,
+      userId,
+      SIGNED_READ_TTL_SECONDS.profile,
+    );
     return ProfileResponseDto.build(
       user,
       profile ?? null,
@@ -155,6 +184,7 @@ export class UsersService {
         followingCount: counts.followingCount,
       },
       streakDays,
+      profileImageUrl,
     );
   }
 
@@ -212,11 +242,23 @@ export class UsersService {
     }
 
     await this.profileRepo.save(profile);
-    const [counts, streakDays] = await Promise.all([
+    const [counts, streakDays, profileImageUrl] = await Promise.all([
       this.followsService.getCounts(userId),
       getCurrentStreakDays(this.workoutRepo, userId),
+      // B5 — CP4a: own profile photo — cached signed GET, 24h TTL.
+      this.uploadsService.toCachedSignedReadUrl(
+        profile.profile_image_url,
+        userId,
+        SIGNED_READ_TTL_SECONDS.profile,
+      ),
     ]);
-    return ProfileResponseDto.build(user, profile, counts, streakDays);
+    return ProfileResponseDto.build(
+      user,
+      profile,
+      counts,
+      streakDays,
+      profileImageUrl,
+    );
   }
 
   /**
@@ -229,6 +271,13 @@ export class UsersService {
     profileImageUrl: string,
   ): Promise<ProfileResponseDto> {
     assertOwnUploadUrl(profileImageUrl, userId, 'profile_image_url');
+    // B5 — CP2: real-content check (size + magic bytes) before this URL is
+    // ever persisted as the profile photo.
+    await this.uploadsService.verifyUploadedObject(
+      profileImageUrl,
+      userId,
+      'profile_image_url',
+    );
     const user = await this.userRepo.findOne({
       where: { id: userId },
       select: ['id', 'username', 'email', 'is_active'],
@@ -250,11 +299,23 @@ export class UsersService {
 
     profile.profile_image_url = profileImageUrl;
     await this.profileRepo.save(profile);
-    const [counts, streakDays] = await Promise.all([
+    const [counts, streakDays, signedProfileImageUrl] = await Promise.all([
       this.followsService.getCounts(userId),
       getCurrentStreakDays(this.workoutRepo, userId),
+      // B5 — CP4a: the photo just uploaded — cached signed GET, 24h TTL.
+      this.uploadsService.toCachedSignedReadUrl(
+        profileImageUrl,
+        userId,
+        SIGNED_READ_TTL_SECONDS.profile,
+      ),
     ]);
-    return ProfileResponseDto.build(user, profile, counts, streakDays);
+    return ProfileResponseDto.build(
+      user,
+      profile,
+      counts,
+      streakDays,
+      signedProfileImageUrl,
+    );
   }
 
   /**
@@ -286,13 +347,23 @@ export class UsersService {
     });
 
     const isOwner = targetUserId === viewerUserId;
-    const [isFollower, counts, streakDays] = await Promise.all([
-      isOwner
-        ? Promise.resolve(false)
-        : this.followsService.isActiveFollower(viewerUserId, targetUserId),
-      this.followsService.getCounts(targetUserId),
-      getCurrentStreakDays(this.workoutRepo, targetUserId),
-    ]);
+    const [isFollower, counts, streakDays, profileImageUrl] = await Promise.all(
+      [
+        isOwner
+          ? Promise.resolve(false)
+          : this.followsService.isActiveFollower(viewerUserId, targetUserId),
+        this.followsService.getCounts(targetUserId),
+        getCurrentStreakDays(this.workoutRepo, targetUserId),
+        // B5 — CP4a: `targetUserId` is the photo's OWNER, never the viewer —
+        // cached signed GET, 24h TTL (same rule regardless of is_private,
+        // unchanged by B5 — see profile-response.dto.ts's own doc comment).
+        this.uploadsService.toCachedSignedReadUrl(
+          profile?.profile_image_url,
+          targetUserId,
+          SIGNED_READ_TTL_SECONDS.profile,
+        ),
+      ],
+    );
 
     return PublicProfileResponseDto.build(
       user,
@@ -300,6 +371,7 @@ export class UsersService {
       { isOwner, isFollower },
       counts,
       streakDays,
+      profileImageUrl,
     );
   }
 
@@ -345,7 +417,19 @@ export class UsersService {
     ]);
     const profileByUser = new Map(profiles.map((p) => [p.user_id, p]));
 
-    return users.map((u) =>
+    // B5 — CP4a: one signed GET per result, cached — `u.id` is each photo's
+    // own owner, never the viewer (viewerUserId never appears here).
+    const signedPhotos = await Promise.all(
+      users.map((u) =>
+        this.uploadsService.toCachedSignedReadUrl(
+          profileByUser.get(u.id)?.profile_image_url,
+          u.id,
+          SIGNED_READ_TTL_SECONDS.profile,
+        ),
+      ),
+    );
+
+    return users.map((u, i) =>
       PublicProfileResponseDto.build(
         u,
         profileByUser.get(u.id) ?? null,
@@ -355,6 +439,7 @@ export class UsersService {
           followingCount: followingCounts.get(u.id) ?? 0,
         },
         streakDaysByUser.get(u.id) ?? 0,
+        signedPhotos[i],
       ),
     );
   }
@@ -665,10 +750,16 @@ export class UsersService {
       .getMany();
 
     const progressByChallenge = await this.attachProgress(challenges, timezone);
-    const { categoriesByChallenge, locationsByChallenge } =
-      await this.attachCategoriesAndLocations(
-        challenges.map((c) => c.challenge_id),
-      );
+    const challengeIds = challenges.map((c) => c.challenge_id);
+    const [{ categoriesByChallenge, locationsByChallenge }, imagesById] =
+      await Promise.all([
+        this.attachCategoriesAndLocations(challengeIds),
+        loadChallengeImages(
+          this.challengeRepo,
+          this.uploadsService,
+          challengeIds,
+        ),
+      ]);
 
     const grouped: {
       active: any[];
@@ -695,6 +786,7 @@ export class UsersService {
         joinedAt: c.joined_at,
         categories: categoriesByChallenge.get(c.challenge_id) ?? [],
         locations: locationsByChallenge.get(c.challenge_id) ?? [],
+        ...(imagesById.get(c.challenge_id) ?? NO_CHALLENGE_IMAGE),
         ...(progress ?? {}),
       };
 

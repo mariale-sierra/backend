@@ -1,4 +1,5 @@
 import { ExerciseSubstitutionService } from '../exercises/exercise-substitution.service';
+import { UploadsService } from '../uploads/uploads.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
@@ -103,6 +104,14 @@ describe('WorkoutLogService', () => {
         {
           provide: getRepositoryToken(ChallengeUserMap),
           useValue: challengeUserMapRepo,
+        },
+        {
+          // B5 — CP2: a post's photo passes the real-content check unless a
+          // test says otherwise (covered in uploads.service.spec.ts, not here).
+          provide: UploadsService,
+          useValue: {
+            verifyUploadedObject: jest.fn().mockResolvedValue(undefined),
+          },
         },
       ],
     }).compile();

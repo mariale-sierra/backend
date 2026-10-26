@@ -13,6 +13,10 @@ import { User } from '../users/entities/user.entity';
 import { PushTokensService } from './push-tokens.service';
 import { ExpoPushService } from './expo-push.service';
 import {
+  SIGNED_READ_TTL_SECONDS,
+  UploadsService,
+} from '../uploads/uploads.service';
+import {
   NOTIFICATION_CATEGORIES,
   type NotificationCategory,
   type NotificationEntityType,
@@ -79,6 +83,7 @@ export class NotificationsService {
     private userRepo: Repository<User>,
     private pushTokens: PushTokensService,
     private expoPush: ExpoPushService,
+    private readonly uploadsService: UploadsService,
   ) {}
 
   /**
@@ -278,8 +283,22 @@ export class NotificationsService {
     const hasNextPage = rows.length > limit;
     const page = hasNextPage ? rows.slice(0, limit) : rows;
     const last = page[page.length - 1];
+    // B5 — CP4a: each actor's own photo, signed for its own owner.
+    const signedActorPhotos = await Promise.all(
+      page.map((n) =>
+        n.actor
+          ? this.uploadsService.toCachedSignedReadUrl(
+              n.actor.profile?.profile_image_url,
+              n.actor.id,
+              SIGNED_READ_TTL_SECONDS.profile,
+            )
+          : Promise.resolve(null),
+      ),
+    );
     return {
-      notifications: page.map((n) => toNotificationDto(n)),
+      notifications: page.map((n, i) =>
+        toNotificationDto(n, signedActorPhotos[i]),
+      ),
       nextCursor:
         hasNextPage && last
           ? encodeCursor(last.created_at, last.id)
@@ -422,26 +441,35 @@ function isReachable(user: User): boolean {
   return user.is_active && !user.deleted_at && !user.deletion_requested_at;
 }
 
+/** @param profileImageUrl B5 — CP4a: already-resolved (signed) URL — the
+ * caller must resolve it (async R2/Redis access this plain function doesn't
+ * have); defaults to the raw stored column. See ProfileResponseDto.build's
+ * identical parameter. */
 function toActorDto(
   user: User | null | undefined,
+  profileImageUrl: string | null = user?.profile?.profile_image_url ?? null,
 ): NotificationActorDto | null {
   if (!user || !isReachable(user)) return null;
   return {
     id: user.id,
     username: user.username,
     displayName: user.profile?.display_name ?? null,
-    profileImageUrl: user.profile?.profile_image_url ?? null,
+    profileImageUrl,
   };
 }
 
-export function toNotificationDto(n: Notification): NotificationDto {
+/** @param actorProfileImageUrl B5 — CP4a: see toActorDto's identical parameter. */
+export function toNotificationDto(
+  n: Notification,
+  actorProfileImageUrl?: string | null,
+): NotificationDto {
   return {
     id: String(n.id),
     type: (n.type?.code ?? '') as NotificationTypeCode,
     category: (n.type?.category ?? 'social') as NotificationCategory,
     isRead: n.is_read,
     createdAt: n.created_at,
-    actor: toActorDto(n.actor),
+    actor: toActorDto(n.actor, actorProfileImageUrl),
     entity: {
       type: n.related_entity_type,
       id: n.related_entity_id ?? null,

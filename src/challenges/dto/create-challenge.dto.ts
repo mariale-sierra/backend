@@ -4,6 +4,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUrl,
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
@@ -96,4 +97,13 @@ export class CreateChallengeDto {
   @ValidateNested({ each: true })
   @Type(() => CreateChallengeCycleDayDto)
   cycle_days?: CreateChallengeCycleDayDto[];
+
+  @ApiProperty({
+    description:
+      'Foto opcional del reto: la URL pública que devolvió POST /uploads/sign, subida por el mismo usuario. Pasa por moderación antes de mostrarse.',
+    required: false,
+  })
+  @IsOptional()
+  @IsUrl({}, { message: 'imageUrl must be a valid URL' })
+  imageUrl?: string;
 }

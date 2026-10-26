@@ -23,6 +23,7 @@ import { UserPenalty } from './entities/user-penalty.entity';
 import { OpenAiModule } from '../openai/openai.module';
 import { FollowsModule } from '../follows/follows.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { UploadsModule } from '../uploads/uploads.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     OpenAiModule,
     FollowsModule,
     NotificationsModule,
+    UploadsModule,
   ],
   controllers: [
     WorkoutPostsController,

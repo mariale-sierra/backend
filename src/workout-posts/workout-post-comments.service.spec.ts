@@ -12,11 +12,22 @@ import { WorkoutPost } from './entities/workout-post.entity';
 import { ModerationService } from '../openai/moderation.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { User } from '../users/entities/user.entity';
+import { UploadsService } from '../uploads/uploads.service';
 
 // B3: emitters call notify()/notifyMany() fire-and-forget; never throws.
 const notificationsService = {
   notify: jest.fn().mockResolvedValue(null),
   notifyMany: jest.fn().mockResolvedValue(undefined),
+};
+
+// B5 — CP4a: identity pass-through by default — signing itself is covered in
+// uploads.service.spec.ts, not here.
+const uploadsService = {
+  toCachedSignedReadUrl: jest
+    .fn()
+    .mockImplementation((url: string | null | undefined) =>
+      Promise.resolve(url ?? null),
+    ),
 };
 
 const createMockCommentRepo = () => ({
@@ -68,6 +79,7 @@ describe('WorkoutPostCommentsService', () => {
         },
         { provide: getRepositoryToken(WorkoutPost), useValue: postRepo },
         { provide: getRepositoryToken(User), useValue: userRepo },
+        { provide: UploadsService, useValue: uploadsService },
       ],
     }).compile();
 

@@ -54,4 +54,20 @@ export class Challenge {
   // Independent of `status` (open/closed is the functional lifecycle).
   @Column({ default: true })
   is_active!: boolean;
+
+  // Sprint 10 — optional challenge photo (2026-10-25-01-challenge-image.sql).
+  // `select: false` on both: every read that spreads a Challenge (Explore,
+  // detail, my challenges, invites) would otherwise leak a photo that hasn't
+  // passed moderation. Only loadChallengeImages() reads them, and it hands
+  // out a signed URL for 'approved' photos only.
+  @Column({ type: 'text', nullable: true, select: false })
+  image_url?: string | null;
+
+  @Column({ type: 'text', nullable: true, select: false })
+  image_moderation_status?: ChallengeImageModerationStatus | null;
 }
+
+export type ChallengeImageModerationStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected';

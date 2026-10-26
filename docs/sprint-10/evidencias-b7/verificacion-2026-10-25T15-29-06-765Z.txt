@@ -1,0 +1,54 @@
+================================================================================
+ B7 — Verificación de backups automáticos (Azure PostgreSQL Flexible Server)
+================================================================================
+ Corrida (UTC)   : 2026-10-25T15:29:06.765Z
+ Origen de datos : AZURE CLI — datos reales
+ Suscripción     : [redactado] ([redactado])
+ Umbrales        : retención >= 7 días; backup más reciente <= 26 h
+
+ Comandos ejecutados:
+   az account show -o json
+   az postgres flexible-server show --resource-group rg-havit-dev --name pg-havit-dev-01 -o json
+   az postgres flexible-server backup list --resource-group rg-havit-dev --server-name pg-havit-dev-01 -o json
+
+--------------------------------------------------------------------------------
+ CONFIGURACIÓN OBSERVADA
+--------------------------------------------------------------------------------
+ Servidor                    : pg-havit-dev-01
+ Resource group              : rg-havit-dev
+ FQDN                        : pg-havit-dev-01.postgres.database.azure.com
+ Región                      : Mexico Central
+ Estado                      : Ready
+ Versión de PostgreSQL       : 16
+ SKU / nivel                 : Standard_B1ms / Burstable
+ Almacenamiento (GB)         : no expuesto por esta versión de az
+ Alta disponibilidad         : Disabled
+ Retención de backups (días) : 7
+ Redundancia del backup      : Disabled
+ Earliest restore point      : 2026-10-19T00:10:47.883591+00:00
+
+--------------------------------------------------------------------------------
+ CHECKS
+--------------------------------------------------------------------------------
+ [PASS] C1  El servidor existe y está operativo
+          esperado : state = Ready
+          observado: Ready
+ [PASS] C2  Backups automáticos activos
+          esperado : backup.backupRetentionDays >= 7
+          observado: 7 días
+          nota     : Igual al mínimo exigido (7): no hay margen. Azure admite hasta 35 días.
+ [PASS] C3  Ventana de recuperación (PITR) abierta
+          esperado : earliestRestoreDate dentro de la retención (<= 8 días)
+          observado: 2026-10-19T00:10:47.883591+00:00 (hace 159.3 h)
+ [PASS] C4  Hay puntos de recuperación recientes
+          esperado : backup más reciente <= 26 h
+          observado: 7 backups; el más reciente 2026-10-25T00:11:26.088981+00:00 (hace 15.3 h)
+          nota     : La API no expone un campo de estado por backup: la completitud se infiere de que completedTime exista.
+ [WARN] C5  Redundancia del backup
+          esperado : se registra el valor de backup.geoRedundantBackup
+          observado: Disabled
+          nota     : Informativo, no es una falla: la geo-redundancia solo se puede elegir al crear el servidor. Si está en Disabled, no hay copia fuera de la región.
+
+--------------------------------------------------------------------------------
+ RESULTADO: PASS   (5 checks: 4 PASS, 1 WARN, 0 FAIL)   exit=0
+================================================================================

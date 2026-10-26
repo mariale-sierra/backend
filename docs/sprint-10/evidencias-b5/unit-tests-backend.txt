@@ -1,0 +1,123 @@
+PASS src/uploads/upload-url.util.spec.ts
+PASS src/workout-posts/workout-post-reactions.controller.spec.ts
+PASS src/routine/routine.service.spec.ts
+PASS src/spaces/spaces.service.spec.ts
+PASS src/workout-posts/workout-post-comments.controller.spec.ts
+PASS src/workout-posts/workout-posts.controller.spec.ts
+PASS src/workout-posts/feed.controller.spec.ts
+PASS src/spaces/spaces.controller.spec.ts
+PASS src/workout-posts/workout-post-comments.service.spec.ts
+PASS src/challenges/challenges.service.spec.ts
+[31m[Nest] 87378  - [39m10/24/2026, 6:30:30 PM [31m  ERROR[39m [38;5;3m[WorkoutPostsService] [39m[31mModeration failed for post post-1, will retry next batch: Error: Could not generate a signed read URL for post post-1 — image is unreachable for moderation[39m
+[31m[Nest] 87378  - [39m10/24/2026, 6:30:30 PM [31m  ERROR[39m [38;5;3m[WorkoutPostsService] [39m[31mModeration failed for post stale-1, will retry next batch: Error: 429 Too Many Requests[39m
+[31m[Nest] 87378  - [39m10/24/2026, 6:30:30 PM [31m  ERROR[39m [38;5;3m[WorkoutPostsService] [39m[31mModeration failed for post fresh-1, will retry next batch: Error: 429 Too Many Requests[39m
+[31m[Nest] 87378  - [39m10/24/2026, 6:30:30 PM [31m  ERROR[39m [38;5;3m[WorkoutPostsService] [39m[31mModeration failed for post stale-sign-1, will retry next batch: Error: Could not generate a signed read URL for post stale-sign-1 — image is unreachable for moderation[39m
+PASS src/workout-log/workout-log.service.spec.ts
+[31m[Nest] 87378  - [39m10/24/2026, 6:30:30 PM [31m  ERROR[39m [38;5;3m[WorkoutPostsService] [39m[31mModeration failed for post fresh-sign-1, will retry next batch: Error: Could not generate a signed read URL for post fresh-sign-1 — image is unreachable for moderation[39m
+[31m[Nest] 87378  - [39m10/24/2026, 6:30:30 PM [31m  ERROR[39m [38;5;3m[WorkoutPostsService] [39m[31mModeration failed for post batch-stale-sign-1, will retry next batch: Error: Could not generate a signed read URL for post batch-stale-sign-1 — image is unreachable for moderation[39m
+PASS src/config/db-ssl.spec.ts
+PASS src/users/users.service.spec.ts
+PASS src/chats/chats.service.spec.ts
+PASS src/workout-posts/workout-posts.service.spec.ts
+PASS src/notifications/notifications.controller.spec.ts
+PASS src/openai/moderation.service.reliability.spec.ts
+PASS src/uploads/uploads.service.spec.ts
+PASS src/workout-log/workout-log.service.concurrency.spec.ts
+PASS src/routine/routine.service.today-substitution.spec.ts
+PASS src/workout-log/workout-log.service.substitution.spec.ts
+PASS src/follows/follows.controller.spec.ts
+PASS src/auth/auth.service.spec.ts
+PASS src/config/trust-proxy.spec.ts
+PASS src/workout-posts/workout-post-reports.service.spec.ts
+PASS src/workout-posts/workout-post-reactions.service.spec.ts
+PASS src/app.controller.spec.ts
+PASS src/workout-log/workout-log.controller.spec.ts
+PASS src/follows/follows.service.spec.ts
+PASS src/chats/chats.controller.spec.ts
+PASS src/auth/auth.controller.spec.ts
+PASS src/auth/guards/jwt-auth.guard.spec.ts
+PASS src/exercises/exercises.service.spec.ts
+[33m[Nest] 87378  - [39m10/24/2026, 6:30:30 PM [33m   WARN[39m [38;5;3m[JwtAuthGuard] [39m[33msession check skipped: connection reset[39m
+PASS src/badges/badges.service.spec.ts
+PASS src/exercises/exercise-substitution.service.spec.ts
+PASS src/notifications/notifications.service.spec.ts
+PASS src/challenge-invites/challenge-invites.service.spec.ts
+PASS src/notifications/push-tokens.service.spec.ts
+[31m[Nest] 87375  - [39m10/23/2026, 6:00:00 AM [31m  ERROR[39m [38;5;3m[RefreshTokensService] [39m[31mrefresh token cleanup failed: db down[39m
+PASS src/auth/refresh-tokens.service.spec.ts
+PASS src/metrics/metrics.service.spec.ts
+PASS src/chats/shared-content.service.spec.ts
+[33m[Nest] 87377  - [39m10/24/2026, 6:30:30 PM [33m   WARN[39m [38;5;3m[NotificationsService] [39m[33mnotify(post_comment) failed: db down[39m
+[33m[Nest] 87377  - [39m10/24/2026, 6:30:30 PM [33m   WARN[39m [38;5;3m[NotificationsService] [39m[33mpush for notification 42 failed: expo down[39m
+[33m[Nest] 87375  - [39m10/23/2026, 6:00:00 AM [33m   WARN[39m [38;5;3m[RefreshTokensService] [39m[33mrefresh token reuse: family family-1 revoked[39m
+[33m[Nest] 87375  - [39m10/23/2026, 6:00:00 AM [33m   WARN[39m [38;5;3m[RefreshTokensService] [39m[33mrefresh token reuse: family family-1 revoked[39m
+[33m[Nest] 87375  - [39m10/23/2026, 6:00:00 AM [33m   WARN[39m [38;5;3m[RefreshTokensService] [39m[33mrefresh token reuse: family family-1 revoked[39m
+[32m[Nest] 87375  - [39m10/23/2026, 6:00:00 AM [32m    LOG[39m [38;5;3m[RefreshTokensService] [39m[32mdeleted 2 expired sessions and 5 expired refresh tokens[39m
+PASS src/notifications/expo-push.service.spec.ts
+PASS src/workout-log/workout-log-streak.util.spec.ts
+PASS src/config/security-headers.spec.ts
+PASS src/cache/redis-throttler-storage.spec.ts
+PASS src/auth/guards/suspension.guard.spec.ts
+PASS src/workout-posts/hashtags/hashtags.service.spec.ts
+PASS src/auth/dto/register.dto.spec.ts
+PASS src/auth/guards/admin.guard.spec.ts
+PASS src/users/dto/user-response.dto.spec.ts
+PASS src/auth/password-policy.spec.ts
+PASS src/common/cycle-day.util.spec.ts
+[31m[Nest] 87380  - [39m10/24/2026, 6:30:31 PM [31m  ERROR[39m [38;5;3m[ModerationService] [39m[31mexternal_call service=openai operation=moderations.create outcome=failure attempts=1 durationMs=0 error=Error[39m
+[31m[Nest] 87380  - [39m10/24/2026, 6:30:31 PM [31m  ERROR[39m [38;5;3m[ModerationService] [39m[31mexternal_call service=openai operation=moderations.create outcome=failure attempts=1 durationMs=0 error=Error[39m
+PASS src/openai/moderation.service.spec.ts
+PASS src/auth/utils/assert-ownership.spec.ts
+PASS src/exercises/lib/exercise-substitution.spec.ts
+PASS src/exercises/lib/repdb-mapping.spec.ts
+PASS src/cache/redis-cache.service.spec.ts
+[31m[Nest] 87377  - [39m10/24/2026, 6:30:31 PM [31m  ERROR[39m [38;5;3m[ExceptionsHandler] [39m[31mUnhandled exception on GET /test-path: some internal database error[39m
+Error: some internal database error
+    at Object.<anonymous> (/Users/martinvillatoro/Documents/Universidad/Havit/backend/src/common/filters/http-exception.filter.spec.ts:92:18)
+    at Promise.then.completed (/Users/martinvillatoro/Documents/Universidad/Havit/backend/node_modules/jest-circus/build/utils.js:391:28)
+    at new Promise (<anonymous>)
+    at callAsyncCircusFn (/Users/martinvillatoro/Documents/Universidad/Havit/backend/node_modules/jest-circus/build/utils.js:316:10)
+    at _callCircusTest (/Users/martinvillatoro/Documents/Universidad/Havit/backend/node_modules/jest-circus/build/run.js:218:40)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at _runTest (/Users/martinvillatoro/Documents/Universidad/Havit/backend/node_modules/jest-circus/build/run.js:155:3)
+    at _runTestsForDescribeBlock (/Users/martinvillatoro/Documents/Universidad/Havit/backend/node_modules/jest-circus/build/run.js:66:9)
+    at _runTestsForDescribeBlock (/Users/martinvillatoro/Documents/Universidad/Havit/backend/node_modules/jest-circus/build/run.js:60:9)
+    at run (/Users/martinvillatoro/Documents/Universidad/Havit/backend/node_modules/jest-circus/build/run.js:25:3)
+[31m[Nest] 87377  - [39m10/24/2026, 6:30:31 PM [31m  ERROR[39m [38;5;3m[ExceptionsHandler] [39m[31mUnhandled exception on GET /test-path: boom[39m
+Error: boom
+    at Object.<anonymous> (/Users/martinvillatoro/Documents/Universidad/Havit/backend/src/common/filters/http-exception.filter.spec.ts:134:32)
+    at Promise.then.completed (/Users/martinvillatoro/Documents/Universidad/Havit/backend/node_modules/jest-circus/build/utils.js:391:28)
+    at new Promise (<anonymous>)
+    at callAsyncCircusFn (/Users/martinvillatoro/Documents/Universidad/Havit/backend/node_modules/jest-circus/build/utils.js:316:10)
+    at _callCircusTest (/Users/martinvillatoro/Documents/Universidad/Havit/backend/node_modules/jest-circus/build/run.js:218:40)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at _runTest (/Users/martinvillatoro/Documents/Universidad/Havit/backend/node_modules/jest-circus/build/run.js:155:3)
+    at _runTestsForDescribeBlock (/Users/martinvillatoro/Documents/Universidad/Havit/backend/node_modules/jest-circus/build/run.js:66:9)
+    at _runTestsForDescribeBlock (/Users/martinvillatoro/Documents/Universidad/Havit/backend/node_modules/jest-circus/build/run.js:60:9)
+    at run (/Users/martinvillatoro/Documents/Universidad/Havit/backend/node_modules/jest-circus/build/run.js:25:3)
+PASS src/common/filters/http-exception.filter.spec.ts
+PASS src/workout-posts/metric-display.util.spec.ts
+PASS src/common/pagination.util.spec.ts
+PASS src/exercises/lib/exercise-metric-profiles.spec.ts
+PASS src/common/external-call-telemetry.spec.ts
+PASS src/common/timezone.util.spec.ts
+PASS src/challenges/dominant-activity-category.util.spec.ts
+PASS src/workout-posts/hashtags/hashtag.util.spec.ts
+PASS src/config/http-config.spec.ts
+[32m[Nest] 87380  - [39m10/24/2026, 6:30:31 PM [32m    LOG[39m [38;5;3m[ModerationService] [39m[32mexternal_call service=openai operation=moderations.create outcome=success attempts=1 durationMs=0[39m
+[32m[Nest] 87380  - [39m10/24/2026, 6:30:31 PM [32m    LOG[39m [38;5;3m[ModerationService] [39m[32mexternal_call service=openai operation=moderations.create outcome=success attempts=1 durationMs=0[39m
+[32m[Nest] 87380  - [39m10/24/2026, 6:30:31 PM [32m    LOG[39m [38;5;3m[ModerationService] [39m[32mexternal_call service=openai operation=moderations.create outcome=success attempts=1 durationMs=0[39m
+[32m[Nest] 87380  - [39m10/24/2026, 6:30:31 PM [32m    LOG[39m [38;5;3m[ModerationService] [39m[32mexternal_call service=openai operation=moderations.create outcome=success attempts=1 durationMs=0[39m
+[32m[Nest] 87380  - [39m10/24/2026, 6:30:31 PM [32m    LOG[39m [38;5;3m[ModerationService] [39m[32mexternal_call service=openai operation=moderations.create outcome=success attempts=1 durationMs=0[39m
+[32m[Nest] 87380  - [39m10/24/2026, 6:30:31 PM [32m    LOG[39m [38;5;3m[ModerationService] [39m[32mexternal_call service=openai operation=moderations.create outcome=success attempts=1 durationMs=0[39m
+[33m[Nest] 87383  - [39m10/24/2026, 6:30:31 PM [33m   WARN[39m [38;5;3m[RedisCacheService] [39m[33mREDIS_URL is not set — caching is disabled, every read falls through to Postgres.[39m
+[33m[Nest] 87383  - [39m10/24/2026, 6:30:31 PM [33m   WARN[39m [38;5;3m[RedisCacheService] [39m[33mREDIS_URL is not set — caching is disabled, every read falls through to Postgres.[39m
+[33m[Nest] 87383  - [39m10/24/2026, 6:30:31 PM [33m   WARN[39m [38;5;3m[RedisCacheService] [39m[33mREDIS_URL is not set — caching is disabled, every read falls through to Postgres.[39m
+[33m[Nest] 87383  - [39m10/24/2026, 6:30:31 PM [33m   WARN[39m [38;5;3m[RedisCacheService] [39m[33mREDIS_URL is not set — caching is disabled, every read falls through to Postgres.[39m
+[33m[Nest] 87383  - [39m10/24/2026, 6:30:31 PM [33m   WARN[39m [38;5;3m[RedisCacheService] [39m[33mRedis error (cache falls back to source of truth): ECONNREFUSED[39m
+[33m[Nest] 87383  - [39m10/24/2026, 6:30:31 PM [33m   WARN[39m [38;5;3m[RedisCacheService] [39m[33mRedis error (cache falls back to source of truth): ECONNREFUSED[39m
+
+Test Suites: 3 skipped, 66 passed, 66 of 69 total
+Tests:       14 skipped, 1214 passed, 1228 total
+Snapshots:   0 total
+Time:        6.403 s, estimated 7 s

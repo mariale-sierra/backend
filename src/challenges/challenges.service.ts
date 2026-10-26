@@ -47,8 +47,18 @@ import {
   categoryNameToActivityType,
 } from './activity-type.util';
 import { assertOwnership } from '../auth/utils/assert-ownership';
+import { assertOwnUploadUrl } from '../uploads/upload-url.util';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import {
+  loadChallengeImages,
+  NO_CHALLENGE_IMAGE,
+} from './challenge-image.util';
 import { ModerationService } from '../openai/moderation.service';
 import { RedisCacheService } from '../cache/redis-cache.service';
+import {
+  SIGNED_READ_TTL_SECONDS,
+  UploadsService,
+} from '../uploads/uploads.service';
 import {
   DecodedCursor,
   encodeCursor,
@@ -92,6 +102,7 @@ export class ChallengesService {
     private moderationService: ModerationService,
     private readonly cache: RedisCacheService,
     private notificationsService: NotificationsService,
+    private readonly uploadsService: UploadsService,
   ) {}
 
   private async cacheKey(suffix: string): Promise<string> {
@@ -118,13 +129,22 @@ export class ChallengesService {
       createChallengeDto.instructions,
     ]);
 
-    const { categories, locations, cycle_days, ...challengeFields } =
+    const { categories, locations, cycle_days, imageUrl, ...challengeFields } =
       createChallengeDto;
+
+    // Sprint 10 — optional photo: same checks as a profile photo (the
+    // caller's own upload, real image bytes) before it is ever stored.
+    if (imageUrl) {
+      assertOwnUploadUrl(imageUrl, userId, 'imageUrl');
+      await this.uploadsService.verifyUploadedObject(imageUrl, userId);
+    }
 
     const result = await this.dataSource.transaction(async (manager) => {
       const challenge = manager.create(Challenge, {
         ...challengeFields,
         created_by_user_id: userId,
+        image_url: imageUrl ?? null,
+        image_moderation_status: imageUrl ? 'pending' : null,
       });
       const savedChallenge = await manager.save(challenge);
 
@@ -163,10 +183,88 @@ export class ChallengesService {
 
     await this.cache.bumpVersion(CACHE_NAMESPACE);
 
+    // Not awaited: the photo is reviewed right away without delaying the
+    // response; if this attempt fails it stays 'pending' and the cron retries.
+    if (imageUrl) {
+      void this.moderateChallengeImage({
+        id: result.id,
+        created_by_user_id: userId,
+        image_url: imageUrl,
+      });
+    }
+
+    // The raw upload URL never goes back to the client, not even to its creator.
+    const challenge: Partial<Challenge> = { ...result };
+    delete challenge.image_url;
+    delete challenge.image_moderation_status;
     return {
       message: 'Challenge created successfully',
-      challenge: result,
+      challenge: {
+        ...challenge,
+        imageUrl: null,
+        imageStatus: result.image_moderation_status ?? 'none',
+      },
     };
+  }
+
+  // ---------------------------------------------------------------------
+  // Challenge photo moderation (Sprint 10)
+  // ---------------------------------------------------------------------
+
+  private imageModerationRunning = false;
+
+  /**
+   * Same OpenAI image moderation as workout photos (validateWorkoutImage on a
+   * short-lived signed URL). Fail-closed: if signing or OpenAI fails the photo
+   * stays 'pending' (the app keeps showing the placeholder) and the cron
+   * below tries again — a photo is never approved without being checked.
+   */
+  private async moderateChallengeImage(
+    challenge: Pick<Challenge, 'id' | 'created_by_user_id' | 'image_url'>,
+  ): Promise<void> {
+    try {
+      const signedUrl = await this.uploadsService.toSignedReadUrl(
+        challenge.image_url,
+        challenge.created_by_user_id,
+        SIGNED_READ_TTL_SECONDS.moderation,
+      );
+      if (!signedUrl) {
+        throw new Error('could not sign the photo for moderation');
+      }
+
+      const { flagged } =
+        await this.moderationService.validateWorkoutImage(signedUrl);
+
+      await this.challengeRepo.update(
+        { id: challenge.id, image_moderation_status: 'pending' },
+        { image_moderation_status: flagged ? 'rejected' : 'approved' },
+      );
+      await this.cache.bumpVersion(CACHE_NAMESPACE);
+    } catch (error) {
+      this.logger.error(
+        `Photo moderation failed for challenge ${challenge.id}, will retry: ${String(error)}`,
+      );
+    }
+  }
+
+  /** Retries photos still 'pending', oldest first (same cadence as workout posts). */
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  async processPendingChallengeImages(): Promise<void> {
+    if (this.imageModerationRunning) return;
+    this.imageModerationRunning = true;
+    try {
+      const pending = await this.challengeRepo.find({
+        where: { image_moderation_status: 'pending', is_active: true },
+        select: { id: true, created_by_user_id: true, image_url: true },
+        order: { created_at: 'ASC' },
+        take: 20,
+      });
+      for (const challenge of pending) {
+        await this.moderateChallengeImage(challenge);
+      }
+    } finally {
+      this.imageModerationRunning = false;
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -753,13 +851,18 @@ export class ChallengesService {
     const enriched = await this.attachCategoriesAndLocations(page);
     const ids = page.map((c) => c.id);
 
-    const [memberCountByChallenge, dominantActivityByChallenge, authorsById] =
-      await Promise.all([
-        this.getMemberCountsByChallenge(ids),
-        getDominantActivityCategories(this.challengeCycleDaysRepo.manager, ids),
-        // One batched lookup for every card's author, not one request per card.
-        this.loadAuthors(page.map((c) => c.created_by_user_id)),
-      ]);
+    const [
+      memberCountByChallenge,
+      dominantActivityByChallenge,
+      authorsById,
+      imagesById,
+    ] = await Promise.all([
+      this.getMemberCountsByChallenge(ids),
+      getDominantActivityCategories(this.challengeCycleDaysRepo.manager, ids),
+      // One batched lookup for every card's author, not one request per card.
+      this.loadAuthors(page.map((c) => c.created_by_user_id)),
+      loadChallengeImages(this.challengeRepo, this.uploadsService, ids),
+    ]);
 
     // Same field name findOne() already returns (members_joined) so the
     // frontend's existing pickMembersCount picker picks it up with zero
@@ -769,6 +872,7 @@ export class ChallengesService {
       members_joined: memberCountByChallenge.get(c.id) ?? 0,
       dominant_activity_category: dominantActivityByChallenge.get(c.id) ?? null,
       author: authorsById.get(c.created_by_user_id) ?? null,
+      ...(imagesById.get(c.id) ?? NO_CHALLENGE_IMAGE),
     }));
 
     const last = page[page.length - 1];
@@ -822,16 +926,19 @@ export class ChallengesService {
 
     const [enriched] = await this.attachCategoriesAndLocations([challenge]);
     const cycleDays = await this.getCycleDaySummaries(id);
-    const [membersJoined, dominantActivityByChallenge, authorsById] =
-      await Promise.all([
-        this.challengeUserMapRepo.count({
-          where: { challenge_id: id, status: 'active' },
-        }),
-        getDominantActivityCategories(this.challengeCycleDaysRepo.manager, [
-          id,
-        ]),
-        this.loadAuthors([challenge.created_by_user_id]),
-      ]);
+    const [
+      membersJoined,
+      dominantActivityByChallenge,
+      authorsById,
+      imagesById,
+    ] = await Promise.all([
+      this.challengeUserMapRepo.count({
+        where: { challenge_id: id, status: 'active' },
+      }),
+      getDominantActivityCategories(this.challengeCycleDaysRepo.manager, [id]),
+      this.loadAuthors([challenge.created_by_user_id]),
+      loadChallengeImages(this.challengeRepo, this.uploadsService, [id]),
+    ]);
 
     return {
       ...enriched,
@@ -839,6 +946,7 @@ export class ChallengesService {
       members_joined: membersJoined,
       dominant_activity_category: dominantActivityByChallenge.get(id) ?? null,
       author: authorsById.get(challenge.created_by_user_id) ?? null,
+      ...(imagesById.get(id) ?? NO_CHALLENGE_IMAGE),
     };
   }
 
@@ -871,7 +979,22 @@ export class ChallengesService {
       where: { id: In(unique) },
       relations: { profile: true },
     });
-    return new Map(users.map((u) => [u.id, ChallengeAuthorDto.fromUser(u)]));
+    // B5 — CP4a: each author's own photo, signed for its own owner.
+    const signedPhotos = await Promise.all(
+      users.map((u) =>
+        this.uploadsService.toCachedSignedReadUrl(
+          u.profile?.profile_image_url,
+          u.id,
+          SIGNED_READ_TTL_SECONDS.profile,
+        ),
+      ),
+    );
+    return new Map(
+      users.map((u, i) => [
+        u.id,
+        ChallengeAuthorDto.fromUser(u, signedPhotos[i]),
+      ]),
+    );
   }
 
   async update(
@@ -1048,7 +1171,17 @@ export class ChallengesService {
       relations: { user: { profile: true } },
       order: { requested_at: 'ASC' },
     });
-    return ChallengeJoinRequestResponseDto.fromEntities(requests);
+    // B5 — CP4a: each requester's own photo, signed for its own owner.
+    const signedPhotos = await Promise.all(
+      requests.map((r) =>
+        this.uploadsService.toCachedSignedReadUrl(
+          r.user?.profile?.profile_image_url,
+          r.user_id,
+          SIGNED_READ_TTL_SECONDS.profile,
+        ),
+      ),
+    );
+    return ChallengeJoinRequestResponseDto.fromEntities(requests, signedPhotos);
   }
 
   /**
@@ -1145,7 +1278,13 @@ export class ChallengesService {
         where: { id: request.id },
         relations: { user: { profile: true } },
       });
-      return ChallengeJoinRequestResponseDto.fromEntity(withUser!);
+      // B5 — CP4a: signed for the requester, its own photo's owner.
+      const signedPhoto = await this.uploadsService.toCachedSignedReadUrl(
+        withUser?.user?.profile?.profile_image_url,
+        withUser!.user_id,
+        SIGNED_READ_TTL_SECONDS.profile,
+      );
+      return ChallengeJoinRequestResponseDto.fromEntity(withUser!, signedPhoto);
     });
 
     if (approve) {

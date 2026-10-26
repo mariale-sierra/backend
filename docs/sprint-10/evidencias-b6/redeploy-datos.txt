@@ -1,0 +1,15 @@
+Reemplazo del contenedor de producción con la imagen ya construida (docker rm -f + docker run), con un sondeo a /health cada 0.2 s.
+
+ANTES  usuarios=1 sesiones=2 migraciones=66 usuario_b6=b6deploy
+corte medido (rm -f + run con imagen ya construida, hasta /health 200): 1.3 s
+sondeos fallidos durante el cambio: 4 de       13
+DESPUES usuarios=1 migraciones=66 usuario_b6=b6deploy
+
+$ docker logs b6-api | grep -i migrat
+> npm run db:migrate
+> backend@0.0.1 db:migrate
+> node database/scripts/migrate.js
+[db] nothing to apply, schema is up to date
+[Nest] 43  - 10/25/2026, 7:20:35 AM     LOG [RouterExplorer] Mapped {/reports/pending, GET} route +0ms
+$ login con el usuario creado antes del redeploy
+HTTP 200

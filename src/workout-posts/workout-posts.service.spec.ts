@@ -13,6 +13,10 @@ import { WorkoutPostReactionsService } from './workout-post-reactions.service';
 import { WorkoutPostCommentsService } from './workout-post-comments.service';
 import { HashtagsService } from './hashtags/hashtags.service';
 import { encodeCursor } from '../common/pagination.util';
+import {
+  SIGNED_READ_TTL_SECONDS,
+  UploadsService,
+} from '../uploads/uploads.service';
 
 const createMockWorkoutPostRepo = () => ({
   create: jest.fn(),
@@ -54,6 +58,11 @@ describe('WorkoutPostsService', () => {
     validateText: jest.Mock;
     assertTextAllowed: jest.Mock;
   };
+  let uploadsService: {
+    toSignedReadUrl: jest.Mock;
+    toCachedSignedReadUrl: jest.Mock;
+    invalidateCachedReadUrl: jest.Mock;
+  };
 
   const VIEWER_ID = 'viewer-1';
   const OTHER_USER_ID = 'other-2';
@@ -87,6 +96,21 @@ describe('WorkoutPostsService', () => {
       validateText: jest.fn(),
       assertTextAllowed: jest.fn(),
     };
+    // B5 — CP4a: identity pass-through by default — signing itself is
+    // covered in uploads.service.spec.ts, not here.
+    uploadsService = {
+      toSignedReadUrl: jest
+        .fn()
+        .mockImplementation((url: string | null | undefined) =>
+          Promise.resolve(url ?? null),
+        ),
+      toCachedSignedReadUrl: jest
+        .fn()
+        .mockImplementation((url: string | null | undefined) =>
+          Promise.resolve(url ?? null),
+        ),
+      invalidateCachedReadUrl: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -98,6 +122,7 @@ describe('WorkoutPostsService', () => {
         { provide: WorkoutPostReactionsService, useValue: reactionsService },
         { provide: WorkoutPostCommentsService, useValue: commentsService },
         { provide: HashtagsService, useValue: hashtagsService },
+        { provide: UploadsService, useValue: uploadsService },
       ],
     }).compile();
 
@@ -110,6 +135,7 @@ describe('WorkoutPostsService', () => {
       user_id: 'author-1',
       image_url: 'https://example.com/a.jpg',
       caption: 'day 1',
+      visibility: 'public',
       created_at: new Date('2026-08-16T10:00:00.000Z'),
       workout_log_id: 10,
       challenge_id: 'challenge-1',
@@ -251,6 +277,50 @@ describe('WorkoutPostsService', () => {
       );
     });
 
+    // B5 — CP4a: once the bucket is private (CP4b, not done yet), OpenAI
+    // can no longer fetch the raw stored URL — moderation must always sign
+    // first, for the post's own author, with the dedicated moderation TTL.
+    // Approve/reject logic itself (asserted above) is unchanged.
+    it('signs the image with the moderation TTL for the post author before sending it to OpenAI', async () => {
+      postRepo.find.mockResolvedValue([
+        pendingPost({
+          user_id: 'author-7',
+          image_url: 'https://example.com/x.jpg',
+        }),
+      ]);
+      moderationService.validateWorkoutImage.mockResolvedValue({
+        flagged: false,
+        flaggedCategories: [],
+      });
+
+      await service.processPendingModerationBatch();
+
+      expect(uploadsService.toSignedReadUrl).toHaveBeenCalledWith(
+        'https://example.com/x.jpg',
+        'author-7',
+        SIGNED_READ_TTL_SECONDS.moderation,
+      );
+    });
+
+    // B5 — CP7 correction: a signing failure must never be treated as "the
+    // photo was moderated" by falling back to `post.image_url` — that public
+    // URL won't resolve once the bucket is private (CP4b), so calling OpenAI
+    // with it would either silently approve unmoderated content or always
+    // fail. It must be treated exactly like any other moderation-service
+    // failure (see the `moderatePostViaAi` block below): on a FRESH post it
+    // stays pending for retry, never approved and never sent to OpenAI.
+    it('never falls back to the raw stored URL if signing fails — treats it as a moderation failure, not a success', async () => {
+      postRepo.find.mockResolvedValue([
+        pendingPost({ id: 'post-1', created_at: new Date() }),
+      ]);
+      uploadsService.toSignedReadUrl.mockResolvedValueOnce(null);
+
+      await service.processPendingModerationBatch();
+
+      expect(moderationService.validateWorkoutImage).not.toHaveBeenCalled();
+      expect(postRepo.update).not.toHaveBeenCalled();
+    });
+
     // moderatePostViaAi is exercised directly here to cover its failure paths.
     describe('moderatePostViaAi (preserved for when the gate is re-enabled)', () => {
       it('should auto-approve a post that has been pending for over 2 hours when the moderation service keeps failing', async () => {
@@ -289,6 +359,66 @@ describe('WorkoutPostsService', () => {
           }
         ).moderatePostViaAi(post);
 
+        expect(postRepo.update).not.toHaveBeenCalled();
+      });
+
+      // B5 — CP7 follow-up correction: unlike an OpenAI-side failure, a
+      // signing failure must NEVER reach the stale-pending safety valve, no
+      // matter how old the post is — OpenAI never got a chance to evaluate
+      // it, so there is no "service outage" signal to justify treating it
+      // as moderated. This is the behavior this correction exists for: the
+      // test above this block ("auto-approve... when the moderation service
+      // keeps failing") proves the valve still fires for a REAL OpenAI
+      // failure; this proves it does NOT fire when signing is what failed,
+      // even well past the 2h threshold that would otherwise trigger it.
+      it('never auto-approves — even a very stale post — when signing (not OpenAI) is what fails', async () => {
+        const veryStaleDate = new Date(Date.now() - 48 * 60 * 60 * 1000); // 48h old
+        const post = pendingPost({
+          id: 'stale-sign-1',
+          created_at: veryStaleDate,
+        });
+        uploadsService.toSignedReadUrl.mockResolvedValueOnce(null);
+
+        await (
+          service as unknown as {
+            moderatePostViaAi: (post: WorkoutPost) => Promise<void>;
+          }
+        ).moderatePostViaAi(post);
+
+        expect(moderationService.validateWorkoutImage).not.toHaveBeenCalled();
+        expect(postRepo.update).not.toHaveBeenCalled();
+      });
+
+      it('should NOT auto-approve a recently-uploaded post when signing fails on its first attempt', async () => {
+        const post = pendingPost({
+          id: 'fresh-sign-1',
+          created_at: new Date(),
+        });
+        uploadsService.toSignedReadUrl.mockResolvedValueOnce(null);
+
+        await (
+          service as unknown as {
+            moderatePostViaAi: (post: WorkoutPost) => Promise<void>;
+          }
+        ).moderatePostViaAi(post);
+
+        expect(moderationService.validateWorkoutImage).not.toHaveBeenCalled();
+        expect(postRepo.update).not.toHaveBeenCalled();
+      });
+
+      // Repeats the whole batch path (not just the direct moderatePostViaAi
+      // call above) so the correction is proven at the same entry point a
+      // real cron run uses, not only when called directly in tests.
+      it('processPendingModerationBatch never approves a stale post when signing fails, even past STALE_PENDING_FALLBACK_MS', async () => {
+        const veryStaleDate = new Date(Date.now() - 48 * 60 * 60 * 1000);
+        postRepo.find.mockResolvedValue([
+          pendingPost({ id: 'batch-stale-sign-1', created_at: veryStaleDate }),
+        ]);
+        uploadsService.toSignedReadUrl.mockResolvedValueOnce(null);
+
+        await service.processPendingModerationBatch();
+
+        expect(moderationService.validateWorkoutImage).not.toHaveBeenCalled();
         expect(postRepo.update).not.toHaveBeenCalled();
       });
 
@@ -404,6 +534,64 @@ describe('WorkoutPostsService', () => {
       expect(posts[0].comments_count).toBe(0);
       expect(posts[0].recent_reactors).toEqual([]);
       expect(posts[0].hashtags).toEqual([]);
+    });
+
+    // B5 — CP4a: a public post's image is signed with the CACHED path and
+    // the public TTL — never the private/followers (uncached) path.
+    it('signs a public post image with the cached path and the public TTL', async () => {
+      postRepo.manager.query.mockResolvedValue([
+        feedRow({ visibility: 'public' }),
+      ]);
+
+      await service.getFeed({ limit: 20 });
+
+      expect(uploadsService.toCachedSignedReadUrl).toHaveBeenCalledWith(
+        'https://example.com/a.jpg',
+        'author-1',
+        SIGNED_READ_TTL_SECONDS.postPublic,
+      );
+      expect(uploadsService.toSignedReadUrl).not.toHaveBeenCalled();
+    });
+
+    // B5 — CP4a: a followers-visibility post (the only other visibility the
+    // Feed can ever return — see getFeed's own visibilityFilter) uses the
+    // UNCACHED path with the followers TTL, never the cached public path —
+    // a cached value would be shared with every future viewer regardless of
+    // whether THEY actively follow the author.
+    it('signs a followers-visibility post image with the uncached path and the followers TTL', async () => {
+      postRepo.manager.query.mockResolvedValue([
+        feedRow({ visibility: 'followers' }),
+      ]);
+
+      await service.getFeed({ limit: 20, viewerId: VIEWER_ID });
+
+      expect(uploadsService.toSignedReadUrl).toHaveBeenCalledWith(
+        'https://example.com/a.jpg',
+        'author-1',
+        SIGNED_READ_TTL_SECONDS.postFollowers,
+      );
+      expect(uploadsService.toCachedSignedReadUrl).not.toHaveBeenCalledWith(
+        'https://example.com/a.jpg',
+        'author-1',
+        expect.anything(),
+      );
+    });
+
+    // B5 — CP4a: each author's own profile photo in the Feed is always
+    // signed via the cached path with the profile TTL, regardless of the
+    // post's own visibility.
+    it('signs each author photo with the cached path and the profile TTL', async () => {
+      postRepo.manager.query.mockResolvedValue([
+        feedRow({ user_avatar_url: 'https://example.com/avatar.jpg' }),
+      ]);
+
+      await service.getFeed({ limit: 20 });
+
+      expect(uploadsService.toCachedSignedReadUrl).toHaveBeenCalledWith(
+        'https://example.com/avatar.jpg',
+        'author-1',
+        SIGNED_READ_TTL_SECONDS.profile,
+      );
     });
 
     it('should attach recent reactors and hashtags from their batched lookups (B5)', async () => {
@@ -640,6 +828,31 @@ describe('WorkoutPostsService', () => {
       const [sql] = postRepo.manager.query.mock.calls[0] as [string, unknown[]];
       expect(sql).toContain("p.visibility != 'private'");
       expect(sql).toMatch(/p\.user_id = \$\d+/);
+    });
+
+    // B5 — CP4a: a private post's image is signed with the UNCACHED path
+    // and the private TTL — the shortest of the three, and never shared
+    // through Redis with anyone else (there IS no "anyone else" for a
+    // private post, but the point stands structurally).
+    it("signs a private post's image with the uncached path and the private TTL", async () => {
+      postRepo.manager.query.mockResolvedValueOnce([
+        photoRow({ visibility: 'private', user_id: 'author-x' }),
+      ]);
+      postRepo.manager.query.mockResolvedValueOnce([]); // metricsByWorkoutLog: base rows
+      postRepo.manager.query.mockResolvedValueOnce([]); // metricsByWorkoutLog: exercise-level rows
+
+      await service.getChallengePhotos('challenge-1', VIEWER_ID);
+
+      expect(uploadsService.toSignedReadUrl).toHaveBeenCalledWith(
+        'https://example.com/a.jpg',
+        'author-x',
+        SIGNED_READ_TTL_SECONDS.postPrivate,
+      );
+      expect(uploadsService.toCachedSignedReadUrl).not.toHaveBeenCalledWith(
+        'https://example.com/a.jpg',
+        'author-x',
+        expect.anything(),
+      );
     });
 
     it('should scope the query to the given challenge', async () => {
@@ -1207,6 +1420,27 @@ describe('WorkoutPostsService', () => {
       );
       expect(postRepo.update).not.toHaveBeenCalled();
       expect(result).toEqual({ message: 'Workout post deleted' });
+    });
+
+    // B5 — CP4a: the accepted revocation mitigation — stop Redis from
+    // handing out this post's cached signed URL to anyone who asks AFTER
+    // this point (never a full guarantee for someone who already had it).
+    it('invalidates the cached signed URL for the deleted post', async () => {
+      const post = {
+        id: POST_ID,
+        user_id: VIEWER_ID,
+        is_active: true,
+        image_url: 'https://cdn.example/uploads/viewer-1/p.jpeg',
+      };
+      postRepo.findOne.mockResolvedValue(post);
+      postRepo.save.mockImplementation((p: unknown) => Promise.resolve(p));
+
+      await service.remove(POST_ID, VIEWER_ID);
+
+      expect(uploadsService.invalidateCachedReadUrl).toHaveBeenCalledWith(
+        'https://cdn.example/uploads/viewer-1/p.jpeg',
+        VIEWER_ID,
+      );
     });
 
     it('should not touch is_hidden (admin moderation is a separate concept)', async () => {

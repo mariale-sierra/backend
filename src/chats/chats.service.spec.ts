@@ -13,11 +13,22 @@ import { DirectConversationHiddenBy } from './entities/direct-conversation-hidde
 import { User } from '../users/entities/user.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SharedContentService } from './shared-content.service';
+import { UploadsService } from '../uploads/uploads.service';
 
 // B3: emitters call notify()/notifyMany() fire-and-forget; never throws.
 const notificationsService = {
   notify: jest.fn().mockResolvedValue(null),
   notifyMany: jest.fn().mockResolvedValue(undefined),
+};
+
+// B5 — CP4a: identity pass-through by default — signing itself is covered in
+// uploads.service.spec.ts, not here.
+const uploadsService = {
+  toCachedSignedReadUrl: jest
+    .fn()
+    .mockImplementation((url: string | null | undefined) =>
+      Promise.resolve(url ?? null),
+    ),
 };
 
 // B5: shared post/challenge previews. Default: nothing shared resolves to
@@ -108,6 +119,7 @@ describe('ChatsService', () => {
         ChatsService,
         { provide: NotificationsService, useValue: notificationsService },
         { provide: SharedContentService, useValue: sharedContentService },
+        { provide: UploadsService, useValue: uploadsService },
         {
           provide: getRepositoryToken(DirectConversation),
           useValue: conversationRepo,

@@ -14,8 +14,13 @@ import { WorkoutLog } from '../workout-log/entities/workout-log.entity';
 import { ChallengeCategoryMap } from '../challenges/entities/challenge-category-map.entity';
 import { ChallengeLocationMap } from '../challenges/entities/challenge-location-map.entity';
 import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.entity';
+import { Challenge } from '../challenges/entities/challenge.entity';
 import { FollowsService } from '../follows/follows.service';
 import { ModerationService } from '../openai/moderation.service';
+import {
+  SIGNED_READ_TTL_SECONDS,
+  UploadsService,
+} from '../uploads/uploads.service';
 import { getDominantActivityCategories } from '../challenges/dominant-activity-category.util';
 import {
   getCurrentStreakDays,
@@ -117,6 +122,7 @@ describe('UsersService', () => {
   let challengeCategoryMapRepo: ReturnType<typeof createMockRepo>;
   let challengeLocationMapRepo: ReturnType<typeof createMockRepo>;
   let challengeCycleDayRepo: ReturnType<typeof createMockRepo>;
+  let challengeRepo: ReturnType<typeof createMockRepo>;
   let followsService: {
     isActiveFollower: jest.Mock;
     getCounts: jest.Mock;
@@ -125,6 +131,10 @@ describe('UsersService', () => {
     getFollowedUserIdsForViewer: jest.Mock;
   };
   let moderationService: { assertTextAllowed: jest.Mock };
+  let uploadsService: {
+    verifyUploadedObject: jest.Mock;
+    toCachedSignedReadUrl: jest.Mock;
+  };
 
   const baseUser = () => ({
     id: 'user-1',
@@ -147,6 +157,9 @@ describe('UsersService', () => {
     challengeCategoryMapRepo.find.mockResolvedValue([]);
     challengeLocationMapRepo.find.mockResolvedValue([]);
     challengeCycleDayRepo.find.mockResolvedValue([]);
+    // Sprint 10: challenge photos (loadChallengeImages) — none unless a test adds one.
+    challengeRepo = createMockRepo();
+    challengeRepo.find.mockResolvedValue([]);
     mockGetDominantActivityCategories.mockReset().mockResolvedValue(new Map());
     mockGetCurrentStreakDays.mockReset().mockResolvedValue(0);
     mockGetCurrentStreakDaysForUsers.mockReset().mockResolvedValue(new Map());
@@ -166,6 +179,21 @@ describe('UsersService', () => {
     // B3: text passes moderation unless a test says otherwise.
     moderationService = {
       assertTextAllowed: jest.fn().mockResolvedValue(undefined),
+    };
+
+    // B5 — CP2: an uploaded photo passes the real-content check unless a
+    // test says otherwise (updateProfilePhoto tests don't exercise CP2 itself
+    // — that's covered in uploads.service.spec.ts).
+    uploadsService = {
+      verifyUploadedObject: jest.fn().mockResolvedValue(undefined),
+      // B5 — CP4a: identity pass-through by default, so existing assertions
+      // on the raw stored URL keep working — the actual signing behavior is
+      // covered in uploads.service.spec.ts, not here.
+      toCachedSignedReadUrl: jest
+        .fn()
+        .mockImplementation((url: string | null | undefined) =>
+          Promise.resolve(url ?? null),
+        ),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -190,8 +218,10 @@ describe('UsersService', () => {
           provide: getRepositoryToken(ChallengeCycleDay),
           useValue: challengeCycleDayRepo,
         },
+        { provide: getRepositoryToken(Challenge), useValue: challengeRepo },
         { provide: FollowsService, useValue: followsService },
         { provide: ModerationService, useValue: moderationService },
+        { provide: UploadsService, useValue: uploadsService },
       ],
     }).compile();
 
@@ -747,6 +777,26 @@ describe('UsersService', () => {
       // Photo and display name stay visible even on private profiles.
       expect(result.display_name).toBe('Bob');
       expect(result.profile_image_url).toBe('https://cdn.example.com/b.jpg');
+    });
+
+    // B5 — CP4a: the key correctness property for a PUBLIC endpoint — the
+    // photo gets signed for its OWNER (user-2), never the viewer (user-1),
+    // with the agreed profile TTL.
+    it('signs the profile photo for the target user, not the viewer, with the profile TTL', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'user-2', username: 'bob' });
+      profileRepo.findOne.mockResolvedValue({
+        user_id: 'user-2',
+        profile_image_url: 'https://cdn.example.com/b.jpg',
+        is_private: false,
+      });
+
+      await service.getPublicProfile('user-2', 'user-1');
+
+      expect(uploadsService.toCachedSignedReadUrl).toHaveBeenCalledWith(
+        'https://cdn.example.com/b.jpg',
+        'user-2',
+        SIGNED_READ_TTL_SECONDS.profile,
+      );
     });
 
     // Practice badges are an identity signal like display_name/photo, not

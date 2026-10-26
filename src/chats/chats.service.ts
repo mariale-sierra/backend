@@ -22,6 +22,10 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { SharedContentService } from './shared-content.service';
 import { assertOwnership } from '../auth/utils/assert-ownership';
 import {
+  SIGNED_READ_TTL_SECONDS,
+  UploadsService,
+} from '../uploads/uploads.service';
+import {
   DEFAULT_MESSAGES_LIMIT,
   MAX_MESSAGES_LIMIT,
 } from './dto/messages-query.dto';
@@ -54,6 +58,7 @@ export class ChatsService {
     private userRepo: Repository<User>,
     private notificationsService: NotificationsService,
     private sharedContentService: SharedContentService,
+    private readonly uploadsService: UploadsService,
   ) {}
 
   /**
@@ -537,7 +542,7 @@ export class ChatsService {
     const summary = new ConversationSummaryDto();
     summary.id = conversationId;
     summary.createdAt = conversation.created_at;
-    summary.otherParticipant = this.toParticipantDto(otherUser);
+    summary.otherParticipant = await this.toParticipantDto(otherUser);
     summary.lastMessage = lastMessage
       ? this.toLastMessagePreview(lastMessage)
       : null;
@@ -548,12 +553,19 @@ export class ChatsService {
     return summary;
   }
 
-  private toParticipantDto(user: User): ConversationParticipantDto {
+  private async toParticipantDto(
+    user: User,
+  ): Promise<ConversationParticipantDto> {
     const dto = new ConversationParticipantDto();
     dto.id = user.id;
     dto.username = user.username;
     dto.displayName = user.profile?.display_name ?? null;
-    dto.profileImageUrl = user.profile?.profile_image_url ?? null;
+    // B5 — CP4a: the participant's own photo, signed for its own owner.
+    dto.profileImageUrl = await this.uploadsService.toCachedSignedReadUrl(
+      user.profile?.profile_image_url,
+      user.id,
+      SIGNED_READ_TTL_SECONDS.profile,
+    );
     return dto;
   }
 

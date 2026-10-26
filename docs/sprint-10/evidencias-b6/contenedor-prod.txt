@@ -1,0 +1,49 @@
+Imagen havit-backend:b6-prod (target prod) contra Postgres 16 y Redis 7 desechables en una red Docker local.
+Se omiten las cabeceras de seguridad de helmet (sin cambios); se deja Cache-Control.
+
+$ docker exec b6-api id
+uid=1000(node) gid=1000(node) groups=1000(node)
+
+$ docker exec b6-api ps -o user,pid,cmd -e  (via /proc)
+node 1 npm start                     
+node 41 sh -c node dist/main.js 
+node 42 node dist/main.js 
+node 73 sh -c for p in /proc/[0-9]*; do u=$(stat -c %U $p); c=$(tr " " " " < $p/cmdline); [ -n "$c" ] && echo "$u $(basename $p) $c"; done 
+
+$ docker inspect --format "{{json .State.Health}}" b6-api
+{
+    "Status": "healthy",
+    "FailingStreak": 0,
+    "Log": [
+        {
+            "Start": "2026-10-25T07:19:29.241064133Z",
+            "End": "2026-10-25T07:19:29.383181842Z",
+            "ExitCode": 0,
+            "Output": ""
+        }
+    ]
+}
+
+$ curl -si http://localhost:3006/health
+HTTP/1.1 200 OK
+Cache-Control: no-store
+Content-Type: application/json; charset=utf-8
+
+{"status":"ok","uptimeSeconds":16}
+
+$ curl -si http://localhost:3006/health/ready
+HTTP/1.1 200 OK
+Cache-Control: no-store
+Content-Type: application/json; charset=utf-8
+
+{"status":"ok","checks":{"database":"up","redis":"up"}}
+
+$ curl -s -o /dev/null -w "%{http_code}" http://localhost:3006/api-docs/  (ENABLE_SWAGGER=true)
+200
+$ curl -s http://localhost:3006/api-docs-json | paths/schemas count
+openapi 3.0.0 paths 109 schemas 77 health ['/health', '/health/ready']
+
+$ psql: migraciones aplicadas
+init|1
+migrations|58
+seeds|7

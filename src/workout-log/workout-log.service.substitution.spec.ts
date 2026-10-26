@@ -13,6 +13,7 @@ import { ChallengeCycleDay } from '../challenges/entities/challenge-cycle-days.e
 import { WorkoutPostsService } from '../workout-posts/workout-posts.service';
 import { RedisCacheService } from '../cache/redis-cache.service';
 import { ExerciseSubstitutionService } from '../exercises/exercise-substitution.service';
+import { UploadsService } from '../uploads/uploads.service';
 
 const REPS = 1;
 const WEIGHT = 2;
@@ -101,6 +102,12 @@ describe('WorkoutLogService - per-user location substitutions (B7)', () => {
         { provide: getRepositoryToken(ChallengeCycleDay), useValue: {} },
         { provide: WorkoutPostsService, useValue: { create: jest.fn() } },
         { provide: DataSource, useValue: dataSource },
+        {
+          provide: UploadsService,
+          useValue: {
+            verifyUploadedObject: jest.fn().mockResolvedValue(undefined),
+          },
+        },
       ],
     }).compile();
     service = module.get(WorkoutLogService);

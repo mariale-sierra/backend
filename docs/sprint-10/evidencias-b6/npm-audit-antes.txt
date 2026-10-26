@@ -1,0 +1,32 @@
+$ npm audit --omit=dev   (development antes de B6, lockfile de origin/development)
+
+# npm audit report
+
+body-parser  2.0.0 - 2.3.0
+Severity: high
+body-parser vulnerable to Denial of Service via trailing bytes after a compressed request body - https://github.com/advisories/GHSA-27r3-jxmh-p828
+fix available via `npm audit fix`
+node_modules/body-parser
+
+js-yaml  5.0.0 - 5.4.0
+Severity: moderate
+js-yaml: maxTotalMergeKeys does not limit CPU use for empty merge sources - https://github.com/advisories/GHSA-r3ph-w7gj-g6xm
+fix available via `npm audit fix`
+node_modules/@nestjs/swagger/node_modules/js-yaml
+  @nestjs/swagger  11.4.6 - 12.0.0
+  Depends on vulnerable versions of js-yaml
+  node_modules/@nestjs/swagger
+
+multer  2.0.0 - 2.4.0
+Severity: high
+multer vulnerable to Denial of Service via a pending asynchronous fileFilter after request teardown - https://github.com/advisories/GHSA-q7qp-rjg7-q26m
+fix available via `npm audit fix`
+node_modules/multer
+  @nestjs/platform-express  10.4.18 - 10.4.22 || >=11.1.2
+  Depends on vulnerable versions of multer
+  node_modules/@nestjs/platform-express
+
+5 vulnerabilities (2 moderate, 3 high)
+
+To address all issues, run:
+  npm audit fix

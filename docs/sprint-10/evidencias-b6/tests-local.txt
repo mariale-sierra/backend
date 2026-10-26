@@ -1,0 +1,22 @@
+Postgres 16 desechable en Docker (puerto 5439), mismas variables que CI.
+
+$ npm run db:migrate
+[db] applied 66 file(s)
+
+$ env -u B2_TEST_DB_URL npx jest --ci
+Test Suites: 3 skipped, 67 passed, 67 of 70 total
+Tests:       14 skipped, 1222 passed, 1236 total
+
+$ npx jest --ci integration
+Test Suites: 3 passed, 3 total
+Tests:       14 passed, 14 total
+
+$ npm run test:e2e -- --ci   (worktree limpio de feature/sprint10-b6-cicd, sin backend/.env)
+Test Suites: 2 passed, 2 total
+Tests:       55 passed, 55 total
+
+Nota: corrido dentro de la copia de trabajo de desarrollo, que tiene un backend/.env con
+CLOUDFLARE_R2_* reales, el e2e "R14 ... imageUrl: solo https y, con R2 configurado, solo
+archivos del propio usuario" da 400 en vez de 201: ConfigModule carga ese .env y la
+verificación HEAD de B5 consulta el R2 real. Sin ese .env (worktree limpio, igual que CI)
+pasa tanto en origin/development como en esta rama: es del entorno local, no de B6.

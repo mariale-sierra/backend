@@ -12,6 +12,10 @@ import { assertPostVisibleToUser } from './workout-post-visibility.util';
 import { ModerationService } from '../openai/moderation.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { User } from '../users/entities/user.entity';
+import {
+  SIGNED_READ_TTL_SECONDS,
+  UploadsService,
+} from '../uploads/uploads.service';
 
 export const DEFAULT_COMMENTS_LIMIT = 20;
 export const MAX_COMMENTS_LIMIT = 50;
@@ -33,6 +37,7 @@ export class WorkoutPostCommentsService {
     // B4: moderator (global admin) lookup for comment deletion.
     @InjectRepository(User)
     private userRepo: Repository<User>,
+    private readonly uploadsService: UploadsService,
   ) {}
 
   private async loadCommentablePost(
@@ -83,7 +88,8 @@ export class WorkoutPostCommentsService {
       where: { id: saved.id },
       relations: { author: { profile: true } },
     });
-    return this.toCommentDto(withAuthor!);
+    const signedPhoto = await this.signCommentAuthorPhoto(withAuthor!);
+    return this.toCommentDto(withAuthor!, signedPhoto);
   }
 
   /**
@@ -133,7 +139,13 @@ export class WorkoutPostCommentsService {
     const page = hasMore ? rows.slice(0, limit) : rows;
     const nextAfter = hasMore ? page[page.length - 1].id : null;
 
-    return { comments: page.map((c) => this.toCommentDto(c)), nextAfter };
+    const signedPhotos = await Promise.all(
+      page.map((c) => this.signCommentAuthorPhoto(c)),
+    );
+    return {
+      comments: page.map((c, i) => this.toCommentDto(c, signedPhotos[i])),
+      nextAfter,
+    };
   }
 
   /**
@@ -188,7 +200,10 @@ export class WorkoutPostCommentsService {
     return new Map(rows.map((r) => [r.postId, Number(r.count)]));
   }
 
-  private toCommentDto(comment: WorkoutPostComment): CommentDto {
+  private toCommentDto(
+    comment: WorkoutPostComment,
+    profileImageUrl: string | null,
+  ): CommentDto {
     const dto = new CommentDto();
     dto.id = comment.id;
     dto.workoutPostId = comment.workout_post_id;
@@ -196,10 +211,21 @@ export class WorkoutPostCommentsService {
       id: comment.author?.id ?? comment.user_id,
       username: comment.author?.username ?? '',
       displayName: comment.author?.profile?.display_name ?? null,
-      profileImageUrl: comment.author?.profile?.profile_image_url ?? null,
+      profileImageUrl,
     };
     dto.content = comment.comment_text;
     dto.createdAt = comment.created_at;
     return dto;
+  }
+
+  /** B5 — CP4a: each comment author's own photo, signed for its own owner. */
+  private async signCommentAuthorPhoto(
+    comment: WorkoutPostComment,
+  ): Promise<string | null> {
+    return this.uploadsService.toCachedSignedReadUrl(
+      comment.author?.profile?.profile_image_url,
+      comment.user_id,
+      SIGNED_READ_TTL_SECONDS.profile,
+    );
   }
 }
