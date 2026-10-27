@@ -153,21 +153,30 @@ export class AccountDeletionService {
   }
 
   /**
-   * Photos go first: if R2 fails we abort before touching the database, so a
-   * retry still knows which user to clean. The DB side is one transaction —
-   * either everything is purged and the audit row written, or nothing is.
+   * The user's row is locked (FOR UPDATE) and re-checked as still due BEFORE any irreversible
+   * step, and the lock is held until the end. cancelDeletion() updates that same row, so:
+   *  - a cancellation committed before the lock makes this a no-op (nothing is deleted from R2);
+   *  - a cancellation arriving after the lock waits for the purge, then finds the account already
+   *    deleted and answers "no pending request" — never a successful cancel over a running purge.
+   * Photos are deleted next: if R2 fails the transaction rolls back before the database is
+   * touched, so a retry still knows which user to clean. The DB side is all-or-nothing: either
+   * everything is purged and the audit row written, or nothing is.
    */
   async purgeAccount(userId: string): Promise<void> {
-    const deletedObjects = await this.uploadsService.deleteUserObjects(userId);
-
     await this.dataSource.transaction(async (manager) => {
       const rows: Array<{ email: string }> = await manager.query(
         `SELECT email FROM havit.users
-         WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+         WHERE id = $1 AND deleted_at IS NULL
+           AND deletion_scheduled_for IS NOT NULL
+           AND deletion_scheduled_for <= now()
+         FOR UPDATE`,
         [userId],
       );
       if (rows.length === 0) return;
       const { email } = rows[0];
+
+      const deletedObjects =
+        await this.uploadsService.deleteUserObjects(userId);
 
       // Likes/comments on the user's posts go with the posts (ON DELETE
       // CASCADE); the rest are listed explicitly. workout_posts must go
