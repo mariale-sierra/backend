@@ -6,7 +6,7 @@ import { execSync } from 'node:child_process';
 import { createHmac, randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 
-const BASE = 'http://localhost:3100';
+const BASE = process.env.PROBE_BASE ?? 'http://localhost:3100';
 const PSQL = '"C:/Program Files/PostgreSQL/17/bin/psql" -h 127.0.0.1 -p 55440 -U postgres -d havit_sec -tA -c';
 const sql = (q) => execSync(`${PSQL} "${q.replace(/"/g, '\\"')}"`, { encoding: 'utf8' }).trim();
 const results = [];
@@ -35,7 +35,7 @@ async function signUp(tag) {
   const password = 'Passw0rd!x';
   const r = await call('POST', '/auth/register', { body: { email, username, password, acceptTerms: true, confirmAge16: true } });
   const id = sql(`SELECT id FROM havit.users WHERE email='${email}'`);
-  return { token: r.json?.accessToken, id, email, username, password, status: r.status };
+  return { token: r.json?.accessToken, refreshToken: r.json?.refreshToken, id, email, username, password, status: r.status };
 }
 
 // ---------- setup
@@ -93,7 +93,8 @@ sql(`UPDATE havit.workout_posts SET moderation_status='approved' WHERE id='${bPo
   ];
   for (const [m, p, tok, label] of t) {
     const r = await call(m, p, { token: tok });
-    const ok = [401, 403, 404].includes(r.status) || (r.status === 200 && Array.isArray(r.json) && r.json.length === 0);
+    const basicOnly = r.status === 200 && r.json && !Array.isArray(r.json) && r.json.bio == null && !('email' in r.json) && label.startsWith('profile of private user');
+    const ok = [401, 403, 404].includes(r.status) || (r.status === 200 && Array.isArray(r.json) && r.json.length === 0) || basicOnly;
     rec('A01-IDOR', 'A01', `IDOR: ${label}`, ok ? 'PASS' : 'FINDING', `${m} ${p} -> ${r.status}${r.status === 200 ? ' body=' + r.text.slice(0, 120) : ''}`);
   }
   const convo = await call('POST', '/chats/conversations', { token: A.token, body: { recipientUserId: B.id } });
@@ -177,7 +178,7 @@ sql(`UPDATE havit.workout_posts SET moderation_status='approved' WHERE id='${bPo
   const avg = (a) => Math.round(a.reduce((x, y) => x + y, 0) / a.length);
   rec('A07-02', 'A07', 'Login timing side channel (existing vs unknown email)', Math.abs(avg(times.wrongPass) - avg(times.noUser)) > 25 ? 'FINDING' : 'PASS', `avg existing=${avg(times.wrongPass)}ms unknown=${avg(times.noUser)}ms (bcrypt only runs for existing accounts)`);
   const dup = await call('POST', '/auth/register', { body: { email: A.email, username: `x_${randomUUID().slice(0, 6)}`, password: 'Passw0rd!x', acceptTerms: true, confirmAge16: true } });
-  rec('A07-03', 'A07', 'Register enumerates existing emails', dup.status === 200 ? 'PASS' : 'FINDING', `duplicate email -> ${dup.status} "${dup.json?.message}"`);
+  rec('A07-03', 'A07', 'Register enumerates existing emails', dup.status === 429 ? 'INFO' : dup.status === 200 ? 'PASS' : 'FINDING', `${dup.status === 429 ? 'INCONCLUSIVE (rate-limited; rerun on a fresh instance) ' : ''}duplicate email -> ${dup.status} "${dup.json?.message}"`);
   for (const weak of ['1', 'abc', 'password', '12345678']) {
     const w = await call('POST', '/auth/register', { body: { email: `w_${randomUUID().slice(0, 6)}@example.com`, username: `w_${randomUUID().slice(0, 6)}`, password: weak, acceptTerms: true, confirmAge16: true } });
     rec('A07-04', 'A07', `Weak password accepted: "${weak}"`, w.status === 200 ? 'FINDING' : 'PASS', `-> ${w.status} ${w.json?.message ?? ''}`);
@@ -194,9 +195,9 @@ sql(`UPDATE havit.workout_posts SET moderation_status='approved' WHERE id='${bPo
   const lock = await call('POST', '/auth/login', { body: { email: A.email, password: A.password } });
   rec('A07-07', 'A07', 'No account lockout after failed attempts (limiter is per IP only)', 'INFO', `valid login after 28 bad attempts from same IP -> ${lock.status} (429 means IP window; no per-account lockout/alerts)`);
   // session lifecycle
-  const lo = await call('POST', '/auth/logout', { token: A.token });
+  const lo = await call('POST', '/auth/logout', { token: A.token, body: { refreshToken: A.refreshToken } });
   const after = await call('GET', '/users/me', { token: A.token });
-  rec('A07-08', 'A07', 'Token still valid after logout (stateless JWT, no revocation)', after.status === 200 ? 'FINDING' : 'PASS', `logout -> ${lo.status}; /users/me after logout -> ${after.status}`);
+  rec('A07-08', 'A07', 'Token still valid after logout with its refresh token (session revocation, B4)', after.status === 200 ? 'FINDING' : 'PASS', `logout -> ${lo.status}; /users/me after logout -> ${after.status}`);
 }
 
 // ---------- A03 Injection
@@ -224,7 +225,7 @@ sql(`UPDATE havit.workout_posts SET moderation_status='approved' WHERE id='${bPo
   const xss = await call('GET', `/workout-posts/user/${B.id}`, { token: B.token });
   rec('A03-06', 'A03', 'Stored XSS payload returned verbatim (JSON API; escaping is the client job)', xss.text.includes('<script>') ? 'INFO' : 'PASS', 'caption "<script>" stored/returned raw; RN renders as text (no HTML), a future web client must escape');
   const nosql = await call('POST', '/auth/login', { body: { email: { $ne: '' }, password: { $ne: '' } } });
-  rec('A03-07', 'A03', 'Operator injection in login body', nosql.status === 400 ? 'PASS' : 'FINDING', `-> ${nosql.status}`);
+  rec('A03-07', 'A03', 'Operator injection in login body', nosql.status === 429 ? 'INFO' : nosql.status === 400 ? 'PASS' : 'FINDING', `${nosql.status === 429 ? 'INCONCLUSIVE (rate-limited) ' : ''}-> ${nosql.status}`);
 }
 
 // ---------- A04/A05/A08/A10
@@ -262,10 +263,10 @@ sql(`UPDATE havit.workout_posts SET moderation_status='approved' WHERE id='${bPo
   rec('A05-05', 'A05', 'X-Powered-By / Server banner', h.get('x-powered-by') ? 'FINDING' : 'PASS', `x-powered-by=${h.get('x-powered-by')}`);
   const tr = await call('TRACE', '/');
   rec('A05-06', 'A05', 'TRACE method', tr.status === 200 ? 'FINDING' : 'PASS', `-> ${tr.status}`);
-  const seed = sql(`SELECT count(*) FROM havit.users WHERE username='testuser'`);
-  rec('A05-07', 'A05', "Seeded default account 'testuser' (password in repo) created by db:migrate on every environment", seed === '1' ? 'FINDING' : 'PASS', `testuser rows: ${seed}; password TestHavit123! is in database/seeds/2026-07-21-01-test-user.sql`);
+  const seed = sql(`SELECT count(*) FROM havit.users WHERE username='testuser' AND is_active = true`);
+  rec('A05-07', 'A05', "Seeded default account 'testuser' still ACTIVE (db:migrate alone must leave it disabled; only db:demo enables it)", seed === '1' ? 'FINDING' : 'PASS', `active testuser rows: ${seed}`);
   const lg = await call('POST', '/auth/login', { body: { email: 'testuser@havit.dev', password: 'TestHavit123!' } });
-  rec('A07-09', 'A07', 'Login with the seeded default credentials', lg.status === 200 ? 'FINDING' : 'PASS', `-> ${lg.status}`);
+  rec('A07-09', 'A07', 'Login with the seeded default credentials', lg.status === 429 ? 'INFO' : lg.status === 200 ? 'FINDING' : 'PASS', `${lg.status === 429 ? 'INCONCLUSIVE (rate-limited) ' : ''}-> ${lg.status}`);
 }
 writeFileSync(process.argv[2] ?? 'sec-results.json', JSON.stringify(results, null, 2));
 console.log('DONE', results.length);

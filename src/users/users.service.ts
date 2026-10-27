@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { escapeLike } from '../common/escape-like.util';
 import { Between, ILike, In, IsNull, Not, Repository } from 'typeorm';
 import { BannedUserResponseDto } from './dto/banned-user-response.dto';
 import { User } from './entities/user.entity';
@@ -389,7 +390,7 @@ export class UsersService {
 
     const users = await this.userRepo.find({
       where: {
-        username: ILike(`%${q}%`),
+        username: ILike(`%${escapeLike(q)}%`),
         is_active: true,
         deletion_requested_at: IsNull(),
         id: Not(viewerUserId),

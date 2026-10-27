@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
+import { escapeLike } from '../common/escape-like.util';
 import { Exercise } from './entities/exercise.entity';
 import { UpdateExerciseRelationsDto } from './dto/update-exercise-relations.dto';
 import { CreateExerciseDto } from './dto/create-exercise.dto';
@@ -143,7 +144,7 @@ export class ExercisesService {
           SELECT 1 FROM havit.exercise_translations et
           WHERE et.exercise_id = exercise.id AND et.name ILIKE :search
         )`,
-        { search: `%${query.search}%` },
+        { search: `%${escapeLike(query.search)}%` },
       );
     }
 
