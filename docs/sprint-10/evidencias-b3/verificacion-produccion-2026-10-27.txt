@@ -1,0 +1,32 @@
+# Verificación en producción — 2026-10-27 17:53:36 UTC
+# Comandos ejecutados desde fuera de la VM (sin credenciales; solo lecturas).
+
+$ curl -sS -o /dev/null -w "%{http_code} ssl_verify=%{ssl_verify_result}\n" https://havit-api.canadacentral.cloudapp.azure.com/health
+200 ssl_verify=0
+
+$ curl -sS https://havit-api.canadacentral.cloudapp.azure.com/health/ready
+{"status":"ok","checks":{"database":"up","redis":"up"}}
+
+$ curl -sS -o /dev/null -w "%{http_code} -> %{redirect_url}\n" http://havit-api.canadacentral.cloudapp.azure.com/health
+308 -> https://havit-api.canadacentral.cloudapp.azure.com/health
+
+$ echo | openssl s_client -connect havit-api.canadacentral.cloudapp.azure.com:443 -servername havit-api.canadacentral.cloudapp.azure.com | openssl x509 -noout -subject -issuer -dates
+subject=CN=havit-api.canadacentral.cloudapp.azure.com
+issuer=C=US, O=Let's Encrypt, CN=YE1
+notBefore=Oct 26 20:45:04 2026 GMT
+notAfter=Jan 24 20:45:03 2027 GMT
+
+$ curl -sS -o /dev/null -w "%{http_code}\n" http://20.63.84.1:3000/health   # puerto 3000 directo, HTTP plano
+200
+
+# B4 desplegado: rutas nuevas responden (400 = falta refreshToken en el cuerpo, no 404)
+$ curl -X POST -d '{}' https://havit-api.canadacentral.cloudapp.azure.com/auth/refresh
+400
+$ curl -X POST -d '{}' https://havit-api.canadacentral.cloudapp.azure.com/auth/logout
+204
+
+# B4 política de contraseñas en producción (registro con '12345678')
+"Password must be at least 10 characters"
+
+# Swagger cerrado (ENABLE_SWAGGER sin definir)
+/api-docs -> 404

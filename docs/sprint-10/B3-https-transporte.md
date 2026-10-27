@@ -23,6 +23,21 @@ El API queda listo para publicarse por HTTPS: Caddy hace de proxy inverso en `ra
 | Flujos críticos funcionan | ✅ login/registro/retos sobre HTTPS en local; ⏳ en dispositivo | `flujo-https-pgbouncer.txt` |
 | Pruebas relevantes pasan | ✅ | Sección 5 |
 
+### 1.1 Actualización 2026-10-27: estado en producción
+
+La infraestructura ya está aprovisionada y desplegada. Se verificó desde fuera de la VM, sin credenciales, en `evidencias-b3/verificacion-produccion-2026-10-27.txt`:
+
+| Criterio | Estado al 27/10 | Evidencia |
+|---|---|---|
+| Certificado TLS del API válido y verificable | ✅ | `CN=havit-api.canadacentral.cloudapp.azure.com`, emisor Let's Encrypt (YE1), `ssl_verify_result=0`. **Vence el 2027-01-24**; Caddy lo renueva solo. |
+| HTTP redirige a HTTPS en la VM | ✅ | `http://…/health` → `308` a `https://…/health` |
+| App apunta al API por HTTPS | ✅ en configuración | `frontend/.env` y los perfiles `preview`/`production` de `eas.json` usan `https://havit-api.canadacentral.cloudapp.azure.com` |
+| Azure PostgreSQL valida el certificado | ✅ indirecto | `/health/ready` responde `database: up` con la verificación activa por defecto. No se puede leer el `.env` de la VM desde aquí para descartar un `DB_SSL_REJECT_UNAUTHORIZED=false` de rollback. |
+| Puerto 3000 no expuesto públicamente | ❌ **Abierto** | `http://20.63.84.1:3000/health` → `200`: el API sigue usable por HTTP plano, sin pasar por Caddy. El limitador no se puede evadir (`TRUST_PROXY` ignora el `X-Forwarded-For` de quien entra directo), pero credenciales y tokens enviados ahí viajan en claro. |
+| APK HTTPS distribuido | ⏳ | Todavía no hay un APK nuevo distribuido (confirmado por el equipo el 27/10). Por eso el 3000 sigue abierto, ver 4.5/4.6. |
+
+**Criterio de aceptación al 27/10: PARCIAL.** Solo falta la transición de los APK y cerrar el 3000. Para cerrarlo no hace falta cambiar código: en la VM, `BACKEND_BIND_ADDR=127.0.0.1` en `raiz/.env` + `docker-compose up -d` (el health check del deploy usa `localhost:3000` y sigue funcionando), y quitar la regla del 3000 en el NSG. Después, repetir `curl -m 10 http://20.63.84.1:3000/health`: debe fallar por tiempo de espera o conexión rechazada.
+
 ## 2. Decisiones técnicas
 
 | Decisión | Alternativas descartadas | Por qué |

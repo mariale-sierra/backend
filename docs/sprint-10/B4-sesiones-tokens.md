@@ -4,7 +4,7 @@ Referencia principal de B4 para los dos repositorios. El documento hermano `fron
 
 Este documento incluye las **correcciones posteriores a la auditoría independiente de B4** (§11). Entre ellas está la del defecto crítico B4-02-F01: un logout concurrente con una rotación dejaba viva la sesión.
 
-> Nada de esto está desplegado. La migración está **preparada** y solo se aplicó en una base local desechable (`havit_b4_test` en `localhost`). No se tocó Azure ni el servidor.
+> **Actualización 2026-10-27: B4 está en producción.** Entró a `main` con el PR #26 (`034d994`) y el job `deploy` terminó el **2026-10-24 06:02:25 UTC** (run *Deploy to server* de ese commit). El arranque aplica la migración con `db:migrate`. Verificado desde fuera de la VM: `POST /auth/refresh` → `400` y `POST /auth/logout` → `204` (antes eran `404`), y el registro rechaza `12345678` con "Password must be at least 10 characters" (`evidencias-b3/verificacion-produccion-2026-10-27.txt`). El texto de abajo describe el estado al 2026-10-23, antes del despliegue.
 
 ## 1. Estado de cada requisito
 
@@ -167,7 +167,7 @@ FROM havit.users u WHERE u.id = $1
 
 - Un token emitido antes de B4 (`{sub, email, username}`, 7 días, **sin `sid`**) sigue pasando el guard con la comprobación de cuenta de siempre, **hasta que vence**.
 - **No obtiene privilegios de renovación:** no es un refresh token. `/auth/refresh` lo rechaza (400 por longitud, o 401), y la app sin refresh token guardado cierra sesión al primer 401 sin intentar renovar.
-- **Fecha límite = fecha y hora del despliegue del backend con B4 + 7 días.** Ejemplo: si entra en producción el 2026-10-26 a las 18:00 UTC, desde el **2026-11-02 a las 18:00 UTC** ya no queda ningún token de 7 días válido. Anotar aquí al desplegar: **despliegue: _pendiente_ → retiro: _pendiente_ + 7 días**.
+- **Fecha límite = fecha y hora del despliegue del backend con B4 + 7 días.** Ejemplo: si entra en producción el 2026-10-26 a las 18:00 UTC, desde el **2026-11-02 a las 18:00 UTC** ya no queda ningún token de 7 días válido. **Despliegue: 2026-10-24 06:02 UTC → retiro: 2026-10-31 06:02 UTC.** Desde esa hora ya no queda ningún token de 7 días válido.
 - Pasada esa fecha, se puede quitar la rama sin `sid` del guard.
 
 | Backend \ App | App vieja (sin B4) | App con B4 |
