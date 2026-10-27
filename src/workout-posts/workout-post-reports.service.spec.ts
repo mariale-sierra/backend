@@ -115,6 +115,7 @@ function buildHarness() {
   let nextReportId = 1;
   let nextPenaltyId = 1;
   let failPenaltyInsert = false;
+  const lockCalls: string[] = [];
 
   const tableFor = (entity: unknown): Row[] => {
     if (entity === ContentReport) return store.reports;
@@ -244,6 +245,10 @@ function buildHarness() {
       return Promise.resolve({ affected: rows.length });
     }),
     query: jest.fn((sql: string, params: unknown[]) => {
+      if (sql.includes('pg_advisory_xact_lock')) {
+        lockCalls.push(String(params[0]));
+        return Promise.resolve([]);
+      }
       if (sql.includes('UPDATE havit.users')) {
         // Suspension: GREATEST(existing, now + hours); never shortens a longer one.
         const [userId, hours] = params as [string, number];
@@ -331,6 +336,7 @@ function buildHarness() {
 
   return {
     service,
+    lockCalls,
     postRepo,
     notificationsService,
     uploadsService,
@@ -625,6 +631,17 @@ describe('WorkoutPostReportsService', () => {
   });
 
   describe('repeat resolution / retries', () => {
+    it('takes the per-target advisory lock before locking the report row (deadlock guard)', async () => {
+      await h.service.create(REPORTER, {
+        targetType: 'post',
+        targetId: POST_ID,
+        reason: 'violence',
+      });
+      h.lockCalls.length = 0;
+      await h.service.resolve(1, ADMIN, { action: 'hide', penalize: true });
+      expect(h.lockCalls).toEqual([`report-target:post:${POST_ID}`]);
+    });
+
     it('records no strike and says nothing was hidden when the target is already hidden', async () => {
       await h.service.create(REPORTER, {
         targetType: 'post',

@@ -327,6 +327,17 @@ export class WorkoutPostReportsService {
 
     const result = await this.dataSource.transaction<ResolveReportResultDto>(
       async (manager) => {
+        // Deadlock guard: two admins resolving different reports of the SAME content used to lock
+        // their own report, update the shared target, then each wait for the other's report row.
+        // Every resolver now first takes a transaction-scoped advisory lock on the target, so they
+        // run one after the other and report rows are only locked inside that critical section.
+        const unlocked = await manager.findOne(ContentReport, {
+          where: { id: reportId },
+        });
+        if (!unlocked) throw new NotFoundException('Report not found');
+        await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+          `report-target:${unlocked.target_type}:${unlocked.target_id}`,
+        ]);
         const report = await manager.findOne(ContentReport, {
           where: { id: reportId },
           lock: { mode: 'pessimistic_write' },
