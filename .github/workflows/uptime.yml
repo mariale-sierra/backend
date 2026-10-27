@@ -1,0 +1,52 @@
+# B12 (sprint 10): monitoreo externo de disponibilidad del API.
+#
+# Cada 5 minutos pide /health (proceso vivo) y /health/ready (base de datos y
+# Redis) por HTTPS desde fuera de la VM. Si alguna falla, el job falla y GitHub
+# lo notifica por correo. Ojo: los workflows programados solo corren desde la
+# rama por defecto (main) y GitHub avisa de sus fallos a quien modificó por
+# última vez el `cron`. GitHub puede retrasar las ejecuciones programadas en
+# horas de carga, así que esto es una línea base, no un SLA.
+#
+# Objetivo mensual del 99 %: 30 días × 24 h × 1 % ≈ 7.2 h de caída al mes.
+# El historial de ejecuciones (Actions → Uptime) es la evidencia.
+name: Uptime
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      API_URL: ${{ vars.API_URL || 'https://havit-api.canadacentral.cloudapp.azure.com' }}
+    steps:
+      - name: GET /health y /health/ready
+        run: |
+          status=0
+          for path in /health /health/ready; do
+            rm -f /tmp/body
+            out=$(curl -sS -o /tmp/body -w '%{http_code} %{time_total}' \
+              --max-time 15 --retry 2 --retry-delay 5 --retry-all-errors \
+              "$API_URL$path") || out="000 -"
+            code=${out%% *}
+            secs=${out##* }
+            echo "$path -> HTTP $code en ${secs}s: $(head -c 200 /tmp/body 2>/dev/null)"
+            echo "| \`$path\` | $code | ${secs}s |" >> rows.md
+            [ "$code" = 200 ] || status=1
+          done
+          {
+            echo "| Ruta | HTTP | Tiempo |"
+            echo "|---|---|---|"
+            cat rows.md
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
