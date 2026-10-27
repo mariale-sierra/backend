@@ -164,6 +164,7 @@ Esto requiere iniciar Docker Desktop y descargar la imagen (~1 GB). El reporte H
 ### Herramientas automatizadas
 | Herramienta | Para qué |
 |---|---|
+| **GitHub Actions** (`uptime.yml`) | Monitoreo de `/health` y `/health/ready` cada 5 minutos por HTTPS, con aviso por correo si falla (corre solo desde `main`) |
 | **GitHub Actions** (`ci.yml`) | Job `tests`: levanta `postgres:16`, aplica las migraciones con el **mismo runner que producción**, corre unitarias con cobertura, integración de servicios y API, genera el resumen y **guarda la evidencia** (artefacto `test-evidence`) |
 | | Job `image`: construye la imagen de producción, arranca el contenedor, espera el `HEALTHCHECK` y comprueba que no corre como root |
 | | Job `deploy`: solo en `push` a `main` y **solo si `tests` e `image` pasaron**; actualiza `backend` y `raiz` en la VM |
@@ -174,7 +175,7 @@ Esto requiere iniciar Docker Desktop y descargar la imagen (~1 GB). El reporte H
 
 Historial del pipeline (`git log -- .github/workflows`): `06/10` primer CI con pruebas de integración y regresión;
 `06/10` pruebas en push a cualquier rama y todas las suites aunque una falle; `25/10` `/health` y un único workflow que no
-despliega si fallan las pruebas o la imagen; `26/10` limpieza de imágenes para no quedarse sin disco.
+despliega si fallan las pruebas o la imagen; `26/10` limpieza de imágenes para no quedarse sin disco; `27/10` monitoreo de disponibilidad (`uptime.yml`).
 
 ### Limitaciones
 - **El frontend no tiene workflow de CI** (`frontend/.github` no existe); sus 2 291 pruebas se corren a mano.
@@ -191,20 +192,22 @@ para este corte.
 
 | # | Área | Estado | Evidencia | Qué falta |
 |---|---|---|---|---|
-| 1 | Transporte seguro | **Parcial** | `raiz` en `origin/development` incluye `caddy/Caddyfile`; `app.config.js` exige https en release; APK sin tráfico en claro; TLS a la BD verificado en código | `raiz` local está en `main`, 5 commits atrás: confirmar qué quedó desplegado. HTTPS real sin probar contra el servidor |
+| 1 | Transporte seguro | **Parcial** | **Verificado en producción el 27/10** (`docs/sprint-10/evidencias-b3/verificacion-produccion-2026-10-27.txt`): certificado Let's Encrypt válido, `http://` redirige con 308 a `https://`, Swagger cerrado, B4 desplegado; `app.config.js` exige https en release; TLS a la BD verificado en código | El puerto 3000 directo sigue respondiendo por HTTP plano (`http://20.63.84.1:3000/health` → 200): cerrarlo en el firewall |
 | 2 | Sesiones y autenticación | **Cumplido** (salvo M2b) | Access de 15 min + refresh rotativo, logout que revoca, política de contraseñas, mensajes uniformes, 5 registros/IP/10 min; 55 pruebas de API | Bloqueo por cuenta tras intentos fallidos (M2b) |
 | 3 | Correcciones Neurolab | **Parcial** | Hechas las de progreso/foto (E-5), ubicación (E-6), recompensa (E-8), botones (E-9) | Sin corregir: **crear un reto (E-4, 2,50/5)**, abandonar un reto (E-7), colores (E-10) |
 | 4 | Cumplimiento legal | **Cumplido** (salvo abogado) | Plazo **7 días** con prueba contra BD real; datos de contacto, regiones y país completos | Aprobación del abogado (dependencia externa) |
 | 5 | Subida de imágenes | **Cumplido** | La firma incluye `ContentType` y `ContentLength` con máximo de 5 MB, verificación de bytes después de subir, lecturas con URL firmada | — |
 | 6 | Pipeline de entrega | **Parcial** | Despliegue solo si pasan pruebas e imagen; imagen multi-etapa no-root con `HEALTHCHECK` y `npm ci`; semillas de desarrollo fuera de producción | El despliegue aún hace `docker-compose down` y luego `up -d` (hay caída); sin `npm audit` ni Dependabot |
-| 7 | Observabilidad y disponibilidad | **No cumplido** | `/health` y `/health/ready` existen | `LoggingInterceptor` solo registra método, ruta, estado y duración: **sin usuario, IP ni id de petición**; sin Azure Monitor, alertas ni monitor externo |
+| 7 | Observabilidad y disponibilidad | **Parcial** | `/health` y `/health/ready`; workflow `Uptime` (`.github/workflows/uptime.yml`) cada 5 min con aviso por correo de GitHub; línea base del 27/10 | `LoggingInterceptor` solo registra método, ruta, estado y duración: **sin usuario, IP ni id de petición**; sin Azure Monitor ni alertas por picos de 401/429/5xx; el monitor corre solo desde `main` |
 | 8 | Backups y pruebas no funcionales | **No cumplido** | Ensayo de restauración **local**; respaldo de Azure en la VM; batería de seguridad y carga manuales | Backups cada 24 h programados, restauración real desde Azure, carga en staging con umbrales, ZAP recurrente, muestra real de OpenAI/R2 |
 | 9 | Dependencias | **Parcial** | Backend: **0** vulnerabilidades de producción | Frontend: 7 (4 altas, de Expo), requiere subir Expo/React Native |
 | 10 | Estructura y mantenimiento | **Parcial** | `console.log`: 0 en backend y 0 en frontend; `any`: 9 en backend y 20 en frontend (no se midió el punto de partida) | 5 servicios por encima de 500 líneas (el mayor, 1 863); no hay ayudante seguro para SQL |
 | 11 | Cobertura | **Cumplido** (backend) | Backend **80,7 %**, umbral fijado; el frontend ahora se mide también sobre componentes y pantallas (58 %) | Meta y CI propios del frontend |
-| 12 | Decisiones de producto | **No cumplido** | Etiquetas de participantes existen | Sin decidir/implementar: retos privados en Explorar, quién ve las rutinas de un reto privado, notificación al reabrir |
+| 12 | Decisiones de producto | **Cumplido** | Documentadas en `docs/sprint-10/B11-B12-cambios-de-codigo.md`: los retos privados siguen en Explorar; un no miembro no ve la rutina (`routine_hidden`); reabrir notifica (`challenge_reopened`); las etiquetas quedan como ticket del próximo sprint | `GET /challenges/:id/users` sigue visible para cualquier usuario con sesión |
 
-**Resumen:** Cumplidos **4** (2, 4, 5, 11) · Parciales **5** (1, 3, 6, 9, 10) · No cumplidos **3** (7, 8, 12).
+**Resumen:** Cumplidos **5** (2, 4, 5, 11, 12) · Parciales **6** (1, 3, 6, 7, 9, 10) · No cumplidos **1** (8).
+
+(Los puntos 1, 7 y 12 se actualizaron con el trabajo de B11/B12 subido el 27/10 por otra persona del equipo: commits `1f2f9a7`, `6c25d4f` y `7fc053f`.)
 
 ### Deuda del sprint anterior (5 compromisos)
 | Compromiso | Estado | Nota |
@@ -216,8 +219,8 @@ para este corte.
 | Cobertura no funcional | **Parcial** | Carga y ZAP siguen manuales |
 
 ### Por qué debía estar cerrado y no lo está
-- **#7 (logs con usuario/IP/id)** era la base para atribuir un ataque (M7 del AUDIT, abierto desde el 13/10). Sin esto,
-  los 10 puntos de seguridad cerrados no se pueden demostrar en producción.
+- **#7 (logs con usuario/IP/id)** era la base para atribuir un ataque (M7 del AUDIT, abierto desde el 13/10). El monitor de
+  disponibilidad ya existe, pero sin usuario, IP e id de petición en los logs un ataque no se puede atribuir.
 - **#6 (despliegue sin caída)** y **#8 (backups automáticos)** son infraestructura: dependen de la VM y de Azure, no del
   código, y por eso quedaron fuera de lo verificable aquí.
 - **#3 (Neurolab)** tiene un dato claro que no se corrigió: crear un reto sacó 2,50/5, el más bajo de la encuesta, y es el

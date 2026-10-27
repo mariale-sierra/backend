@@ -39,14 +39,14 @@ que tenía en el informe del sprint pasado.
 | 15 | FAQ | Parcial | **Cumple** | Ayuda/FAQ de Sprint 10 B9 dentro de `help.tsx` | Ampliar según Neurolab |
 | 16 | Cobertura de pruebas unitarias ≥ 80 % | Parcial | **Parcial** | **Backend 80,7 %** (cumple, umbral fijado en `package.json`); **frontend 58,05 %** (§5) | Meta y CI del frontend |
 | 17 | Adaptabilidad de dificultad/pantalla | Parcial | **Sin evidencia** | No encontré ningún código de "dificultad" en backend ni frontend | Definir el requisito (¿nivel del reto? ¿responsive?) y probarlo |
-| 18 | Configuración de notificaciones y panel de administración | Parcial | **Parcial** | Notificaciones con preferencias (`frontend/app/notification-settings.tsx`); panel de moderación y bans (`frontend/app/profile/moderation.tsx`) | `reopenChallenge` no notifica (§6) |
+| 18 | Configuración de notificaciones y panel de administración | Parcial | **Cumple** | Notificaciones con preferencias (`frontend/app/notification-settings.tsx`); panel de moderación y bans (`frontend/app/profile/moderation.tsx`); `reopenChallenge` ya notifica con el tipo `challenge_reopened` (`docs/sprint-10/B11-B12-cambios-de-codigo.md`, commit `1f2f9a7`) | — |
 | 19 | Apariencia: paleta neutra / lenguaje inclusivo | Sin prueba | **Sin evidencia** | No evaluado | Revisión de diseño |
 | 20 | Apariencia: tiempo de renderizado < 4 s | Sin prueba | **Sin evidencia** | Sin medición dedicada | Medir en dispositivo |
 | 21 | Apariencia: consistencia visual | Sin prueba | **Parcial** | Tokens de tema y componentes compartidos (`frontend/constants/theme`, `components/ui`); encuesta: "visualmente atractiva" 4,00/5 (E-11) | Evaluación visual en dispositivo |
 | 22 | Usabilidad: navegación sin ayuda | Parcial | **Parcial** | Neurolab: crear cuenta 4,75, Home 4,00, encontrar retos 4,25 (`frontend/docs/sprint-10/B2-navegacion-comprension.md` §9.3, 4 participantes) | Repetir tras las correcciones |
 | 23 | Usabilidad: satisfacción | Parcial | **Parcial** | Neurolab: atractiva 4,00, motivaría a seguir 4,00 (E-11, E-12) | Muestra mayor |
 | 24 | Usabilidad: primer reto sin asistencia | Parcial | **Parcial** | Neurolab: "comprendí cómo crear un reto" **2,50** (E-4, el más bajo; sin corrección en B2) | Corregir y volver a medir |
-| 25 | Disponibilidad ≥ 99 % mensual | Sin prueba | **Planificado** | `/health` y `/health/ready` existen y CI los prueba; no hay monitor externo | Monitor (UptimeRobot/Better Stack/Azure Monitor) durante un mes; 99 % ≈ 7,2 h de caída/mes |
+| 25 | Disponibilidad ≥ 99 % mensual | Sin prueba | **Parcial** | `/health` y `/health/ready` existen; el workflow `Uptime` (`.github/workflows/uptime.yml`, commit `6c25d4f`) consulta ambos cada 5 min por HTTPS; línea base del 27/10 17:53 UTC: `/health` 200 y `/health/ready` con base de datos y Redis `up` (`docs/sprint-10/evidencias-b3/verificacion-produccion-2026-10-27.txt`) | El workflow programado **solo corre desde `main`**; medir un mes completo. 99 % ≈ 7,2 h de caída/mes |
 | 26 | Portabilidad: Android/iOS | Sin prueba | **Parcial** | EAS Build con perfiles `development/preview/production` y https obligatorio en release (`frontend/eas.json`, `app.config.js`) | Validar en Android 10 e iOS 15 reales |
 | 27 | Legal: normativa local de privacidad | Sin prueba | **Parcial** | Documentos legales con datos completos (`frontend/constants/legal/legalDocs.ts`), consentimiento 16+ y eliminación con auditoría | **Revisión del abogado** (dependencia externa, §7) |
 | 28 | Confiabilidad: backups automáticos cada 24 h | Sin prueba | **Parcial** | Ensayo local 60/60 tablas en 0,54 s; respaldo de Azure en la VM (`B11-CONFIABILIDAD-BACKUPS-INTEGRACIONES.md`) | Programar cada 24 h y restaurar de verdad desde Azure |
@@ -57,8 +57,8 @@ que tenía en el informe del sprint pasado.
 | 33 | Conexión estable | Sin prueba | **Parcial** | Timeout de 30 s y manejo de errores de red en `frontend/services/api.ts` | Pruebas con datos móviles |
 | 34 | Exclusividad móvil / orientación vertical / sensores | Sin prueba | **Parcial** | `"orientation": "portrait"` en `frontend/app.json` | Validar en dispositivo |
 
-**Resumen:** Cumplen **10** · Parciales **15** · No cumple **1** · Sin evidencia **4** (17, 19, 20, 29) · Planificados
-**4** (25, 30, 31, 32). Total 34.
+**Resumen:** Cumplen **11** · Parciales **15** · No cumple **1** · Sin evidencia **4** (17, 19, 20, 29) · Planificados
+**3** (30, 31, 32). Total 34. (El 18 pasó a Cumple y el 25 a Parcial por el trabajo de B11/B12 del 27/10.)
 
 Cambios frente al informe anterior: **8** (términos) y **9** (eliminación ≤ 7 días) pasaron de *No cumple* a *Cumple*;
 **13** y **15** (ayuda y FAQ) pasaron de *Parcial* a *Cumple*; la seguridad ya no tiene hallazgos abiertos en la batería
@@ -95,7 +95,7 @@ tal cual (el cliente no renderiza HTML).
 
 | ID | Estado | Evidencia de esta sesión |
 |---|---|---|
-| H1 HTTPS | **Parcial** | Caddy + redirección y `app.config.js` exige https en release (código); el despliegue real no se verificó. Prueba pendiente en el ambiente desplegado |
+| H1 HTTPS | **Parcial** | Verificado en producción el 27/10 (`verificacion-produccion-2026-10-27.txt`): certificado de Let's Encrypt válido hasta el 24/01/2027, `http://` redirige con 308 a `https://`, Swagger cerrado (404) y B4 desplegado. **Sigue abierto el puerto 3000 directo por HTTP plano** (`http://20.63.84.1:3000/health` responde 200) |
 | H2 `testuser` | **Cerrado** | Migración `2026-10-13-02-disable-seeded-testuser.sql`; `db:migrate` deja `is_active=false` (A05-07 PASS, A07-09 → 401) |
 | H3 Retos sin sesión | **Cerrado** | A01-02/04/05 PASS |
 | H4 `imageUrl` | **Cerrado** | A10-01 PASS (5 payloads) y validación de ruta normalizada (H-18, `upload-url.util.spec.ts`) |
@@ -184,10 +184,10 @@ cd frontend && npx jest --ci --coverage --coverageReporters=json-summary --cover
 | Datos legales | Ale Sierra | 2026-10-27 | Responsable HAVIT, domicilio Ciudad de Guatemala, Guatemala; contacto de privacidad y soporte `havit_support@gmail.com`; Azure y R2 en Canadá; copias de seguridad hasta 7 días; respuesta a derechos en 30 días; leyes de Guatemala |
 | Línea de ayuda | Ale Sierra / asistente | 2026-10-27 | Se citó **911 (emergencias)**. Se indicó "123" (bomberos) con duda; no se usó. **Verificar el número** antes de publicar |
 | `LEGAL_VERSION` | **pendiente** | — | El texto legal cambió (plazo de 7 días y datos). Subir `LEGAL_VERSION` obligaría a todos los usuarios a aceptar de nuevo (`terms-version.ts` en backend debe coincidir). No se subió: decidir con el abogado |
-| Retos privados en Explorar | **pendiente** | — | Hoy se listan a usuarios con sesión para poder solicitar unirse (H3). Decidir con qué datos |
-| Rutinas de un reto privado (`GET /routine/:id`) | **pendiente** | — | Hoy lo lee cualquier usuario autenticado (A01-08) |
-| Etiquetas de participantes | **pendiente** | — | Existen (`workout_post_tagged_users`); decidir si se notifica al etiquetado y dónde se ven |
-| Aviso al reabrir un reto | **pendiente** | — | `reopenChallenge` no notifica; sería un espejo de `notifyChallengeClosed` |
+| Retos privados en Explorar | esteban-dlp (B11) | 2026-10-27 | **Siguen en Explorar** con nombre, foto, duración, miembros y autor, porque HU-18 (solicitar ingreso) necesita encontrarlos |
+| Rutinas de un reto privado | esteban-dlp (B11) | 2026-10-27 | **Decidido e implementado**: un no miembro recibe solo la forma del ciclo (`day_number`, `is_rest_day`) con `routine_hidden: true` (commit `1f2f9a7`). Pendiente de decidir: `GET /challenges/:id/users` sigue visible para cualquier usuario con sesión. El caso A01-08 de la batería (`GET /routine/:id`) sigue como INFO: esa ruta ya era del creador, hay que revisarlo con el nuevo cambio |
+| Etiquetas de participantes | esteban-dlp (B11) | 2026-10-27 | **Sin cambios este sprint**; queda como ticket del siguiente (hoy solo se etiqueta a participantes del reto y nadie se autoetiqueta) |
+| Aviso al reabrir un reto | esteban-dlp (B11) | 2026-10-27 | **Implementado**: `PATCH /challenges/:id/reopen` notifica al creador y a los participantes activos (`challenge_reopened`) |
 
 ## 7. Dependencias externas
 
@@ -195,7 +195,7 @@ cd frontend && npx jest --ci --coverage --coverageReporters=json-summary --cover
 |---|---|---|---|
 | Aprobación legal de Términos y Privacidad (incluye `LEGAL_VERSION`) | Abogado | 2026-10-27 | **Pendiente**; no marcar completa hasta recibirla |
 | Verificar línea de ayuda 911 para Guatemala | Ale Sierra | 2026-10-27 | Pendiente |
-| Monitor externo de disponibilidad sobre `/health` (UptimeRobot/Better Stack/Azure Monitor) | Ale Sierra | 2026-10-27 | Pendiente: requiere cuenta |
+| Monitor de disponibilidad sobre `/health` | esteban-dlp | 2026-10-27 | **Hecho en código** (workflow `Uptime`); empieza a correr cuando `development` llegue a `main` (requiere tu autorización) |
 | Ventana y entorno para carga contra Azure/staging (la BD es compartida; 300 req/min por IP) | Equipo | 2026-10-27 | Pendiente: coordinar |
 | Pruebas en dispositivos (Android 10, iOS 15) | Equipo | 2026-10-27 | Pendiente |
 | ZAP re-run y autenticado | Equipo | 2026-10-27 | Pendiente (necesita ambiente desplegado) |
@@ -207,8 +207,8 @@ cd frontend && npx jest --ci --coverage --coverageReporters=json-summary --cover
 
 | Severidad | Defecto | Nota |
 |---|---|---|
-| Alta | H1: HTTPS real sin verificar en el despliegue | Código y configuración listos |
-| Media | M7: sin trazabilidad ni alertas | Pendiente |
+| Alta | H1: el puerto 3000 directo sigue respondiendo por HTTP plano | HTTPS con Let's Encrypt ya verificado; falta cerrar el puerto 3000 al exterior |
+| Media | M7: logs sin usuario/IP/id de petición (el monitor de `/health` ya existe) | Pendiente |
 | Media | M4: la URL firmada de R2 no limita el tamaño | Mitigado por verificación posterior |
 | Media | Frontend: 7 vulnerabilidades de producción (4 altas) | Requiere subir Expo |
 | Media | Registro confirma existencia con 409 | Aceptado hasta decidir verificación de correo |
