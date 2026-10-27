@@ -55,7 +55,9 @@ export class WorkoutPostReactionsService {
       where: { id: postId, is_hidden: false, is_active: true },
     });
     if (!post) throw new NotFoundException('Workout post not found');
-    assertPostVisibleToUser(post, userId);
+    await assertPostVisibleToUser(post, userId, (sql, params) =>
+      this.postRepo.manager.query(sql, params),
+    );
     return post;
   }
 

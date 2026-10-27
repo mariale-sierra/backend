@@ -283,6 +283,8 @@ function buildHarness() {
   };
 
   const dataSource = {
+    // assertPostVisibleToUser's SQL: one row = the reporter may see the post.
+    query: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
     transaction: jest.fn(
       async (cb: (m: typeof manager) => Promise<unknown>) => {
         // Shallow per-row copy is enough: the service only ever reassigns

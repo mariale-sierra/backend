@@ -82,7 +82,9 @@ export class WorkoutPostReportsService {
         where: { id: targetId, is_hidden: false, is_active: true },
       });
       if (!post) throw new NotFoundException('Workout post not found');
-      assertPostVisibleToUser(post, reporterId);
+      await assertPostVisibleToUser(post, reporterId, (sql, params) =>
+        this.dataSource.query(sql, params),
+      );
       return post.user_id;
     }
 
@@ -101,7 +103,9 @@ export class WorkoutPostReportsService {
     ) {
       throw new NotFoundException('Comment not found');
     }
-    assertPostVisibleToUser(comment.post, reporterId);
+    await assertPostVisibleToUser(comment.post, reporterId, (sql, params) =>
+      this.dataSource.query(sql, params),
+    );
     return comment.user_id;
   }
 
