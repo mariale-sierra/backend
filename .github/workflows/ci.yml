@@ -181,6 +181,13 @@ jobs:
             git fetch origin main
             git checkout main
             git merge --ff-only origin/main
+            # The VM disk fills up with old images and build cache (a deploy
+            # failed with "no space left on device" on 2026-10-27): drop the
+            # build cache and every image no container is using before building.
+            # The running containers keep their images, so nothing goes down here.
+            docker builder prune -af >/dev/null 2>&1 || true
+            docker image prune -af >/dev/null 2>&1 || true
+            df -h / | tail -1
             # Build while the old container keeps serving: the outage below is
             # only the restart, not npm ci + nest build.
             docker-compose build backend
