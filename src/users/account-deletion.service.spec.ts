@@ -51,6 +51,25 @@ describe('AccountDeletionService.purgeAccount', () => {
     expect(order.slice(2).every((step) => step === 'db-write')).toBe(true);
   });
 
+  it('cancelDeletion answers 404 when the UPDATE returned no rows, whatever shape TypeORM uses', async () => {
+    for (const raw of [[[], 0], []]) {
+      const manager = { query: jest.fn().mockResolvedValue(raw) };
+      const dataSource = {
+        transaction: jest.fn((cb: (m: typeof manager) => Promise<unknown>) =>
+          cb(manager),
+        ),
+      };
+      const service = new AccountDeletionService(
+        dataSource as never,
+        {} as unknown as UploadsService,
+      );
+      await expect(service.cancelDeletion('u1')).rejects.toThrow(
+        'No pending account deletion request',
+      );
+      expect(manager.query).toHaveBeenCalledTimes(1); // no audit insert
+    }
+  });
+
   it('re-checks that the deletion is still scheduled and due in the locking query', async () => {
     const { service, manager } = build([]);
     await service.purgeAccount('u1');

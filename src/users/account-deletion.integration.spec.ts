@@ -52,7 +52,7 @@ describeDb('AccountDeletionService (real Postgres)', () => {
     await ds?.destroy();
   });
 
-  it('requires the right password, schedules 30 days out, audits, and can be cancelled', async () => {
+  it('requires the right password, schedules 7 days out, audits, and can be cancelled', async () => {
     const id = await createUser();
 
     await expect(service.requestDeletion(id, 'wrong')).rejects.toThrow(
@@ -64,7 +64,7 @@ describeDb('AccountDeletionService (real Postgres)', () => {
       (res.deletion_scheduled_for.getTime() -
         res.deletion_requested_at.getTime()) /
       86_400_000;
-    expect(days).toBe(30);
+    expect(days).toBe(7);
     await expect(service.requestDeletion(id, 'password123')).rejects.toThrow(
       'already requested',
     );
@@ -261,5 +261,79 @@ describeDb('AccountDeletionService (real Postgres)', () => {
       'failed',
     ]);
     expect(events[1].details.error).toBe('r2 down');
+  });
+
+  it('answers 404 and writes no audit row when there is no pending deletion to cancel', async () => {
+    const id = await createUser();
+    await expect(service.cancelDeletion(id)).rejects.toThrow(
+      'No pending account deletion request',
+    );
+    const events = await ds.query(
+      `SELECT event FROM havit.account_deletion_audit WHERE user_id = $1`,
+      [id],
+    );
+    expect(events).toEqual([]);
+  });
+
+  // H-19: the cron selected the account, then the user cancels.
+  it('a cancellation confirmed before the purge locks the row means nothing is deleted from R2', async () => {
+    const id = await createUser();
+    await service.requestDeletion(id, 'password123');
+    await ds.query(
+      `UPDATE havit.users SET deletion_scheduled_for = now() - interval '1 minute' WHERE id = $1`,
+      [id],
+    );
+    // The cron's SELECT already ran; the user cancels before purgeAccount starts.
+    await service.cancelDeletion(id);
+    uploads.deleteUserObjects.mockClear();
+
+    await service.purgeAccount(id);
+
+    expect(uploads.deleteUserObjects).not.toHaveBeenCalled();
+    const [user] = await ds.query(
+      `SELECT deleted_at, deletion_scheduled_for FROM havit.users WHERE id = $1`,
+      [id],
+    );
+    expect(user.deleted_at).toBeNull();
+    expect(user.deletion_scheduled_for).toBeNull();
+  });
+
+  it('a cancellation that arrives while the purge runs waits for it and never reports success', async () => {
+    const id = await createUser();
+    await service.requestDeletion(id, 'password123');
+    await ds.query(
+      `UPDATE havit.users SET deletion_scheduled_for = now() - interval '1 minute' WHERE id = $1`,
+      [id],
+    );
+    let release!: () => void;
+    let started!: () => void;
+    const r2Started = new Promise<void>((r) => (started = r));
+    uploads.deleteUserObjects.mockImplementationOnce(
+      () =>
+        new Promise<number>((resolve) => {
+          started();
+          release = () => resolve(2);
+        }),
+    );
+
+    const purge = service.purgeAccount(id);
+    await r2Started; // the row is locked and R2 deletion is in flight
+    const cancel = service.cancelDeletion(id).then(
+      () => 'cancelled',
+      (e: Error) => e.constructor.name,
+    );
+    let settledEarly = false;
+    void cancel.then(() => (settledEarly = true));
+    await new Promise((r) => setTimeout(r, 300)); // cancel must still be blocked
+    expect(settledEarly).toBe(false);
+    release();
+    await purge;
+
+    expect(await cancel).toBe('NotFoundException');
+    const [user] = await ds.query(
+      `SELECT deleted_at FROM havit.users WHERE id = $1`,
+      [id],
+    );
+    expect(user.deleted_at).not.toBeNull();
   });
 });

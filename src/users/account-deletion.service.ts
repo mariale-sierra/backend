@@ -13,7 +13,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { UploadsService } from '../uploads/uploads.service';
 
 /** Days an account stays recoverable between the request and the purge. */
-export const ACCOUNT_DELETION_GRACE_DAYS = 30;
+export const ACCOUNT_DELETION_GRACE_DAYS = 7;
 
 type AuditEvent = 'requested' | 'cancelled' | 'completed' | 'failed';
 
@@ -90,14 +90,21 @@ export class AccountDeletionService {
 
   async cancelDeletion(userId: string) {
     const cancelled = await this.dataSource.transaction(async (manager) => {
-      const rows: Array<{ email: string }> = await manager.query(
+      // TypeORM answers an UPDATE ... RETURNING with [rows, affectedCount], so `raw.length` is
+      // never 0: unwrap the rows (a plain array is accepted too) before deciding whether any
+      // pending request was actually cancelled.
+      const raw: unknown = await manager.query(
         `UPDATE havit.users
          SET deletion_requested_at = NULL, deletion_scheduled_for = NULL
          WHERE id = $1 AND deletion_requested_at IS NOT NULL AND deleted_at IS NULL
          RETURNING email`,
         [userId],
       );
-      if (rows.length === 0) return false;
+      const first = Array.isArray(raw) ? raw[0] : undefined;
+      const rows = (Array.isArray(first) ? first : raw) as Array<{
+        email: string;
+      }>;
+      if (!Array.isArray(rows) || rows.length === 0) return false;
       await this.audit(manager, userId, 'cancelled', rows[0].email);
       return true;
     });
