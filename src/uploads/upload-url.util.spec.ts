@@ -31,6 +31,14 @@ describe('assertOwnUploadUrl', () => {
       ['another user folder', 'https://pub-abc.r2.dev/uploads/u2/9f.jpeg'],
       ['another host', 'https://evil.example/uploads/u1/9f.jpeg'],
       [
+        'dot segments that normalize into another folder',
+        'https://pub-abc.r2.dev/uploads/u1/../u2/9f.jpeg',
+      ],
+      [
+        'percent-encoded dot segments',
+        'https://pub-abc.r2.dev/uploads/u1/%2e%2e/u2/9f.jpeg',
+      ],
+      [
         'host that merely starts with the base',
         'https://pub-abc.r2.dev.evil.example/uploads/u1/x.jpg',
       ],

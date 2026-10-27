@@ -337,6 +337,7 @@ export class WorkoutPostReportsService {
         resolved = report;
         const status = hide ? 'actioned' : 'dismissed';
         let penaltyRecorded = false;
+        let contentHidden = false;
         let alsoResolvedReportIds: number[] = [];
 
         if (hide) {
@@ -352,11 +353,12 @@ export class WorkoutPostReportsService {
             const hiddenPost = await manager.findOne(WorkoutPost, {
               where: { id: report.target_id },
             });
-            await manager.update(
+            const postUpdate = await manager.update(
               WorkoutPost,
               { id: report.target_id, is_hidden: false },
               hiddenFields,
             );
+            contentHidden = (postUpdate.affected ?? 0) > 0;
             if (hiddenPost) {
               await this.uploadsService.invalidateCachedReadUrl(
                 hiddenPost.image_url,
@@ -364,14 +366,17 @@ export class WorkoutPostReportsService {
               );
             }
           } else {
-            await manager.update(
+            const commentUpdate = await manager.update(
               WorkoutPostComment,
               { id: Number(report.target_id), is_hidden: false },
               hiddenFields,
             );
+            contentHidden = (commentUpdate.affected ?? 0) > 0;
           }
 
-          if (penalize) {
+          // No strike or suspension when this action hid nothing (target already
+          // hidden or deleted): the author would be sanctioned for no change.
+          if (penalize && contentHidden) {
             const hours = REPORT_REASON_SUSPENSION_HOURS[report.reason] ?? 24;
             const inserted: Array<{ id: number }> = await manager.query(
               `INSERT INTO havit.user_penalties
@@ -464,7 +469,7 @@ export class WorkoutPostReportsService {
           reportId: Number(report.id),
           status,
           action: dto.action,
-          contentHidden: hide,
+          contentHidden,
           penaltyRecorded,
           alsoResolvedReportIds,
         };

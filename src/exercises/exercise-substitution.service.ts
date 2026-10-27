@@ -187,6 +187,10 @@ export class ExerciseSubstitutionService {
       this.locationRepo.find({ order: { id: 'ASC' } }),
       this.loadProfiles(exerciseIds),
     ]);
+    const missing = [...new Set(exerciseIds)].filter((id) => !profiles.has(id));
+    if (missing.length > 0) {
+      throw new NotFoundException(`Exercises not found: ${missing.join(', ')}`);
+    }
     return locations
       .filter((l) => l.code !== ANYWHERE_LOCATION_CODE)
       .map((l) => {

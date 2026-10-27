@@ -623,6 +623,26 @@ describe('WorkoutPostReportsService', () => {
   });
 
   describe('repeat resolution / retries', () => {
+    it('records no strike and says nothing was hidden when the target is already hidden', async () => {
+      await h.service.create(REPORTER, {
+        targetType: 'post',
+        targetId: POST_ID,
+        reason: 'violence',
+      });
+      h.store.posts.find((p) => p.id === POST_ID)!.is_hidden = true;
+
+      const result = await h.service.resolve(1, ADMIN, {
+        action: 'hide',
+        penalize: true,
+      });
+
+      expect(result).toMatchObject({
+        contentHidden: false,
+        penaltyRecorded: false,
+      });
+      expect(h.store.penalties).toHaveLength(0);
+    });
+
     it('answers 409 on a second resolution and never adds a second penalty', async () => {
       await h.service.create(REPORTER, {
         targetType: 'post',
