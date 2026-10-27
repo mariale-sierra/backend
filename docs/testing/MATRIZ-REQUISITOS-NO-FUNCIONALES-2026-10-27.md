@@ -5,57 +5,64 @@ Todas las pruebas de esta sesión se ejecutaron en **local**, con un PostgreSQL 
 directorio de ejecución con su propio `.env`, sin credenciales de Azure, R2 ni OpenAI. No se hicieron peticiones al
 servidor público ni a la base de Azure.
 
-## 0. Advertencia sobre la fuente de los 34 requisitos
+## 0. Fuente de los 34 requisitos
 
-El documento original de requisitos **no está en ningún repositorio** (`HISTORIAS-DE-USUARIO.md` contiene 64 historias de
-usuario, no los 34 requisitos no funcionales). Esta lista de 34 se **reconstruyó** a partir del resumen de grado de
-cumplimiento del informe de sprint (9 cumplen, 12 parcial, 1 no cumple, 12 planificados). Los nombres de los grupos
-(p. ej. "Apariencia (3)", "Usabilidad (3)") se desglosaron en filas individuales. **Hay que cotejar los números y nombres
-con el documento original** antes de entregarla; si difieren, cambia la columna "Requisito" y conserva la evidencia.
+La lista sale del informe del sprint anterior ("Comparación con los requisitos no funcionales del diseño"), que cuenta
+**18 evaluados** (Cumplen 6, No cumplen 3, Parciales 3, Ayuda y documentación 3, Soporte 3) y **16 sin prueba dedicada**
+(Apariencia 3, Usabilidad 3, disponibilidad, portabilidad, legal, backups, sincronización y 5 de software/hardware/
+restricciones). El documento de diseño original no está en ningún repositorio, y el informe agrupa algunos requisitos,
+así que **dos desgloses son una interpretación** y hay que cotejarlos con el diseño: RAM y almacenamiento (filas 31 y 32)
+se separaron, y "exclusividad móvil / orientación vertical / sensores" (fila 34) se dejó como una sola.
 
 ## 1. Matriz (34)
 
-Estados: **Cumple** · **Parcial** · **No cumple** · **Planificado** (depende de infraestructura, dispositivos o personas,
-fuera de lo que se puede comprobar desde el código).
+Estados: **Cumple** · **Parcial** · **No cumple** · **Sin evidencia** (no hay código ni prueba que lo respalde) ·
+**Planificado** (depende de infraestructura, dispositivos o personas). La columna "Informe anterior" muestra el estado
+que tenía en el informe del sprint pasado.
 
-| # | Requisito | Estado | Resultado y evidencia | Falta |
-|---|---|---|---|---|
-| 1 | Autenticación obligatoria con contraseña cifrada | **Cumple** | bcrypt + política de contraseñas (`backend/src/auth/auth.service.ts`, `password-policy.ts`); 78 PASS / 0 hallazgos en la batería (`backend/docs/security/scripts/security-probe-results-2026-10-27.json`: A02, A07). JWT HS256 de 15 min + refresh rotativo | bcrypt con costo 10 (mínimo OWASP); valorar 12 |
-| 2 | Backend en Linux/Docker | **Cumple** | `backend/Dockerfile` multi-etapa, `USER node`, `HEALTHCHECK` sobre `/health`; imagen verificada en CI (`backend/.github/workflows/ci.yml`, job `image`) | — |
-| 3 | PostgreSQL 14+ | **Cumple** | CI usa `postgres:16`; pruebas locales con 17 (68 archivos SQL aplicados sin error) | — |
-| 4 | Moderación en ≤ 24 h | **Cumple** | Cron cada 10 min (`backend/src/workout-posts/workout-posts.service.ts:332`) + reportes con ocultamiento inmediato; `backend/docs/moderacion-automatica.md`, `moderacion-manual.md` | Medir la latencia real de la cola contra OpenAI con credenciales |
-| 5 | Visibilidad de publicaciones | **Cumple** | Reglas de feed (`workout-posts.service.ts` `postVisibilityFilter`) y, desde hoy, las mismas reglas en comentarios, reacciones y reportes por id (`workout-post-visibility.util.ts` + `.spec.ts`, hallazgo H-01) | — |
-| 6 | Unidades configurables | **Cumple** | Preferencias de unidades en el frontend (`frontend/app/profile/settings.tsx`) | Sin prueba específica de esa pantalla |
-| 7 | Aceptación de términos con auditoría | **Cumple** | `backend/database/migrations/2026-10-02-03-terms-acceptance-and-account-deletion.sql`, `src/auth/terms-version.ts`, `frontend/app/accept-terms.tsx`; versión `2026-10-v1` | Si el texto legal cambia materialmente hay que subir `LEGAL_VERSION`/`CURRENT_TERMS_VERSION` (ver §6) |
-| 8 | Sin errores de integridad en la interfaz interna | **Cumple** | E2E contra Postgres real: `backend/test/api-integration.e2e-spec.ts` (30 casos) y `auth-sessions.e2e-spec.ts` (24); integración de BD en `account-deletion.integration.spec.ts` | — |
-| 9 | Paginación de listados | **Cumple** | Paginación por cursor en retos, feed y logs (`backend/src/common/pagination.util.ts`); latencia de `GET /challenges` −87–97 % en local (`backend/performance/B1-RESULTS.md`) | — |
-| 10 | Concurrencia y tiempos de respuesta | **Parcial** | Con límites de producción: 0 errores 5xx bajo 100 conexiones (F1–F3). Sin limitador: `/feed` 587 req/s p99 331 ms; `/challenges` 378 req/s p99 592 ms (§4) | Medir contra Azure/staging con umbrales; solo hay medición local |
-| 11 | Seguridad | **Parcial** | 88 comprobaciones: 78 PASS, 10 INFO, **0 hallazgos** (antes 20). `npm audit` backend 0 vulnerabilidades de producción | HTTPS real verificado, ZAP autenticado recurrente, M4/M7/M8 (§3) |
-| 12 | Legal (abogado, plazo de 7 días, contacto) | **Parcial** | Plazo de eliminación **7 días** (`ACCOUNT_DELETION_GRACE_DAYS = 7`, probado en `account-deletion.integration.spec.ts` contra Postgres real); datos de contacto, regiones y país completados en `frontend/constants/legal/legalDocs.ts` | **Aprobación del abogado** (dependencia externa, §7) |
-| 13 | Backups | **Parcial** | Ensayo de restauración local (60/60 tablas, 0,54 s) y respaldo de Azure en la VM: `backend/docs/confiabilidad/B11-CONFIABILIDAD-BACKUPS-INTEGRACIONES.md`; RPO ≤ 15 min / RTO ≤ 4 h son objetivos propuestos, no SLA | Programar backups cada 24 h y restaurar de verdad desde Azure midiendo RPO/RTO (sección 4 de ese documento, "no ejecutado") |
-| 14 | Integraciones externas (OpenAI, R2) | **Parcial** | Timeouts y reintentos acotados, métrica de éxito/error: `B11-...md` §6–7; firma de subida con validación de bytes (`uploads.service.ts` `verifyUploadedObject`, hallazgo H-02 resuelto) | Muestra real de OpenAI/R2 ≥ 95 % con credenciales (`backend/scripts/b11-integration-sample.js`) |
-| 15 | Cobertura de pruebas | **Parcial** | Backend **80,7 %** de líneas (meta 80 % cumplida, umbral fijado); frontend 58,05 % (§5) | Frontend: meta y CI propios |
-| 16 | Notificaciones y panel de administración | **Parcial** | Notificaciones con preferencias; panel de moderación, bans y reapertura de retos (`frontend/app/profile/moderation.tsx`, `backend/src/challenges`) | `reopenChallenge` no notifica (ver §6, decisión pendiente) |
-| 17 | Ayuda y documentación | **Parcial** | Pantalla de ayuda (`frontend/app/profile/help.tsx`) y onboarding (`frontend/app/onboarding`) | FAQ y ayuda según correcciones Neurolab |
-| 18 | Portabilidad | **Parcial** | EAS Build configurado, perfiles `development/preview/production` y HTTPS obligatorio en release (`frontend/eas.json`, `app.config.js`) | Validar en Android 10 / iOS 15 reales |
-| 19 | Usabilidad — evaluación | **Parcial** | Pruebas UX y Neurolab realizadas, hallazgos documentados (`frontend/docs/sprint-10/B2-navegacion-comprension.md`) | — |
-| 20 | Usabilidad — correcciones | **Parcial** | Áreas de mejora especificadas | Implementar y verificar cada una |
-| 21 | Usabilidad — verificación posterior | **Parcial** | Pendiente de las correcciones | Repetir la sesión sobre lo corregido |
-| 22 | Capacidad y concurrencia ≥ 5 000 | **No cumple** | No demostrado; el límite por IP (300 req/min) y un solo contenedor lo impiden | Prueba de carga en staging, varias instancias + PgBouncer + Redis |
-| 23–25 | Apariencia (3) | **Planificado** | Sin medición dedicada | Revisión visual en dispositivo (Gestalt/consistencia) |
-| 26 | Disponibilidad ≥ 99 % mensual | **Planificado** | `/health` y `/health/ready` existen y CI los prueba; no hay monitor externo | Configurar UptimeRobot/Better Stack/Azure Monitor y medir un mes (99 % ≈ 7,2 h de caída/mes) |
-| 27 | Cumplimiento normativo de privacidad | **Planificado** | Eliminación con auditoría, consentimiento 16+, documentos legales completos | Revisión legal formal; cifrado de columnas de datos personales |
-| 28 | Sincronización entre módulos ≤ 5 s | **Planificado** | Sin medición dedicada | Instrumentar y medir en dispositivo |
-| 29 | Compatibilidad de dispositivos | **Planificado** | — | Pruebas en Android 10 e iOS 15 |
-| 30 | RAM | **Planificado** | — | Medir en dispositivo |
-| 31 | Almacenamiento | **Planificado** | — | Medir en dispositivo |
-| 32 | Conexión estable | **Planificado** | Timeout de 30 s y manejo de errores de red en `frontend/services/api.ts` | Pruebas con datos móviles |
-| 33 | Orientación | **Planificado** | — | Validar orientación vertical en dispositivo |
-| 34 | Sensores | **Planificado** | — | Validar en dispositivo |
+| # | Requisito | Informe anterior | Estado hoy | Resultado y evidencia | Falta |
+|---|---|---|---|---|---|
+| 1 | Autenticación obligatoria (correo + contraseña cifrada) | Cumple | **Cumple** | bcrypt + política de contraseñas (`backend/src/auth/auth.service.ts`, `password-policy.ts`); batería de seguridad 78 PASS / 0 hallazgos (`backend/docs/security/scripts/security-probe-results-2026-10-27.json`); JWT de 15 min + refresh rotativo | bcrypt costo 10 (mínimo OWASP); valorar 12 |
+| 2 | Backend en Linux/Docker/nube pública | Cumple | **Cumple** | `backend/Dockerfile` multi-etapa, `USER node`, `HEALTHCHECK`; imagen verificada en CI (`.github/workflows/ci.yml`, job `image`) | — |
+| 3 | PostgreSQL 14+ | Cumple | **Cumple** | CI con `postgres:16`; pruebas de hoy con 17 (68 archivos SQL aplicados sin error) | — |
+| 4 | Moderación de contenido en ≤ 24 h | Cumple | **Cumple** | Cron cada 10 min (`backend/src/workout-posts/workout-posts.service.ts:332`) y reportes con ocultamiento inmediato; `backend/docs/moderacion-automatica.md` | Medir la latencia real de la cola contra OpenAI |
+| 5 | Visibilidad de publicaciones | Cumple | **Cumple** | Reglas del feed y, desde hoy, las mismas en comentarios, reacciones y reportes por id (`workout-post-visibility.util.ts` + spec, H-01) | — |
+| 6 | Unidades de medida configurables | Cumple | **Cumple (en código)** | Cada métrica de ejercicio lleva su `default_unit` (`backend/database/init/2026-07-07-00-init-schema.sql`) y el frontend maneja `lbs`/`reps`/etc. (`frontend/types/metrics.ts`) | **No hay selector de unidades para el usuario** (no encontré ninguno). Confirmar si el requisito lo exige |
+| 7 | Capacidad y concurrencia ≥ 5 000 | No cumple | **No cumple** | No demostrado: límite de 300 req/min por IP, un contenedor, solo medición local (§3) | Prueba en staging con varias instancias, PgBouncer y Redis |
+| 8 | Aceptación de términos y condiciones | No cumple | **Cumple** | Flujo implementado: `backend/database/migrations/2026-10-02-03-terms-acceptance-and-account-deletion.sql`, `src/auth/terms-version.ts`, `frontend/app/accept-terms.tsx`; auditoría con versión `2026-10-v1` | Revisión del abogado (fila 27) |
+| 9 | Eliminación de cuenta/datos en ≤ 7 días | No cumple | **Cumple (con matiz)** | Endpoint y purga automática; `ACCOUNT_DELETION_GRACE_DAYS = 7`, probado contra Postgres real (`account-deletion.integration.spec.ts`) | La purga corre cada hora, así que ocurre hasta ~1 h después de los 7 días |
+| 10 | Tiempos de respuesta (login/foto/pantalla) | Parcial | **Parcial** | 0 errores 5xx bajo 100 conexiones con límites de producción; sin limitador `/feed` 587 req/s p99 331 ms (§3) | Medir contra Azure real, con umbrales |
+| 11 | Cifrado de información personal | Parcial | **Parcial** | Contraseñas con bcrypt y Azure cifra en reposo; TLS a la BD verificado en código (`src/config/db-ssl.ts`) | Cifrado explícito por columna (correo, fotos, métricas) |
+| 12 | Integración con API externa (≥ 95 % de éxito) | Parcial | **Parcial** | OpenAI y R2 integradas con timeouts y reintentos acotados (`backend/docs/confiabilidad/B11-CONFIABILIDAD-BACKUPS-INTEGRACIONES.md` §6–7); verificación de bytes tras la subida (H-02) | Muestra real con credenciales (`backend/scripts/b11-integration-sample.js`) |
+| 13 | Sección de ayuda | Parcial | **Cumple** | `frontend/app/profile/help.tsx` (+ test) | Contenido a ajustar según Neurolab |
+| 14 | Tutorial inicial | Parcial | **Parcial** | `frontend/app/onboarding/practices.tsx` solo selecciona prácticas; el directorio `app/(auth)/onboarding` está vacío | Tutorial real del primer uso |
+| 15 | FAQ | Parcial | **Cumple** | Ayuda/FAQ de Sprint 10 B9 dentro de `help.tsx` | Ampliar según Neurolab |
+| 16 | Cobertura de pruebas unitarias ≥ 80 % | Parcial | **Parcial** | **Backend 80,7 %** (cumple, umbral fijado en `package.json`); **frontend 58,05 %** (§5) | Meta y CI del frontend |
+| 17 | Adaptabilidad de dificultad/pantalla | Parcial | **Sin evidencia** | No encontré ningún código de "dificultad" en backend ni frontend | Definir el requisito (¿nivel del reto? ¿responsive?) y probarlo |
+| 18 | Configuración de notificaciones y panel de administración | Parcial | **Parcial** | Notificaciones con preferencias (`frontend/app/notification-settings.tsx`); panel de moderación y bans (`frontend/app/profile/moderation.tsx`) | `reopenChallenge` no notifica (§6) |
+| 19 | Apariencia: paleta neutra / lenguaje inclusivo | Sin prueba | **Sin evidencia** | No evaluado | Revisión de diseño |
+| 20 | Apariencia: tiempo de renderizado < 4 s | Sin prueba | **Sin evidencia** | Sin medición dedicada | Medir en dispositivo |
+| 21 | Apariencia: consistencia visual | Sin prueba | **Parcial** | Tokens de tema y componentes compartidos (`frontend/constants/theme`, `components/ui`); encuesta: "visualmente atractiva" 4,00/5 (E-11) | Evaluación visual en dispositivo |
+| 22 | Usabilidad: navegación sin ayuda | Parcial | **Parcial** | Neurolab: crear cuenta 4,75, Home 4,00, encontrar retos 4,25 (`frontend/docs/sprint-10/B2-navegacion-comprension.md` §9.3, 4 participantes) | Repetir tras las correcciones |
+| 23 | Usabilidad: satisfacción | Parcial | **Parcial** | Neurolab: atractiva 4,00, motivaría a seguir 4,00 (E-11, E-12) | Muestra mayor |
+| 24 | Usabilidad: primer reto sin asistencia | Parcial | **Parcial** | Neurolab: "comprendí cómo crear un reto" **2,50** (E-4, el más bajo; sin corrección en B2) | Corregir y volver a medir |
+| 25 | Disponibilidad ≥ 99 % mensual | Sin prueba | **Planificado** | `/health` y `/health/ready` existen y CI los prueba; no hay monitor externo | Monitor (UptimeRobot/Better Stack/Azure Monitor) durante un mes; 99 % ≈ 7,2 h de caída/mes |
+| 26 | Portabilidad: Android/iOS | Sin prueba | **Parcial** | EAS Build con perfiles `development/preview/production` y https obligatorio en release (`frontend/eas.json`, `app.config.js`) | Validar en Android 10 e iOS 15 reales |
+| 27 | Legal: normativa local de privacidad | Sin prueba | **Parcial** | Documentos legales con datos completos (`frontend/constants/legal/legalDocs.ts`), consentimiento 16+ y eliminación con auditoría | **Revisión del abogado** (dependencia externa, §7) |
+| 28 | Confiabilidad: backups automáticos cada 24 h | Sin prueba | **Parcial** | Ensayo local 60/60 tablas en 0,54 s; respaldo de Azure en la VM (`B11-CONFIABILIDAD-BACKUPS-INTEGRACIONES.md`) | Programar cada 24 h y restaurar de verdad desde Azure |
+| 29 | Interfaz interna: sincronización ≤ 5 s | Sin prueba | **Sin evidencia** | Sin medición dedicada | Instrumentar y medir |
+| 30 | Compatibilidad de dispositivos | Sin prueba | **Planificado** | — | Pruebas en dispositivos reales |
+| 31 | RAM | Sin prueba | **Planificado** | — | Medir en dispositivo |
+| 32 | Almacenamiento | Sin prueba | **Planificado** | — | Medir en dispositivo |
+| 33 | Conexión estable | Sin prueba | **Parcial** | Timeout de 30 s y manejo de errores de red en `frontend/services/api.ts` | Pruebas con datos móviles |
+| 34 | Exclusividad móvil / orientación vertical / sensores | Sin prueba | **Parcial** | `"orientation": "portrait"` en `frontend/app.json` | Validar en dispositivo |
 
-**Resumen:** Cumplen 9 · Parciales 12 · No cumple 1 · Planificados 12. La suma coincide con 34. En esta sesión no cambió
-ningún estado global; cambió la evidencia: legal ya tiene datos y plazo de 7 días (sigue parcial por el abogado) y
-seguridad pasó de 20 hallazgos a 0 en la batería.
+**Resumen:** Cumplen **10** · Parciales **15** · No cumple **1** · Sin evidencia **4** (17, 19, 20, 29) · Planificados
+**4** (25, 30, 31, 32). Total 34.
+
+Cambios frente al informe anterior: **8** (términos) y **9** (eliminación ≤ 7 días) pasaron de *No cumple* a *Cumple*;
+**13** y **15** (ayuda y FAQ) pasaron de *Parcial* a *Cumple*; la seguridad ya no tiene hallazgos abiertos en la batería
+(0 de 88). Siguen sin cumplirse la capacidad ≥ 5 000 (7) y todo lo que depende de dispositivos o monitoreo.
 
 ## 2. Pruebas de seguridad (2026-10-27)
 
@@ -208,3 +215,16 @@ cd frontend && npx jest --ci --coverage --coverageReporters=json-summary --cover
 | Baja | bcrypt costo 10 | Valorar 12 |
 | Baja | H-12: `rounds` se captura pero no se persiste | Sin métrica de backend equivalente |
 | Baja | H-15: `npm start` borra `.env.local` | Comportamiento documentado a propósito |
+| Media | Sin código de "dificultad" ni selector de unidades para el usuario (filas 6 y 17) | Confirmar con el diseño si el requisito lo exige |
+
+## 9. Medibilidad de los requisitos (definiciones propuestas)
+
+El informe del sprint anterior señaló cuatro requisitos mal acotados. Propuesta para cerrarlos, **sujeta a tu
+aprobación**:
+
+| Requisito | Problema | Definición propuesta |
+|---|---|---|
+| 7. "Al menos 5 000" | No dice la unidad | 5 000 **usuarios activos simultáneos** sobre la API completa, con p95 < 1 s y < 1 % de errores 5xx, medido en staging |
+| 25. Disponibilidad ≥ 99 % | No dice cómo medirla | Monitor externo cada 1–5 min sobre `/health/ready`; el mes cuenta como cumplido con ≤ 7,2 h acumuladas de caída |
+| 1. "Correo y un código o contraseña" | Ambiguo si son alternativas | Hoy: **correo + contraseña** (sin código). Confirmar que es lo exigido |
+| 28. Backups cada 24 h | Sin RPO/RTO ni prueba de restore | Backup diario verificado, restore real mensual; RPO ≤ 15 min y RTO ≤ 4 h como objetivos (no SLA) hasta medirlos |
