@@ -430,12 +430,16 @@ export class ChallengesController {
   @ApiParam({ name: 'id', description: 'ID del desafío' })
   @ApiOperation({
     summary: 'Obtener detalles de un desafío',
-    description: 'Devuelve la información completa de un desafío específico',
+    description:
+      'Devuelve la información completa de un desafío específico. En un desafío privado, quien no es miembro (ni creador, invitado pendiente o admin) recibe `cycle_days` solo con `day_number`/`is_rest_day` (sin rutinas ni ejercicios) y `routine_hidden: true`.',
   })
   @ApiResponse({ status: 200, description: 'Detalles del desafío' })
   @ApiResponse({ status: 404, description: 'Desafío no encontrado' })
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.challengesService.findOne(id);
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.challengesService.findOne(id, user.sub);
   }
 
   @Patch(':id')

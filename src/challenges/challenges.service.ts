@@ -911,11 +911,65 @@ export class ChallengesService {
     return memberCountByChallenge;
   }
 
-  async findOne(id: string) {
+  /**
+   * B11 (sprint 10) decision: a private challenge stays discoverable (name, photo,
+   * duration, members — HU-18 needs it to ask to join), but its routine is only for
+   * people already in it. A viewer outside it gets the cycle's shape (which days are
+   * rest days) without routine names or exercises, plus `routine_hidden: true`.
+   * The cached entry is shared by every viewer, so this happens after the cache.
+   */
+  async findOne(id: string, viewerId: string) {
     const key = await this.cacheKey(`findOne:${id}`);
-    return this.cache.getOrSet(key, LIST_TTL_SECONDS, () =>
+    const challenge = await this.cache.getOrSet(key, LIST_TTL_SECONDS, () =>
       this.findOneUncached(id),
     );
+    if (
+      challenge.visibility !== 'private' ||
+      (await this.canSeePrivateRoutine(
+        id,
+        challenge.created_by_user_id,
+        viewerId,
+      ))
+    ) {
+      return challenge;
+    }
+    return {
+      ...challenge,
+      cycle_days: challenge.cycle_days.map((day) => ({
+        day_number: day.day_number,
+        is_rest_day: day.is_rest_day,
+        routine_id: null,
+        routine_name: null,
+        routine_description: null,
+        exercises: [],
+      })),
+      routine_hidden: true,
+    };
+  }
+
+  /** Owner, anyone with a challenge_user_map row (the same "member" the feed's
+   * challengePrivacyFilter uses), someone holding a pending invite (so they see what
+   * they were invited to), or a platform admin (who closes/reopens from this screen). */
+  private async canSeePrivateRoutine(
+    challengeId: string,
+    ownerId: string,
+    viewerId: string,
+  ): Promise<boolean> {
+    if (viewerId === ownerId) return true;
+    const rows: unknown[] = await this.challengeRepo.manager.query(
+      `SELECT 1
+       WHERE EXISTS (
+           SELECT 1 FROM havit.challenge_user_map
+           WHERE challenge_id = $1 AND user_id = $2)
+         OR EXISTS (
+           SELECT 1 FROM havit.challenge_invites
+           WHERE challenge_id = $1 AND recipient_user_id = $2
+             AND status = 'pending' AND is_active = true)
+         OR EXISTS (
+           SELECT 1 FROM havit.users WHERE id = $2 AND is_admin = true)`,
+      [challengeId, viewerId],
+    );
+    return rows.length > 0;
   }
 
   private async findOneUncached(id: string) {
@@ -1399,14 +1453,23 @@ export class ChallengesService {
     challenge.status = 'open';
     await this.challengeRepo.save(challenge);
     await this.cache.bumpVersion(CACHE_NAMESPACE);
+    // B11 (sprint 10): reopening is announced to the same people closing was.
+    void this.notifyChallengeStatusChange(challenge, 'challenge_reopened');
     return { message: 'Challenge reopened successfully' };
+  }
+
+  private notifyChallengeClosed(challenge: Challenge): Promise<void> {
+    return this.notifyChallengeStatusChange(challenge, 'challenge_closed');
   }
 
   /**
    * Fire-and-forget: everyone still in the challenge plus its creator. No
    * actor — it's an admin action, and which admin did it isn't shown.
    */
-  private async notifyChallengeClosed(challenge: Challenge): Promise<void> {
+  private async notifyChallengeStatusChange(
+    challenge: Challenge,
+    type: 'challenge_closed' | 'challenge_reopened',
+  ): Promise<void> {
     try {
       const members = await this.challengeUserMapRepo.find({
         where: { challenge_id: challenge.id, status: 'active' },
@@ -1414,13 +1477,13 @@ export class ChallengesService {
       await this.notificationsService.notifyMany(
         [challenge.created_by_user_id, ...members.map((m) => m.user_id)],
         {
-          type: 'challenge_closed',
+          type,
           entity: { type: 'challenge', id: challenge.id },
         },
       );
     } catch (error) {
       this.logger.warn(
-        `challenge_closed fan-out failed: ${error instanceof Error ? error.message : String(error)}`,
+        `${type} fan-out failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
