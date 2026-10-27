@@ -33,15 +33,15 @@ module.exports = [
     locations: ['Gym'],
     durationDays: 28,
     description:
-      'Four weeks of the big barbell lifts — squat, bench, deadlift and press — on a simple lower / upper / full-body split. Built for steady progress: add a little weight when every set feels solid.',
+      'Four weeks of the big lifts — squat, bench, deadlift and press — on a simple lower / upper / full-body split. Built for steady progress: add a little weight when every set feels solid.',
     days: [
       {
         name: 'Lower Body',
         description: 'Squat and hinge, then volume for the legs.',
         exercises: [
-          { name: 'Barbell Back Squat', sets: 4, reps: 8, rest: 120 },
+          { name: 'Front Squat', sets: 4, reps: 8, rest: 120 },
           { name: 'Romanian Deadlift', sets: 3, reps: 10, rest: 90 },
-          { name: 'Leg Press', sets: 3, reps: 12, rest: 90 },
+          { name: 'Horizontal Leg Press', sets: 3, reps: 12, rest: 90 },
           { name: 'Dumbbell Calf Raise', sets: 3, reps: 15, rest: 60 },
         ],
       },
@@ -49,10 +49,10 @@ module.exports = [
         name: 'Upper Body',
         description: 'Push and pull, balanced.',
         exercises: [
-          { name: 'Barbell Bench Press', sets: 4, reps: 8, rest: 120 },
-          { name: 'Bent-Over Barbell Row', sets: 4, reps: 8, rest: 90 },
+          { name: 'Incline Barbell Bench Press', sets: 4, reps: 8, rest: 120 },
+          { name: 'Pendlay Row', sets: 4, reps: 8, rest: 90 },
           { name: 'Barbell Overhead Press', sets: 3, reps: 10, rest: 90 },
-          { name: 'Lat Pulldown', sets: 3, reps: 12, rest: 60 },
+          { name: 'Close Grip Lat Pulldown', sets: 3, reps: 12, rest: 60 },
         ],
       },
       rest,
@@ -60,7 +60,7 @@ module.exports = [
         name: 'Full Body',
         description: 'Heavy deadlifts, then the rest of the body.',
         exercises: [
-          { name: 'Barbell Deadlift', sets: 3, reps: 5, rest: 150 },
+          { name: 'Hex Bar Deadlift', sets: 3, reps: 5, rest: 150 },
           { name: 'Dumbbell Bench Press', sets: 3, reps: 10, rest: 90 },
           { name: 'Pull-Up', sets: 3, reps: 8, rest: 90 },
           { name: 'Goblet Squat', sets: 3, reps: 12, rest: 60 },
@@ -95,7 +95,7 @@ module.exports = [
           { name: 'Dumbbell Romanian Deadlift', sets: 4, reps: 10, rest: 75 },
           { name: 'Bent-Over Dumbbell Row', sets: 4, reps: 10, rest: 60 },
           { name: 'Dumbbell Hip Thrust', sets: 3, reps: 12, rest: 60 },
-          { name: 'Dumbbell Bicep Curl', sets: 3, reps: 12, rest: 45 },
+          { name: 'Dumbbell Hammer Curl', sets: 3, reps: 12, rest: 45 },
         ],
       },
       rest,
@@ -125,7 +125,7 @@ module.exports = [
         description: 'Run, ropes and stairs.',
         exercises: [
           { name: 'Treadmill Running', time: '15:00', distance: 2.5 },
-          { name: 'Battle Ropes', time: '06:00' },
+          { name: 'Battle Rope Double Slam', sets: 4, reps: 15, rest: 45 },
           { name: 'Stair Climber', time: '10:00' },
         ],
       },
@@ -137,20 +137,22 @@ module.exports = [
     name: 'Couch to 5K',
     activity: 'cardioIntense',
     categories: ['Cardio Intense'],
-    locations: ['Outdoor'],
+    // The catalog's only active running exercise is the treadmill one (RepDB's
+    // "Running" was never imported), so the plan is logged as Treadmill Running.
+    locations: ['Gym'],
     durationDays: 30,
     description:
-      'A month of running that ends with a full 5K. An easy run, a longer run, and a rest day — repeat until 5 km feels like yours.',
+      'A month of running that ends with a full 5K. An easy run, a longer run, and a rest day — repeat until 5 km feels like yours. Logged on the treadmill; run outside whenever you can.',
     days: [
       {
         name: 'Easy Run',
         description: 'Conversational pace. Walk breaks are fine.',
-        exercises: [{ name: 'Running', time: '20:00', distance: 3 }],
+        exercises: [{ name: 'Treadmill Running', time: '20:00', distance: 3 }],
       },
       {
         name: 'Long Run',
         description: 'Steady, a little further every week.',
-        exercises: [{ name: 'Running', time: '32:00', distance: 5 }],
+        exercises: [{ name: 'Treadmill Running', time: '32:00', distance: 5 }],
       },
       rest,
     ],

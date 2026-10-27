@@ -32,11 +32,16 @@ const DRY_RUN = process.argv.includes('--dry-run');
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // backend DEFAULT_UPLOAD_MAX_BYTES
 const COVER_TYPES = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' };
 
+// The catalog's category codes (snake_case since 2026-09-08-03; the RepDB
+// importer's kebab-case kept too, just in case).
 const CATEGORY_CODE_TO_ACTIVITY = {
   strength: 'strength',
+  cardio_intense: 'cardioIntense',
   'cardio-intense': 'cardioIntense',
+  cardio_low: 'cardioLow',
   'cardio-low': 'cardioLow',
   flexibility: 'flexibility',
+  mind_body: 'mindBody',
   'mind-body': 'mindBody',
   functional: 'functional',
 };
