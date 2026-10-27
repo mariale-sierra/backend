@@ -1,4 +1,8 @@
-import { ForbiddenException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import { SuspensionGuard } from './suspension.guard';
 
@@ -63,8 +67,20 @@ describe('SuspensionGuard', () => {
     expect(query).not.toHaveBeenCalled();
   });
 
-  it('lets the request through if the lookup fails', async () => {
+  it('answers 503 instead of letting a write through if the lookup fails', async () => {
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     query.mockRejectedValue(new Error('db down'));
-    await expect(guard.canActivate(ctx(write()))).resolves.toBe(true);
+    await expect(guard.canActivate(ctx(write()))).rejects.toThrow(
+      ServiceUnavailableException,
+    );
+  });
+
+  it('still lets reads through when the lookup would fail', async () => {
+    query.mockRejectedValue(new Error('db down'));
+    await expect(
+      guard.canActivate(
+        ctx({ method: 'GET', originalUrl: '/feed', user: { sub: 'u1' } }),
+      ),
+    ).resolves.toBe(true);
   });
 });
