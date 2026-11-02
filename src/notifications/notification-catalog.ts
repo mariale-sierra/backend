@@ -18,6 +18,7 @@ export const NOTIFICATION_TYPE_CODES = [
   'challenge_join_response',
   'challenge_participant_joined',
   'challenge_closed',
+  'challenge_reopened',
   'challenge_removed',
   'report_resolved',
   'content_hidden',
@@ -159,6 +160,16 @@ export const NOTIFICATION_COPY: Record<
     en: {
       title: 'Challenge closed',
       body: 'A challenge you are in was closed.',
+    },
+  },
+  challenge_reopened: {
+    es: {
+      title: 'Challenge reabierto',
+      body: 'Se reabrió un challenge en el que participas.',
+    },
+    en: {
+      title: 'Challenge reopened',
+      body: 'A challenge you are in was reopened.',
     },
   },
   challenge_removed: {

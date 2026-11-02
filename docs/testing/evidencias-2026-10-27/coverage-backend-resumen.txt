@@ -1,0 +1,6 @@
+Statements   : 79.13% ( 5413/6840 )
+Branches     : 74.57% ( 1414/1896 )
+Functions    : 67.55% ( 739/1094 )
+Lines        : 80.7% ( 4966/6153 )
+Test Suites: 3 skipped, 70 passed, 70 of 73 total
+Tests:       17 skipped, 1250 passed, 1267 total

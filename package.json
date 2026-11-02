@@ -111,6 +111,14 @@
       "**/*.(t|j)s"
     ],
     "coverageDirectory": "../coverage",
+    "coverageThreshold": {
+      "global": {
+        "lines": 80,
+        "statements": 78,
+        "branches": 72,
+        "functions": 66
+      }
+    },
     "testEnvironment": "node",
     "globals": {
       "ts-jest": {

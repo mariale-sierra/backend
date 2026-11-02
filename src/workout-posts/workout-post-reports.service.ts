@@ -82,7 +82,9 @@ export class WorkoutPostReportsService {
         where: { id: targetId, is_hidden: false, is_active: true },
       });
       if (!post) throw new NotFoundException('Workout post not found');
-      assertPostVisibleToUser(post, reporterId);
+      await assertPostVisibleToUser(post, reporterId, (sql, params) =>
+        this.dataSource.query(sql, params),
+      );
       return post.user_id;
     }
 
@@ -101,7 +103,9 @@ export class WorkoutPostReportsService {
     ) {
       throw new NotFoundException('Comment not found');
     }
-    assertPostVisibleToUser(comment.post, reporterId);
+    await assertPostVisibleToUser(comment.post, reporterId, (sql, params) =>
+      this.dataSource.query(sql, params),
+    );
     return comment.user_id;
   }
 
@@ -323,6 +327,17 @@ export class WorkoutPostReportsService {
 
     const result = await this.dataSource.transaction<ResolveReportResultDto>(
       async (manager) => {
+        // Deadlock guard: two admins resolving different reports of the SAME content used to lock
+        // their own report, update the shared target, then each wait for the other's report row.
+        // Every resolver now first takes a transaction-scoped advisory lock on the target, so they
+        // run one after the other and report rows are only locked inside that critical section.
+        const unlocked = await manager.findOne(ContentReport, {
+          where: { id: reportId },
+        });
+        if (!unlocked) throw new NotFoundException('Report not found');
+        await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+          `report-target:${unlocked.target_type}:${unlocked.target_id}`,
+        ]);
         const report = await manager.findOne(ContentReport, {
           where: { id: reportId },
           lock: { mode: 'pessimistic_write' },
@@ -337,6 +352,7 @@ export class WorkoutPostReportsService {
         resolved = report;
         const status = hide ? 'actioned' : 'dismissed';
         let penaltyRecorded = false;
+        let contentHidden = false;
         let alsoResolvedReportIds: number[] = [];
 
         if (hide) {
@@ -352,11 +368,12 @@ export class WorkoutPostReportsService {
             const hiddenPost = await manager.findOne(WorkoutPost, {
               where: { id: report.target_id },
             });
-            await manager.update(
+            const postUpdate = await manager.update(
               WorkoutPost,
               { id: report.target_id, is_hidden: false },
               hiddenFields,
             );
+            contentHidden = (postUpdate.affected ?? 0) > 0;
             if (hiddenPost) {
               await this.uploadsService.invalidateCachedReadUrl(
                 hiddenPost.image_url,
@@ -364,14 +381,17 @@ export class WorkoutPostReportsService {
               );
             }
           } else {
-            await manager.update(
+            const commentUpdate = await manager.update(
               WorkoutPostComment,
               { id: Number(report.target_id), is_hidden: false },
               hiddenFields,
             );
+            contentHidden = (commentUpdate.affected ?? 0) > 0;
           }
 
-          if (penalize) {
+          // No strike or suspension when this action hid nothing (target already
+          // hidden or deleted): the author would be sanctioned for no change.
+          if (penalize && contentHidden) {
             const hours = REPORT_REASON_SUSPENSION_HOURS[report.reason] ?? 24;
             const inserted: Array<{ id: number }> = await manager.query(
               `INSERT INTO havit.user_penalties
@@ -464,7 +484,7 @@ export class WorkoutPostReportsService {
           reportId: Number(report.id),
           status,
           action: dto.action,
-          contentHidden: hide,
+          contentHidden,
           penaltyRecorded,
           alsoResolvedReportIds,
         };

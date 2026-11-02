@@ -195,6 +195,13 @@ describe('ExerciseSubstitutionService', () => {
       expect(by.outdoor.unsupportedExerciseIds).toEqual([10, 11]);
       expect(by.anywhere).toBeUndefined();
     });
+
+    it('rejects ids that are not in the catalog instead of calling them compatible', async () => {
+      const service = await makeService(CATALOG);
+      await expect(
+        service.getLocationAvailability([10, 999999]),
+      ).rejects.toThrow('999999');
+    });
   });
 
   describe('resolveSubstitutions', () => {

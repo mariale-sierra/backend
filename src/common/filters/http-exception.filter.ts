@@ -15,6 +15,8 @@ interface StandardErrorBody {
   error: string;
   message: string | string[];
   code?: string;
+  /** Only on ACCOUNT_SUSPENDED: ISO date the moderation suspension ends. */
+  suspendedUntil?: string;
   timestamp: string;
   path: string;
 }
@@ -69,6 +71,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     let message: string | string[] = STATUS_CODES[statusCode] ?? 'Error';
     let error: string = STATUS_CODES[statusCode] ?? 'Error';
     let code: string | undefined = DEFAULT_ERROR_CODE_BY_STATUS[statusCode];
+    let suspendedUntil: string | undefined;
 
     if (isHttpException) {
       const body = exception.getResponse();
@@ -90,6 +93,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
         }
         if (typeof record.code === 'string') {
           code = record.code;
+        }
+        if (
+          code === 'ACCOUNT_SUSPENDED' &&
+          typeof record.suspendedUntil === 'string' &&
+          !Number.isNaN(Date.parse(record.suspendedUntil))
+        ) {
+          suspendedUntil = record.suspendedUntil;
         }
       } else {
         message = exception.message;
@@ -122,6 +132,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       error,
       message,
       ...(code ? { code } : {}),
+      ...(suspendedUntil ? { suspendedUntil } : {}),
       timestamp: new Date().toISOString(),
       path: request.originalUrl ?? request.url,
     };

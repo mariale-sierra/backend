@@ -3,6 +3,8 @@ import {
   ExecutionContext,
   ForbiddenException,
   Injectable,
+  Logger,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 
@@ -20,10 +22,13 @@ const ALLOWED_PREFIXES = ['/auth', '/notifications'];
  * message, join, report...) answers 403 `ACCOUNT_SUSPENDED` with the end date; reading is
  * untouched. Registered globally right after JwtAuthGuard (see app.module.ts), so `request.user`
  * is already set; public routes have no user and pass. Only write requests pay the one primary-key
- * lookup. A database error lets the request through, like JwtAuthGuard does.
+ * lookup. If the lookup itself fails, the write answers 503 (never allowed through: whether the
+ * account is suspended is unknown) and the failure is logged.
  */
 @Injectable()
 export class SuspensionGuard implements CanActivate {
+  private readonly logger = new Logger(SuspensionGuard.name);
+
   constructor(private readonly dataSource: DataSource) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -42,8 +47,16 @@ export class SuspensionGuard implements CanActivate {
           [userId],
         );
       suspendedUntil = rows[0]?.suspended_until ?? null;
-    } catch {
-      return true;
+    } catch (error) {
+      this.logger.error(
+        `Suspension lookup failed for user ${userId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      throw new ServiceUnavailableException({
+        message: 'Could not verify your account status. Try again shortly.',
+        code: 'SUSPENSION_CHECK_UNAVAILABLE',
+      });
     }
 
     if (suspendedUntil && new Date(suspendedUntil).getTime() > Date.now()) {

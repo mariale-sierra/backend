@@ -54,6 +54,32 @@ describe('HttpExceptionFilter', () => {
     expect(() => new Date(body.timestamp).toISOString()).not.toThrow();
   });
 
+  it('keeps suspendedUntil on an ACCOUNT_SUSPENDED error and drops it elsewhere', () => {
+    const until = '2026-11-01T10:00:00.000Z';
+    filter.catch(
+      new ForbiddenException({
+        message: 'suspended',
+        code: 'ACCOUNT_SUSPENDED',
+        suspendedUntil: until,
+      }),
+      buildHost(),
+    );
+    expect(jsonMock.mock.calls[0][0]).toMatchObject({
+      code: 'ACCOUNT_SUSPENDED',
+      suspendedUntil: until,
+    });
+
+    filter.catch(
+      new ForbiddenException({
+        message: 'x',
+        code: 'OTHER',
+        suspendedUntil: until,
+      }),
+      buildHost(),
+    );
+    expect(jsonMock.mock.calls[0][0]).not.toHaveProperty('suspendedUntil');
+  });
+
   it('should preserve the message and status of a ForbiddenException', () => {
     const host = buildHost();
     filter.catch(

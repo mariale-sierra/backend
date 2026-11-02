@@ -13,6 +13,19 @@ export function ownUploadPrefix(userId: string): string | null {
 }
 
 /**
+ * The raw text must start with the prefix AND the URL as the parser normalizes it must still
+ * sit under it: `<prefix>../<otherUser>/x.jpg` starts with the prefix but resolves to another
+ * user's folder (dot segments, also when percent-encoded).
+ */
+function isUnderPrefix(raw: string, parsed: URL, prefix: string): boolean {
+  if (!raw.startsWith(prefix)) return false;
+  const base = new URL(prefix);
+  return (
+    parsed.origin === base.origin && parsed.pathname.startsWith(base.pathname)
+  );
+}
+
+/**
  * An image URL the client sends back after uploading must be one of the caller's OWN uploaded
  * objects. Without this any string was stored and shown to other users (file://, javascript:,
  * internal hosts, tracking pixels) and forwarded to the moderation service. Always: https only,
@@ -36,7 +49,7 @@ export function assertOwnUploadUrl(
     throw new BadRequestException(`${field} must be a valid https URL`);
   }
   const prefix = ownUploadPrefix(userId);
-  if (prefix && !url.startsWith(prefix)) {
+  if (prefix && !isUnderPrefix(url, parsed, prefix)) {
     throw new BadRequestException(
       `${field} must point to one of your own uploads`,
     );

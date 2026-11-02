@@ -190,7 +190,7 @@ export class UsersController {
   @ApiOperation({
     summary: 'Solicitar la eliminación de la cuenta',
     description:
-      'Programa la eliminación de la cuenta y de sus datos personales dentro de 30 días. Durante ese plazo se puede cancelar. Requiere la contraseña actual.',
+      'Programa la eliminación de la cuenta y de sus datos personales dentro de 7 días. Durante ese plazo se puede cancelar. Requiere la contraseña actual.',
   })
   @ApiOkResponse({ description: 'Eliminación programada' })
   @ApiResponse({ status: 401, description: 'Contraseña incorrecta' })

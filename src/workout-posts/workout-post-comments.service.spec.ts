@@ -39,6 +39,8 @@ const createMockCommentRepo = () => ({
 
 const createMockPostRepo = () => ({
   findOne: jest.fn(),
+  // assertPostVisibleToUser's SQL: one row = the viewer may see the post.
+  manager: { query: jest.fn().mockResolvedValue([{ '?column?': 1 }]) },
 });
 
 describe('WorkoutPostCommentsService', () => {

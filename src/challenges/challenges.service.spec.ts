@@ -441,7 +441,7 @@ describe('ChallengesService', () => {
     });
 
     const operations: Array<[string, () => Promise<unknown>]> = [
-      ['findOne', () => service.findOne(CHALLENGE_ID)],
+      ['findOne', () => service.findOne(CHALLENGE_ID, OWNER_ID)],
       ['getChallengeAuthor', () => service.getChallengeAuthor(CHALLENGE_ID)],
       ['update', () => service.update(CHALLENGE_ID, { name: 'x' }, OWNER_ID)],
       [
@@ -938,7 +938,7 @@ describe('ChallengesService', () => {
       challengeUserMapRepo.count.mockResolvedValue(0);
       userRepo.find.mockResolvedValue([author('u1', 'ana', 'Ana')]);
 
-      const result = await service.findOne(CHALLENGE_ID);
+      const result = await service.findOne(CHALLENGE_ID, OWNER_ID);
 
       expect(result.author).toMatchObject({ id: 'u1', username: 'ana' });
     });
@@ -1757,7 +1757,7 @@ describe('ChallengesService', () => {
         new Map([[CHALLENGE_ID, 'flexibility']]),
       );
 
-      const result = await service.findOne(CHALLENGE_ID);
+      const result = await service.findOne(CHALLENGE_ID, OWNER_ID);
 
       expect(result.members_joined).toBe(7);
       expect(result.dominant_activity_category).toBe('flexibility');
@@ -1775,7 +1775,7 @@ describe('ChallengesService', () => {
       challengeUserMapRepo.count.mockResolvedValue(0);
       mockGetDominantActivityCategories.mockResolvedValue(new Map());
 
-      const result = await service.findOne(CHALLENGE_ID);
+      const result = await service.findOne(CHALLENGE_ID, OWNER_ID);
 
       expect(result.dominant_activity_category).toBeNull();
     });
@@ -1791,7 +1791,7 @@ describe('ChallengesService', () => {
       });
       challengeUserMapRepo.count.mockResolvedValue(0);
 
-      await service.findOne(CHALLENGE_ID);
+      await service.findOne(CHALLENGE_ID, OWNER_ID);
 
       expect(mockGetDominantActivityCategories).toHaveBeenCalledWith(
         challengeCycleDaysRepo.manager,
@@ -1799,10 +1799,105 @@ describe('ChallengesService', () => {
       );
     });
 
+    describe('private challenge routine (B11)', () => {
+      const cycleRow = {
+        day_in_cycle: 1,
+        day_type: 'workout',
+        routine_id: 9,
+        routine: {
+          name: 'Leg day',
+          description: 'Squats',
+          routine_exercises: [
+            {
+              exercise_id: 3,
+              exercise: { name: 'Squat', category_maps: [] },
+              sets: [],
+              targets: [],
+            },
+          ],
+        },
+      };
+      let query: jest.Mock;
+
+      beforeEach(() => {
+        challengeRepo.findOne.mockResolvedValue({
+          ...baseChallenge(),
+          visibility: 'private',
+        });
+        challengeCycleDaysRepo.createQueryBuilder.mockReturnValue({
+          leftJoinAndSelect: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          addOrderBy: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([cycleRow]),
+        });
+        challengeUserMapRepo.count.mockResolvedValue(3);
+        mockGetDominantActivityCategories.mockResolvedValue(new Map());
+        query = jest.fn();
+        challengeRepo.manager = { query };
+      });
+
+      it('hides routine names and exercises from a non-member but keeps the cycle shape', async () => {
+        query.mockResolvedValue([]);
+
+        const result = await service.findOne(CHALLENGE_ID, OTHER_USER_ID);
+
+        expect(query).toHaveBeenCalledWith(expect.any(String), [
+          CHALLENGE_ID,
+          OTHER_USER_ID,
+        ]);
+        expect(result).toMatchObject({
+          routine_hidden: true,
+          members_joined: 3,
+        });
+        expect(result.cycle_days).toEqual([
+          {
+            day_number: 1,
+            is_rest_day: false,
+            routine_id: null,
+            routine_name: null,
+            routine_description: null,
+            exercises: [],
+          },
+        ]);
+      });
+
+      it('shows the full routine to a member, invitee or admin', async () => {
+        query.mockResolvedValue([{ '?column?': 1 }]);
+
+        const result = await service.findOne(CHALLENGE_ID, OTHER_USER_ID);
+
+        expect(result).not.toHaveProperty('routine_hidden');
+        expect(result.cycle_days[0]).toMatchObject({
+          routine_name: 'Leg day',
+          exercises: [expect.objectContaining({ name: 'Squat' })],
+        });
+      });
+
+      it('shows the full routine to the creator without querying membership', async () => {
+        const result = await service.findOne(CHALLENGE_ID, OWNER_ID);
+
+        expect(query).not.toHaveBeenCalled();
+        expect(result.cycle_days[0].routine_name).toBe('Leg day');
+      });
+
+      it('never queries membership for a public challenge', async () => {
+        challengeRepo.findOne.mockResolvedValue({
+          ...baseChallenge(),
+          visibility: 'public',
+        });
+
+        const result = await service.findOne(CHALLENGE_ID, OTHER_USER_ID);
+
+        expect(query).not.toHaveBeenCalled();
+        expect(result.cycle_days[0].routine_name).toBe('Leg day');
+      });
+    });
+
     it('should throw NotFoundException for a missing challenge without calling the dominant-category util', async () => {
       challengeRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.findOne('missing-id')).rejects.toThrow(
+      await expect(service.findOne('missing-id', OWNER_ID)).rejects.toThrow(
         NotFoundException,
       );
       expect(mockGetDominantActivityCategories).not.toHaveBeenCalled();
@@ -2248,7 +2343,7 @@ describe('ChallengesService', () => {
           },
         ]);
 
-        const res = await service.findOne(CHALLENGE_ID);
+        const res = await service.findOne(CHALLENGE_ID, OWNER_ID);
 
         expect(res).toMatchObject({
           imageUrl: expectedUrl,
@@ -2815,6 +2910,44 @@ describe('ChallengesService', () => {
           entity: { type: 'challenge', id: CHALLENGE_ID },
         },
       );
+    });
+
+    it('notifies the creator and active participants when a challenge is reopened (B11)', async () => {
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        status: 'closed',
+      });
+      challengeRepo.save.mockImplementation((c: object) => Promise.resolve(c));
+      challengeUserMapRepo.find.mockResolvedValue([{ user_id: OTHER_USER_ID }]);
+
+      await service.reopenChallenge(CHALLENGE_ID);
+      await flush();
+
+      expect(challengeUserMapRepo.find).toHaveBeenCalledWith({
+        where: { challenge_id: CHALLENGE_ID, status: 'active' },
+      });
+      expect(notificationsService.notifyMany).toHaveBeenCalledWith(
+        [OWNER_ID, OTHER_USER_ID],
+        {
+          type: 'challenge_reopened',
+          entity: { type: 'challenge', id: CHALLENGE_ID },
+        },
+      );
+    });
+
+    it('still reopens the challenge when the participants lookup fails', async () => {
+      challengeRepo.findOne.mockResolvedValue({
+        ...baseChallenge(),
+        status: 'closed',
+      });
+      challengeRepo.save.mockImplementation((c: object) => Promise.resolve(c));
+      challengeUserMapRepo.find.mockRejectedValue(new Error('db down'));
+
+      await expect(service.reopenChallenge(CHALLENGE_ID)).resolves.toEqual({
+        message: 'Challenge reopened successfully',
+      });
+      await flush();
+      expect(notificationsService.notifyMany).not.toHaveBeenCalled();
     });
 
     it('still closes the challenge when the participants lookup fails', async () => {

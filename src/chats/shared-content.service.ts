@@ -137,7 +137,8 @@ export class SharedContentService {
        LEFT JOIN havit.challenges c ON c.id = wl.challenge_id
        WHERE p.id = ANY($1)
          AND p.is_active = true
-         AND p.is_hidden = false`,
+         AND p.is_hidden = false
+         AND (c.id IS NULL OR c.is_active = true)`,
       [ids, viewerId],
     );
     const rowsById = new Map(rows.map((r) => [r.id, r]));
