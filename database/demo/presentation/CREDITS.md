@@ -1,0 +1,92 @@
+# Créditos de las fotos de la demo
+
+Fotos de Wikimedia Commons con licencias libres (CC0 / CC BY / CC BY-SA). Usadas solo para la demo de presentación.
+
+- [Workout Srodula Sosnowiec regulamin.jpg](https://commons.wikimedia.org/wiki/File:Workout_Srodula_Sosnowiec_regulamin.jpg) — Stimoroll — CC BY-SA 4.0
+- [Workout Srodula Sosnowiec przegląd.jpg](https://commons.wikimedia.org/wiki/File:Workout_Srodula_Sosnowiec_przegl%C4%85d.jpg) — Stimoroll — CC BY-SA 4.0
+- [Planche.jpg](https://commons.wikimedia.org/wiki/File:Planche.jpg) — Jonathanfv — CC BY 3.0
+- [Calisthenics Poststadion Berlin 1v5.jpg](https://commons.wikimedia.org/wiki/File:Calisthenics_Poststadion_Berlin_1v5.jpg) — Singlespeedfahrer — CC0
+- [Calisthenics Poststadion Berlin 2v5.jpg](https://commons.wikimedia.org/wiki/File:Calisthenics_Poststadion_Berlin_2v5.jpg) — Singlespeedfahrer — CC0
+- [Fit young man doing deadlift exercise in gym.jpg](https://commons.wikimedia.org/wiki/File:Fit_young_man_doing_deadlift_exercise_in_gym.jpg) — Nenad Stojkovic — CC BY 2.0
+- [2025 Skelton Gym Powerlifting Competition (9326222).jpg](https://commons.wikimedia.org/wiki/File:2025_Skelton_Gym_Powerlifting_Competition_(9326222).jpg) — U.S. Air Force photo by Senior Airman Haiden Morris — Public domain
+- [VP-5 OPERATIONS AT NAVAL AIR STATION SIGONELLA (8976467).jpg](https://commons.wikimedia.org/wiki/File:VP-5_OPERATIONS_AT_NAVAL_AIR_STATION_SIGONELLA_(8976467).jpg) — U.S. Navy photo by Petty Officer 2nd Class Sang Kim — Public domain
+- [Woman lifting dumbbells in a modern gym during a workout session focused on strength training and fitness.jpg](https://commons.wikimedia.org/wiki/File:Woman_lifting_dumbbells_in_a_modern_gym_during_a_workout_session_focused_on_strength_training_and_fitness.jpg) — Shixart1985 — CC BY 2.0
+- [Strength training and fitness workout in a home gym setting with dumbbells and exercise gear.jpg](https://commons.wikimedia.org/wiki/File:Strength_training_and_fitness_workout_in_a_home_gym_setting_with_dumbbells_and_exercise_gear.jpg) — Shixart1985 — CC BY 2.0
+- [Fitness enthusiast lifts vibrant dumbbell during home workout.jpg](https://commons.wikimedia.org/wiki/File:Fitness_enthusiast_lifts_vibrant_dumbbell_during_home_workout.jpg) — Shixart1985 — CC BY 2.0
+- [Strong woman performs shoulder press exercise in fitness gym during afternoon workout session.jpg](https://commons.wikimedia.org/wiki/File:Strong_woman_performs_shoulder_press_exercise_in_fitness_gym_during_afternoon_workout_session.jpg) — Shixart1985 — CC BY 2.0
+- [Strength training session in a gym focusing on leg workouts with dumbbells closeup.jpg](https://commons.wikimedia.org/wiki/File:Strength_training_session_in_a_gym_focusing_on_leg_workouts_with_dumbbells_closeup.jpg) — Shixart1985 — CC BY 2.0
+- [Relaxing stretch and workout preparation in a cozy home setting with a smartphone on a gym mat.jpg](https://commons.wikimedia.org/wiki/File:Relaxing_stretch_and_workout_preparation_in_a_cozy_home_setting_with_a_smartphone_on_a_gym_mat.jpg) — Shixart1985 — CC BY 2.0
+- [Woman holds Covid test in home gym while sitting on floor with equipment nearby.jpg](https://commons.wikimedia.org/wiki/File:Woman_holds_Covid_test_in_home_gym_while_sitting_on_floor_with_equipment_nearby.jpg) — Shixart1985 — CC BY 2.0
+- [USMC-17935.jpg](https://commons.wikimedia.org/wiki/File:USMC-17935.jpg) — autor desconocido — Public domain
+- [USMC-18271.jpg](https://commons.wikimedia.org/wiki/File:USMC-18271.jpg) — autor desconocido — Public domain
+- [2025 Skelton Gym Powerlifting Competition (9326219).jpg](https://commons.wikimedia.org/wiki/File:2025_Skelton_Gym_Powerlifting_Competition_(9326219).jpg) — U.S. Air Force photo by Senior Airman Haiden Morris — Public domain
+- [World Gym workout (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:World_Gym_workout_(Unsplash).jpg) — Scott Webb scottwebb — CC0
+- [Gym Life (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Gym_Life_(Unsplash).jpg) — Filip Mroz mroz — CC0
+- [Strength training (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Strength_training_(Unsplash).jpg) — Scott Webb scottwebb — CC0
+- [Fit young man doing deadlift exercise in gym.jpg](https://commons.wikimedia.org/wiki/File:Fit_young_man_doing_deadlift_exercise_in_gym.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Close-up Hand holding dumbbell in gym.jpg](https://commons.wikimedia.org/wiki/File:Close-up_Hand_holding_dumbbell_in_gym.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Young man doing leg with machine in gym.jpg](https://commons.wikimedia.org/wiki/File:Young_man_doing_leg_with_machine_in_gym.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Young attractive man practicing on exercise bike during cross training in a gym.jpg](https://commons.wikimedia.org/wiki/File:Young_attractive_man_practicing_on_exercise_bike_during_cross_training_in_a_gym.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Iron heavy plates stacked for exercise.jpg](https://commons.wikimedia.org/wiki/File:Iron_heavy_plates_stacked_for_exercise.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Woman doing squat workout in gym with barbell.jpg](https://commons.wikimedia.org/wiki/File:Woman_doing_squat_workout_in_gym_with_barbell.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Woman standing and concentrating in gym in the middle of the workout.jpg](https://commons.wikimedia.org/wiki/File:Woman_standing_and_concentrating_in_gym_in_the_middle_of_the_workout.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Woman doing squat workout in gym with barbell, back view.jpg](https://commons.wikimedia.org/wiki/File:Woman_doing_squat_workout_in_gym_with_barbell,_back_view.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Attractive young woman have exercise with tape in the gym. Sport gym concept.jpg](https://commons.wikimedia.org/wiki/File:Attractive_young_woman_have_exercise_with_tape_in_the_gym._Sport_gym_concept.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Attractive sporty woman doing overhead press in gym with barbell.jpg](https://commons.wikimedia.org/wiki/File:Attractive_sporty_woman_doing_overhead_press_in_gym_with_barbell.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Gym posing and sitting on weights.jpg](https://commons.wikimedia.org/wiki/File:Gym_posing_and_sitting_on_weights.jpg) — Nenad Stojkovic — CC BY 2.0
+- [A girl practices in a gym closeup.jpg](https://commons.wikimedia.org/wiki/File:A_girl_practices_in_a_gym_closeup.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Young man running on treadmill during sports training in a gym.jpg](https://commons.wikimedia.org/wiki/File:Young_man_running_on_treadmill_during_sports_training_in_a_gym.jpg) — Nenad Stojkovic — CC BY 2.0
+- [The gym girl is stretching her arms.jpg](https://commons.wikimedia.org/wiki/File:The_gym_girl_is_stretching_her_arms.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Young blonde girl in the gym. Sport concept.jpg](https://commons.wikimedia.org/wiki/File:Young_blonde_girl_in_the_gym._Sport_concept.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Sporty girl posing in gym on weigh rack.jpg](https://commons.wikimedia.org/wiki/File:Sporty_girl_posing_in_gym_on_weigh_rack.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Tired blonde woman in the gym. End of training.jpg](https://commons.wikimedia.org/wiki/File:Tired_blonde_woman_in_the_gym._End_of_training.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Close up of a woman holding two dumbbells in her hands - 50431900038.jpg](https://commons.wikimedia.org/wiki/File:Close_up_of_a_woman_holding_two_dumbbells_in_her_hands_-_50431900038.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Young woman doing biceps curls with dumbbell at home closeup, back view.jpg](https://commons.wikimedia.org/wiki/File:Young_woman_doing_biceps_curls_with_dumbbell_at_home_closeup,_back_view.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Smiling girl holding two weights in nature closeup.jpg](https://commons.wikimedia.org/wiki/File:Smiling_girl_holding_two_weights_in_nature_closeup.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Close up of the woman's hands while she's doing bicep curls with dumbbells. (50425016047).jpg](https://commons.wikimedia.org/wiki/File:Close_up_of_the_woman%27s_hands_while_she%27s_doing_bicep_curls_with_dumbbells._(50425016047).jpg) — Nenad Stojkovic — CC BY 2.0
+- [Tattooed arms and weight on the floor closeup. (51007852395).jpg](https://commons.wikimedia.org/wiki/File:Tattooed_arms_and_weight_on_the_floor_closeup._(51007852395).jpg) — Nenad Stojkovic — CC BY 2.0
+- [Attractive young woman lifting heavy weight closeup.jpg](https://commons.wikimedia.org/wiki/File:Attractive_young_woman_lifting_heavy_weight_closeup.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Young man lifting dumbbell weight for exercise in fitness gym.jpg](https://commons.wikimedia.org/wiki/File:Young_man_lifting_dumbbell_weight_for_exercise_in_fitness_gym.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Young man using a leg press machine at the gym.jpg](https://commons.wikimedia.org/wiki/File:Young_man_using_a_leg_press_machine_at_the_gym.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Young attractive man athlete doing exercise with the barbell in the gym.jpg](https://commons.wikimedia.org/wiki/File:Young_attractive_man_athlete_doing_exercise_with_the_barbell_in_the_gym.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Attractive man lifting dumbbell weight for exercise in fitness gym.jpg](https://commons.wikimedia.org/wiki/File:Attractive_man_lifting_dumbbell_weight_for_exercise_in_fitness_gym.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Fit young man caucasian running on machine treadmill workout in gym.jpg](https://commons.wikimedia.org/wiki/File:Fit_young_man_caucasian_running_on_machine_treadmill_workout_in_gym.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Back view of young and attractive man doing leg with machine in gym.jpg](https://commons.wikimedia.org/wiki/File:Back_view_of_young_and_attractive_man_doing_leg_with_machine_in_gym.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Young attractive man doing leg with machine in gym. Back view closeup.jpg](https://commons.wikimedia.org/wiki/File:Young_attractive_man_doing_leg_with_machine_in_gym._Back_view_closeup.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Woman doing push-up on wooden terrace near lake.jpg](https://commons.wikimedia.org/wiki/File:Woman_doing_push-up_on_wooden_terrace_near_lake.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Woman doing push-up on yogi mat in the forest with sunset background - 51525476019.jpg](https://commons.wikimedia.org/wiki/File:Woman_doing_push-up_on_yogi_mat_in_the_forest_with_sunset_background_-_51525476019.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Young blonde woman working out in the gym while holding kettlebell.jpg](https://commons.wikimedia.org/wiki/File:Young_blonde_woman_working_out_in_the_gym_while_holding_kettlebell.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Woman exercising in the gym.jpg](https://commons.wikimedia.org/wiki/File:Woman_exercising_in_the_gym.jpg) — Nenad Stojkovic — CC BY 2.0
+- [The gym girl is pulling weight with her leg muscle.jpg](https://commons.wikimedia.org/wiki/File:The_gym_girl_is_pulling_weight_with_her_leg_muscle.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Strong attractive and healthy blonde girl working out in gym.jpg](https://commons.wikimedia.org/wiki/File:Strong_attractive_and_healthy_blonde_girl_working_out_in_gym.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Fit young man caucasian running on machine treadmill workout in gym.jpg](https://commons.wikimedia.org/wiki/File:Fit_young_man_caucasian_running_on_machine_treadmill_workout_in_gym.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Young blonde woman running on a treadmill in the gym.jpg](https://commons.wikimedia.org/wiki/File:Young_blonde_woman_running_on_a_treadmill_in_the_gym.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Fit woman wearing sportswear doing cardio in gym on a treadmill.jpg](https://commons.wikimedia.org/wiki/File:Fit_woman_wearing_sportswear_doing_cardio_in_gym_on_a_treadmill.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Yogi unrolling yoga mat on the floor. (50214718967).jpg](https://commons.wikimedia.org/wiki/File:Yogi_unrolling_yoga_mat_on_the_floor._(50214718967).jpg) — Nenad Stojkovic — CC BY 2.0
+- [Closeup of the woman on a yoga mat stretching her hips. (50398220748).jpg](https://commons.wikimedia.org/wiki/File:Closeup_of_the_woman_on_a_yoga_mat_stretching_her_hips._(50398220748).jpg) — Nenad Stojkovic — CC BY 2.0
+- [Woman on a yoga mat next to a window doing lower back exercises - 50401795697.jpg](https://commons.wikimedia.org/wiki/File:Woman_on_a_yoga_mat_next_to_a_window_doing_lower_back_exercises_-_50401795697.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Woman doing exercises with an ab wheel and ankle weights on a yoga mat in the park. (51540571665).jpg](https://commons.wikimedia.org/wiki/File:Woman_doing_exercises_with_an_ab_wheel_and_ankle_weights_on_a_yoga_mat_in_the_park._(51540571665).jpg) — Nenad Stojkovic — CC BY 2.0
+- [Woman on the yoga mat stretching her hamstrings - 50398044188.jpg](https://commons.wikimedia.org/wiki/File:Woman_on_the_yoga_mat_stretching_her_hamstrings_-_50398044188.jpg) — Nenad Stojkovic — CC BY 2.0
+- [Woman doing yoga on the wooden terrace on lake (50185617051).jpg](https://commons.wikimedia.org/wiki/File:Woman_doing_yoga_on_the_wooden_terrace_on_lake_(50185617051).jpg) — Nenad Stojkovic — CC BY 2.0
+- [Senior woman practicing home exercise near window. (51532578326).jpg](https://commons.wikimedia.org/wiki/File:Senior_woman_practicing_home_exercise_near_window._(51532578326).jpg) — Nenad Stojkovic — CC BY 2.0
+- [Running along the beach (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Running_along_the_beach_(Unsplash).jpg) — Alex wong killerfvith — CC0
+- [Running in an alley (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Running_in_an_alley_(Unsplash).jpg) — Kyle Kranz kjkranz — CC0
+- [One leg in boots while running (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:One_leg_in_boots_while_running_(Unsplash).jpg) — Mitchell Orr mitchorr — CC0
+- [Womens pink running shoes (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Womens_pink_running_shoes_(Unsplash).jpg) — Hunter Johnson hjohnson02 — CC0
+- [Guy running in sneakers (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Guy_running_in_sneakers_(Unsplash).jpg) — Hunter Johnson hjohnson02 — CC0
+- [Man running down side of road (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Man_running_down_side_of_road_(Unsplash).jpg) — Tikkho Maciel tikkho — CC0
+- [Running down Mount Tamalpais in gold (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Running_down_Mount_Tamalpais_in_gold_(Unsplash).jpg) — Todd Diemer todd_diemer — CC0
+- [Sports2.jpg](https://commons.wikimedia.org/wiki/File:Sports2.jpg) — skeeze — CC0
+- [Guy jogging by sign (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Guy_jogging_by_sign_(Unsplash).jpg) — Guillaume de Germain guillaumedegermain — CC0
+- [Francesco Gallarotti 2014-11-07 (Unsplash Zp-wTck-3Zw).jpg](https://commons.wikimedia.org/wiki/File:Francesco_Gallarotti_2014-11-07_(Unsplash_Zp-wTck-3Zw).jpg) — Francesco Gallarotti gallarotti — CC0
+- [Curtis MacNewton 2015 (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Curtis_MacNewton_2015_(Unsplash).jpg) — Curtis MacNewton curtismacnewton — CC0
+- [Running on a roof (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Running_on_a_roof_(Unsplash).jpg) — Jascha Huisman jaschahuisman — CC0
+- [Boy running in field (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Boy_running_in_field_(Unsplash).jpg) — Linh Nguyen linhnguyen — CC0
+- [Yoga in the beach (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Yoga_in_the_beach_(Unsplash).jpg) — bady qb bady — CC0
+- [Oceanside yoga (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Oceanside_yoga_(Unsplash).jpg) — Matthew Kane matthewkane — CC0
+- [Pilates reformer.jpg](https://commons.wikimedia.org/wiki/File:Pilates_reformer.jpg) — Maddi Bazzocco — CC0
+- [Yoga sunrise. (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Yoga_sunrise._(Unsplash).jpg) — Dave Contreras basixfilms — CC0
+- [Yoga by the sea (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Yoga_by_the_sea_(Unsplash).jpg) — Kristopher Allison kristopher_allison — CC0
+- [Patrick Hendry - Yoga Fog (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Patrick_Hendry_-_Yoga_Fog_(Unsplash).jpg) — Patrick Hendry worldsbetweenlines — CC0
+- [Woman yoga pose sunrise (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Woman_yoga_pose_sunrise_(Unsplash).jpg) — Andressa Voltolini desnorteeu — CC0
+- [Yoga Uyuni Salt Flat (Unsplash).jpg](https://commons.wikimedia.org/wiki/File:Yoga_Uyuni_Salt_Flat_(Unsplash).jpg) — Farsai C. clearsky — CC0

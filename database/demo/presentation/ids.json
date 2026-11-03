@@ -1,0 +1,22 @@
+{
+ "users": {
+  "andres": "d63d873b-cc9b-5424-b593-328be19fc4e8",
+  "diego": "6229fb30-d7ad-5aa4-841e-b8536f14dfb3",
+  "valeria": "aa4d293e-851c-5943-a1ed-f3f1afa447b2",
+  "sofia": "2742934a-ced9-57d0-a634-4338099ee102",
+  "ana": "4a0ca4f3-e493-5e56-83f0-788e055ba8e3",
+  "lucia": "aa9f3faa-a898-56bf-953e-55551be50449",
+  "marco": "19ba4c03-9156-5097-8665-2e002acaf98a",
+  "fernanda": "937f441f-2ced-5dab-86cc-eba53797e39d"
+ },
+ "challenges": {
+  "fuerza": "4be81057-8903-58cf-b41c-524c05d0a0eb",
+  "gluteos": "8de05ecd-b1c4-5d32-88ad-0a315c5ebf4a",
+  "running": "e2816108-4af1-5ec7-adaf-e49b745e3976",
+  "yoga": "2002cdb3-8c7a-55c6-9675-84754d830a61",
+  "calistenia": "afcfaff8-e341-58dd-aaaa-6aebef8ca0f2",
+  "core": "a23a6d06-693f-5260-9ac9-94a1e3a6f295",
+  "10k": "7ab5ac84-34b6-54ff-b594-6eadc8747102",
+  "octubre": "a0a18a41-9d64-552d-a903-b7f707b3f249"
+ }
+}
